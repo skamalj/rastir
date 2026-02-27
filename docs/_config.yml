@@ -9,6 +9,9 @@ url: https://skamalj.github.io
 
 color_scheme: dark
 
+# Logo instead of text title
+logo: "/assets/images/rastir_small.png"
+
 # Search
 search_enabled: true
 search.button: true
