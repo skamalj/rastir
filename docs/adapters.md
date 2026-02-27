@@ -52,6 +52,7 @@ If no provider adapter matches, the fallback adapter returns an `AdapterResult` 
 
 | Adapter | Kind | Priority | Handles |
 |---------|------|----------|---------|
+| **LangGraph** | framework | 260 | State dicts from `graph.invoke()`, `StateSnapshot` → unwraps last `AIMessage` |
 | **LangChain** | framework | 250 | `AIMessage`, `LLMResult` → unwraps to provider response |
 | **OpenAI** | provider | 150 | `ChatCompletion`, `Completion`, `ChatCompletionChunk` |
 | **Anthropic** | provider | 150 | `Message`, `ContentBlockDelta` |
@@ -59,6 +60,107 @@ If no provider adapter matches, the fallback adapter returns an `AdapterResult` 
 | **Retrieval** | provider | 50 | Retrieval-specific response objects |
 | **Tool** | provider | 10 | Tool execution results |
 | **Fallback** | fallback | 0 | Anything — returns `provider="unknown"` |
+
+---
+
+## LangGraph Adapter
+
+The LangGraph adapter handles responses from compiled LangGraph state graphs. LangGraph is the most popular agent framework built on LangChain, and its `graph.invoke()` returns a state dict containing LangChain message objects.
+
+### What It Detects
+
+1. **State dicts** — `dict` with a `messages` key containing LangChain message objects (`AIMessage`, `HumanMessage`, `ToolMessage`)
+2. **StateSnapshot** — `langgraph.types.StateSnapshot` from `graph.get_state()`
+3. **Streaming tuples** — `(AIMessageChunk, metadata)` from `graph.stream(stream_mode="messages")`
+
+### Resolution Chain
+
+```
+graph.invoke() returns {"messages": [HumanMessage(...), AIMessage(...)]}
+         │
+         ▼
+┌─────────────────────────────┐
+│ LangGraph (priority 260)    │  Detects state dict with messages
+│ Extracts last AIMessage     │  Adds graph metadata (message counts)
+└─────────────┬───────────────┘
+              │ unwrapped AIMessage
+              ▼
+┌─────────────────────────────┐
+│ LangChain (priority 250)    │  Detects AIMessage
+│ Extracts response_metadata  │  Unwraps native provider response
+└─────────────┬───────────────┘
+              │ unwrapped ChatCompletion
+              ▼
+┌─────────────────────────────┐
+│ OpenAI (priority 150)       │  Extracts model, tokens, provider
+└─────────────────────────────┘
+```
+
+### Graph Metadata Extracted
+
+| Attribute | Source | Description |
+|-----------|--------|-------------|
+| `langgraph_message_count` | State dict | Total messages in the conversation |
+| `langgraph_ai_message_count` | State dict | Number of AI responses |
+| `langgraph_tool_message_count` | State dict | Number of tool call results |
+| `langgraph_next_nodes` | StateSnapshot | Pending node names |
+| `langgraph_task_count` | StateSnapshot | Number of tasks in the snapshot |
+| `langgraph_task_names` | StateSnapshot | Names of executed graph nodes |
+| `langgraph_step` | StateSnapshot metadata | Superstep number in the graph loop |
+| `langgraph_source` | StateSnapshot metadata | Checkpoint source (`"input"`, `"loop"`, `"fork"`) |
+
+### Example Usage
+
+```python
+from rastir import configure, agent, llm, tool
+from langgraph.graph import StateGraph, MessagesState, START, END
+
+configure(service="my-langgraph-app", push_url="http://localhost:8080")
+
+# Define graph nodes
+@llm
+def chatbot(state: MessagesState):
+    return {"messages": [model.invoke(state["messages"])]}
+
+@tool
+def search(state: MessagesState):
+    query = state["messages"][-1].tool_calls[0]["args"]["query"]
+    return {"messages": [ToolMessage(content=results, tool_call_id=...)]}
+
+# Build the graph
+graph = StateGraph(MessagesState)
+graph.add_node("chatbot", chatbot)
+graph.add_node("search", search)
+graph.add_edge(START, "chatbot")
+graph.add_conditional_edges("chatbot", should_search, {"search": "search", END: END})
+graph.add_edge("search", "chatbot")
+app = graph.compile()
+
+# Invoke — Rastir traces the full agent loop
+@agent(agent_name="research_agent")
+def run_agent(query: str):
+    return app.invoke({"messages": [HumanMessage(query)]})
+```
+
+Rastir captures:
+- **Agent span** for `run_agent` with full loop duration
+- **LLM spans** for each `chatbot` node invocation (model, tokens, provider)
+- **Tool spans** for each `search` node invocation
+- **Graph metadata** — message count, AI/tool message counts from the state dict
+
+### Streaming with LangGraph
+
+```python
+@agent(agent_name="streaming_agent")
+def stream_agent(query: str):
+    for chunk in app.stream(
+        {"messages": [HumanMessage(query)]},
+        stream_mode="messages",
+    ):
+        yield chunk  # (AIMessageChunk, metadata) tuples
+```
+
+The adapter's `extract_stream_delta()` extracts model name, provider, and token usage from each streaming tuple.
 
 ---
 

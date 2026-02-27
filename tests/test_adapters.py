@@ -136,10 +136,12 @@ def _fresh_registry():
     from rastir.adapters.anthropic import AnthropicAdapter
     from rastir.adapters.bedrock import BedrockAdapter
     from rastir.adapters.langchain import LangChainAdapter
+    from rastir.adapters.langgraph import LangGraphAdapter
     from rastir.adapters.retrieval import RetrievalAdapter
     from rastir.adapters.tool import ToolAdapter
     from rastir.adapters.fallback import FallbackAdapter
 
+    register(LangGraphAdapter())
     register(LangChainAdapter())
     register(OpenAIAdapter())
     register(AnthropicAdapter())
@@ -164,6 +166,7 @@ class TestRegistry:
         assert "anthropic" in names
         assert "bedrock" in names
         assert "langchain" in names
+        assert "langgraph" in names
         assert "retrieval" in names
         assert "fallback" in names
 
@@ -172,11 +175,13 @@ class TestRegistry:
         priorities = [a.priority for a in adapters]
         assert priorities == sorted(priorities, reverse=True)
 
-    def test_langchain_first(self):
-        """Framework adapter should be first (highest priority)."""
+    def test_langgraph_first(self):
+        """LangGraph adapter should be first (highest priority framework)."""
         adapters = get_registered_adapters()
-        assert adapters[0].name == "langchain"
+        assert adapters[0].name == "langgraph"
         assert adapters[0].kind == "framework"
+        assert adapters[1].name == "langchain"
+        assert adapters[1].kind == "framework"
 
 
 # ========================================================================
@@ -544,3 +549,251 @@ class TestConflictResolution:
         ar = resolve("test")
         assert ar is not None
         assert ar.provider == "adapter_a"
+
+
+# ========================================================================
+# LangGraph adapter tests
+# ========================================================================
+
+
+def _make_langgraph_ai_message(content="Hello from agent", response_metadata=None,
+                                usage_metadata=None):
+    """Create a mock AIMessage with langchain_core module for LangGraph state."""
+    cls = type("AIMessage", (), {"__module__": "langchain_core.messages.ai"})
+    obj = cls.__new__(cls)
+    obj.content = content
+    obj.response_metadata = response_metadata or {}
+    obj.additional_kwargs = {}
+    obj.usage_metadata = usage_metadata
+    return obj
+
+
+def _make_human_message(content="Hello"):
+    cls = type("HumanMessage", (), {"__module__": "langchain_core.messages.human"})
+    obj = cls.__new__(cls)
+    obj.content = content
+    return obj
+
+
+def _make_tool_message(content="Tool result"):
+    cls = type("ToolMessage", (), {"__module__": "langchain_core.messages.tool"})
+    obj = cls.__new__(cls)
+    obj.content = content
+    return obj
+
+
+def _make_state_snapshot(values=None, next_nodes=(), tasks=(), metadata=None):
+    """Create a mock StateSnapshot (NamedTuple-like) from langgraph.types."""
+    cls = type("StateSnapshot", (), {"__module__": "langgraph.types"})
+    obj = cls.__new__(cls)
+    obj.values = values or {}
+    obj.next = next_nodes
+    obj.tasks = tasks
+    obj.metadata = metadata
+    obj.config = {}
+    obj.created_at = None
+    obj.parent_config = None
+    obj.interrupts = ()
+    return obj
+
+
+def _make_pregel_task(name="agent_node", task_id="task-1"):
+    """Create a mock PregelTask."""
+    cls = type("PregelTask", (), {"__module__": "langgraph.types"})
+    obj = cls.__new__(cls)
+    obj.name = name
+    obj.id = task_id
+    obj.error = None
+    obj.interrupts = ()
+    obj.result = None
+    return obj
+
+
+def _make_ai_message_chunk(content="chunk", usage_metadata=None):
+    """Create a mock AIMessageChunk for streaming."""
+    cls = type("AIMessageChunk", (), {"__module__": "langchain_core.messages.ai"})
+    obj = cls.__new__(cls)
+    obj.content = content
+    obj.usage_metadata = usage_metadata
+    return obj
+
+
+class TestLangGraphAdapter:
+    """Tests for the LangGraph framework adapter."""
+
+    def test_detect_state_dict_with_messages(self):
+        """graph.invoke() returns a dict with 'messages' containing AIMessage objects."""
+        human = _make_human_message("What is 2+2?")
+        ai = _make_langgraph_ai_message(
+            "The answer is 4.",
+            response_metadata={
+                "token_usage": {"prompt_tokens": 10, "completion_tokens": 5},
+                "model_name": "gpt-4o",
+            },
+        )
+        state = {"messages": [human, ai]}
+
+        ar = resolve(state)
+        assert ar is not None
+        # LangGraph extracts last AIMessage → LangChain adapter processes it
+        assert ar.extra_attributes.get("langgraph_message_count") == 2
+        assert ar.extra_attributes.get("langgraph_ai_message_count") == 1
+
+    def test_state_dict_unwraps_to_langchain(self):
+        """LangGraph unwraps AIMessage → LangChain adapter extracts metadata."""
+        ai = _make_langgraph_ai_message(
+            "Hello",
+            response_metadata={
+                "token_usage": {"prompt_tokens": 50, "completion_tokens": 30},
+                "model_name": "gpt-4o",
+                "finish_reason": "stop",
+            },
+        )
+        state = {"messages": [ai]}
+
+        ar = resolve(state)
+        assert ar is not None
+        # Metadata from LangChain adapter via extra_attributes
+        assert ar.extra_attributes.get("tokens_input") == 50
+        assert ar.extra_attributes.get("tokens_output") == 30
+        assert ar.extra_attributes.get("model") == "gpt-4o"
+        assert ar.extra_attributes.get("finish_reason") == "stop"
+
+    def test_state_dict_with_tool_messages(self):
+        """State with mixed message types — counts tool messages."""
+        human = _make_human_message("Search for X")
+        ai1 = _make_langgraph_ai_message("Let me search")
+        tool = _make_tool_message("Search result: ...")
+        ai2 = _make_langgraph_ai_message("Based on the search...")
+        state = {"messages": [human, ai1, tool, ai2]}
+
+        ar = resolve(state)
+        assert ar is not None
+        assert ar.extra_attributes.get("langgraph_message_count") == 4
+        assert ar.extra_attributes.get("langgraph_ai_message_count") == 2
+        assert ar.extra_attributes.get("langgraph_tool_message_count") == 1
+
+    def test_state_snapshot(self):
+        """StateSnapshot from graph.get_state() is detected."""
+        ai = _make_langgraph_ai_message("Hello")
+        task = _make_pregel_task(name="chatbot_node")
+        snapshot = _make_state_snapshot(
+            values={"messages": [ai]},
+            next_nodes=("tools",),
+            tasks=(task,),
+            metadata={"step": 3, "source": "loop"},
+        )
+
+        ar = resolve(snapshot)
+        assert ar is not None
+        assert ar.extra_attributes.get("langgraph_next_nodes") == ["tools"]
+        assert ar.extra_attributes.get("langgraph_task_count") == 1
+        assert ar.extra_attributes.get("langgraph_task_names") == ["chatbot_node"]
+        assert ar.extra_attributes.get("langgraph_step") == 3
+        assert ar.extra_attributes.get("langgraph_source") == "loop"
+
+    def test_state_snapshot_empty(self):
+        """StateSnapshot with no values still resolves."""
+        snapshot = _make_state_snapshot(values={}, next_nodes=(), tasks=())
+        ar = resolve(snapshot)
+        assert ar is not None
+
+    def test_negative_plain_dict_no_messages(self):
+        """Plain dict without 'messages' should NOT match LangGraph."""
+        result = {"output": "hello", "status": "ok"}
+        ar = resolve(result)
+        assert ar is not None
+        # Should fall through to fallback
+        assert ar.provider == "unknown"
+
+    def test_negative_dict_with_non_langchain_messages(self):
+        """Dict with 'messages' but non-LangChain objects should NOT match."""
+        state = {"messages": [{"role": "user", "content": "hi"}]}
+        ar = resolve(state)
+        assert ar is not None
+        # Fallback, not LangGraph
+        assert ar.provider == "unknown"
+
+    def test_negative_wrong_module_state_snapshot(self):
+        """StateSnapshot-like class from wrong module should NOT match."""
+        cls = type("StateSnapshot", (), {"__module__": "mylib.types"})
+        obj = cls.__new__(cls)
+        obj.values = {}
+        obj.next = ()
+        ar = resolve(obj)
+        assert ar is not None
+        assert ar.provider == "unknown"
+
+    def test_full_pipeline_langgraph_to_openai(self):
+        """LangGraph → LangChain → OpenAI full unwrap chain."""
+        openai_resp = _make_openai_chat_completion(
+            model="gpt-4o", prompt_tokens=100, completion_tokens=50,
+        )
+        ai = _make_langgraph_ai_message(
+            "Final answer",
+            response_metadata={"raw": openai_resp},
+        )
+        state = {"messages": [_make_human_message("Question"), ai]}
+
+        ar = resolve(state)
+        assert ar is not None
+        # Should have gone through LangGraph → LangChain → OpenAI
+        assert ar.provider == "openai"
+        assert ar.model == "gpt-4o"
+        assert ar.tokens_input == 100
+        assert ar.tokens_output == 50
+
+    def test_stream_messages_mode(self):
+        """stream_mode='messages' produces (AIMessageChunk, metadata) tuples."""
+        chunk = _make_ai_message_chunk("token")
+        meta = {
+            "model_name": "gpt-4o",
+            "ls_provider": "openai",
+        }
+        delta = resolve_stream_chunk((chunk, meta))
+        assert delta is not None
+        assert delta.model == "gpt-4o"
+        assert delta.provider == "openai"
+
+    def test_stream_messages_with_usage(self):
+        """Streaming chunk with usage_metadata on the message."""
+        usage = _Usage(input_tokens=100, output_tokens=50)
+        chunk = _make_ai_message_chunk("final", usage_metadata=usage)
+        meta = {"model_name": "claude-3-5-sonnet", "ls_provider": "anthropic"}
+        delta = resolve_stream_chunk((chunk, meta))
+        assert delta is not None
+        assert delta.model == "claude-3-5-sonnet"
+        assert delta.provider == "anthropic"
+        assert delta.tokens_input == 100
+        assert delta.tokens_output == 50
+
+    def test_stream_non_langgraph_tuple_ignored(self):
+        """Random tuple should not match LangGraph stream detection."""
+        delta = resolve_stream_chunk(("hello", "world"))
+        # No adapter should match a plain string tuple
+        assert delta is None
+
+    def test_state_dict_extracts_last_ai_message(self):
+        """Multiple AIMessages — adapter extracts the LAST one."""
+        ai1 = _make_langgraph_ai_message(
+            "First",
+            response_metadata={"model_name": "gpt-3.5-turbo"},
+        )
+        ai2 = _make_langgraph_ai_message(
+            "Second (final)",
+            response_metadata={
+                "model_name": "gpt-4o",
+                "token_usage": {"prompt_tokens": 200, "completion_tokens": 80},
+            },
+        )
+        state = {"messages": [_make_human_message("Q"), ai1, ai2]}
+        ar = resolve(state)
+        assert ar is not None
+        assert ar.extra_attributes.get("model") == "gpt-4o"
+        assert ar.extra_attributes.get("tokens_input") == 200
+
+    def test_adapter_priority_above_langchain(self):
+        """LangGraph (260) should be resolved before LangChain (250)."""
+        from rastir.adapters.langgraph import LangGraphAdapter
+        from rastir.adapters.langchain import LangChainAdapter
+        assert LangGraphAdapter.priority > LangChainAdapter.priority

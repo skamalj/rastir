@@ -343,6 +343,7 @@ Study these files for real-world examples:
 | `src/rastir/adapters/anthropic.py` | Provider | Anthropic (Message, streaming events) |
 | `src/rastir/adapters/bedrock.py` | Provider | AWS Bedrock (dict-based responses) |
 | `src/rastir/adapters/langchain.py` | Framework | LangChain (AIMessage → unwrap) |
+| `src/rastir/adapters/langgraph.py` | Framework | LangGraph (state dicts, StateSnapshot → unwrap) |
 | `src/rastir/adapters/fallback.py` | Fallback | Catch-all for unknown responses |
 
 ---
