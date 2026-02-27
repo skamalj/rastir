@@ -47,15 +47,22 @@ pre code {
   background-color: #1a1a2e !important;
 }
 
+// Catch-all: ensure ALL text inside code blocks is bright by default
+.highlight,
+.highlight pre,
+.highlight code,
+.highlight span {
+  color: #d4d4d8 !important;
+}
+
 // Syntax highlighting - high contrast for dark background
 .highlight {
-  .k, .kd, .kn, .kp, .kr, .kt { color: #c792ea !important; }  // keywords (purple)
-  .s, .s1, .s2, .sb, .sc, .sd, .sh, .sx { color: #c3e88d !important; }  // strings (green)
-  .n, .na, .nb, .nc, .no, .nd, .ni, .ne, .nf, .nl, .nn, .nt, .nv { color: #82aaff !important; }  // names (blue)
+  .k, .kd, .kn, .kp, .kr, .kt, .kc { color: #c792ea !important; }  // keywords (purple)
+  .s, .s1, .s2, .sb, .sc, .sd, .sh, .sx, .sr, .se, .si, .ss { color: #c3e88d !important; }  // strings (green)
+  .n, .na, .nb, .nc, .no, .nd, .ni, .ne, .nf, .nl, .nn, .nt, .nv, .nx, .py, .fm { color: #82aaff !important; }  // names (blue)
   .o, .ow, .p { color: #d4d4d8 !important; }  // operators, punctuation (light gray)
   .c, .c1, .cm, .cp, .cs, .ch { color: #676e95 !important; }  // comments (dim)
   .m, .mi, .mf, .mh, .mo, .mb, .mx, .il { color: #f78c6c !important; }  // numbers (orange)
   .bp { color: #89ddff !important; }  // builtins (cyan)
-  .fm { color: #82aaff !important; }  // function/method names (blue)
   .err { color: #ff5370 !important; background: none !important; }  // errors (red)
 }
