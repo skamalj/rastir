@@ -1,16 +1,28 @@
 # Rastir
 
 <p align="center">
-  <img src="rastir.png" alt="Rastir" width="200">
+  <img src="rastir_small.png" alt="Rastir" width="200">
+</p>
+
+<p align="center">
+  <a href="https://pypi.org/project/rastir/"><img alt="PyPI" src="https://img.shields.io/pypi/v/rastir"></a>
+  <a href="https://pypi.org/project/rastir/"><img alt="Python" src="https://img.shields.io/pypi/pyversions/rastir"></a>
+  <a href="https://github.com/skamalj/rastir"><img alt="GitHub" src="https://img.shields.io/github/stars/skamalj/rastir?style=social"></a>
+  <a href="https://skamalj.github.io/rastir/"><img alt="Docs" src="https://img.shields.io/badge/docs-GitHub%20Pages-blue"></a>
+  <a href="https://github.com/skamalj/rastir/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/skamalj/rastir"></a>
 </p>
 
 LLM & Agent Observability — structured tracing and Prometheus metrics via Python decorators, with a built-in collector server.
 
+> **[Full Documentation](https://skamalj.github.io/rastir/)** — Getting Started, Decorators, Adapters, Server Configuration, and more.
+
 ## Features
 
 - **Decorator-based instrumentation** — `@trace`, `@agent`, `@llm`, `@tool`, `@retrieval`, `@metric`
-- **Adapter-based metadata extraction** — OpenAI, Anthropic, Bedrock, LangChain (no monkey-patching)
+- **Adapter-based metadata extraction** — OpenAI, Anthropic, Bedrock, LangChain, LangGraph (no monkey-patching)
+- **Nested span support** — automatic parent–child linking for agent → LLM → tool call trees
 - **Built-in collector server** — FastAPI ingestion, Prometheus `/metrics`, in-memory trace store
+- **Histogram percentiles & exemplars** — P50/P95/P99 latency with trace-linked exemplars
 - **OTLP forwarding** — optional export to Tempo, Jaeger, or any OTLP-compatible backend
 - **Multi-tenant support** — tenant isolation via configurable HTTP header
 - **Zero external dependencies** — no database, no Redis, no Kafka; fully stateless
@@ -137,8 +149,8 @@ conda run -n llmobserve pip install -e ".[all]"
 ### Running Tests
 
 ```bash
-conda run -n llmobserve pytest           # all 201 tests
-conda run -n llmobserve pytest tests/test_integration.py -v  # integration only
+conda run -n llmobserve pytest           # all 337 tests
+conda run -n llmobserve pytest tests/test_langgraph_integration.py -v  # LangGraph integration
 ```
 
 ### Code Quality
@@ -166,6 +178,7 @@ src/rastir/
 │   ├── anthropic.py     # Anthropic adapter
 │   ├── bedrock.py       # AWS Bedrock adapter
 │   ├── langchain.py     # LangChain framework adapter
+│   ├── langgraph.py     # LangGraph framework adapter
 │   ├── retrieval.py     # Retrieval adapter
 │   ├── tool.py          # Tool adapter
 │   └── fallback.py      # Fallback (always matches)
@@ -181,8 +194,15 @@ src/rastir/
 
 ## Documentation
 
-- [Requirements](requirements.md)
-- [Adapter Requirements](adapters_requirements.md)
-- [Configuration Requirements](configuration_requirements.md)
-- [Server Requirements](server_requirement.md)
-- [Deployment Requirements](deployment_requirements.md)
+Full documentation is available at **[skamalj.github.io/rastir](https://skamalj.github.io/rastir/)**:
+
+- [Getting Started](https://skamalj.github.io/rastir/getting-started) — Installation, quick start, nested spans
+- [Decorators](https://skamalj.github.io/rastir/decorators) — `@trace`, `@agent`, `@llm`, `@tool`, `@retrieval`, `@metric`
+- [Adapters](https://skamalj.github.io/rastir/adapters) — OpenAI, Anthropic, Bedrock, LangChain, LangGraph
+- [Server](https://skamalj.github.io/rastir/server) — Collector server, metrics, histograms, exemplars
+- [Configuration](https://skamalj.github.io/rastir/configuration) — Client & server configuration reference
+- [Contributing Adapters](https://skamalj.github.io/rastir/contributing-adapters) — How to write a custom adapter
+
+## License
+
+MIT — see [LICENSE](LICENSE) for details.

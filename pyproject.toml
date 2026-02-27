@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "rastir"
-version = "0.1.0"
+version = "0.1.0b1"
 description = "Rastir — LLM & Agent Observability Library with decorators, metrics, and traces"
 readme = "README.md"
 license = "MIT"
@@ -53,6 +53,13 @@ dev = [
     "httpx",  # for test client
 ]
 all = ["rastir[server,dev]"]
+
+[project.urls]
+Homepage = "https://github.com/skamalj/rastir"
+Documentation = "https://skamalj.github.io/rastir/"
+Repository = "https://github.com/skamalj/rastir"
+Issues = "https://github.com/skamalj/rastir/issues"
+Changelog = "https://github.com/skamalj/rastir/releases"
 
 [project.scripts]
 rastir-server = "rastir.server.app:main"
