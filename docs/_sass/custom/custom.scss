@@ -23,17 +23,39 @@
   overflow-x: auto;
 }
 
+// Center the logo in sidebar
+.site-logo {
+  display: block;
+  margin: 0 auto;
+}
+
 // Larger code blocks and inline code
 code {
   font-size: 0.95em !important;
+  color: #e4e4e7 !important;
 }
 
 pre code {
   font-size: 0.92em !important;
+  color: #d4d4d8 !important;
 }
 
 .highlight pre {
   font-size: 0.92em !important;
   line-height: 1.55;
   padding: 1em;
+  background-color: #1a1a2e !important;
+}
+
+// Syntax highlighting - high contrast for dark background
+.highlight {
+  .k, .kd, .kn, .kp, .kr, .kt { color: #c792ea !important; }  // keywords (purple)
+  .s, .s1, .s2, .sb, .sc, .sd, .sh, .sx { color: #c3e88d !important; }  // strings (green)
+  .n, .na, .nb, .nc, .no, .nd, .ni, .ne, .nf, .nl, .nn, .nt, .nv { color: #82aaff !important; }  // names (blue)
+  .o, .ow, .p { color: #d4d4d8 !important; }  // operators, punctuation (light gray)
+  .c, .c1, .cm, .cp, .cs, .ch { color: #676e95 !important; }  // comments (dim)
+  .m, .mi, .mf, .mh, .mo, .mb, .mx, .il { color: #f78c6c !important; }  // numbers (orange)
+  .bp { color: #89ddff !important; }  // builtins (cyan)
+  .fm { color: #82aaff !important; }  // function/method names (blue)
+  .err { color: #ff5370 !important; background: none !important; }  // errors (red)
 }
