@@ -7,7 +7,7 @@ plugins:
 baseurl: /rastir
 url: https://skamalj.github.io
 
-color_scheme: dark
+color_scheme: rastir-dark
 
 # Logo instead of text title
 logo: "/assets/images/rastir_small.png"
