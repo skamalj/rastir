@@ -119,6 +119,155 @@ If unhealthy:
 | `rastir_duration_seconds` | Histogram | service, env, span_type |
 | `rastir_tokens_per_call` | Histogram | service, env, model, provider |
 
+### Histogram Buckets
+
+Histograms track the **distribution** of values, not just averages. Rastir ships two histograms with LLM-optimised default buckets:
+
+| Histogram | Default Buckets | Unit |
+|-----------|----------------|------|
+| `rastir_duration_seconds` | 0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0 | seconds |
+| `rastir_tokens_per_call` | 10, 50, 100, 250, 500, 1000, 2000, 4000, 8000, 16000, 32000 | tokens |
+
+Maximum of **20 buckets** per histogram. Buckets are configurable via YAML or environment variables.
+
+#### Custom Bucket Configuration
+
+```yaml
+# server-config.yml
+histograms:
+  duration_buckets: [0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0]
+  tokens_buckets: [50, 100, 500, 1000, 5000, 10000]
+```
+
+Or via environment variables (comma-separated):
+
+```bash
+export RASTIR_SERVER_HISTOGRAMS_DURATION_BUCKETS=0.1,0.5,1.0,2.0,5.0,10.0,30.0
+export RASTIR_SERVER_HISTOGRAMS_TOKENS_BUCKETS=50,100,500,1000,5000,10000
+```
+
+#### What Prometheus Exposes
+
+For each histogram, Prometheus creates:
+
+```
+# rastir_duration_seconds_bucket{..., le="0.25"} → count of spans ≤ 0.25s
+# rastir_duration_seconds_bucket{..., le="1.0"}  → count of spans ≤ 1.0s
+# rastir_duration_seconds_bucket{..., le="+Inf"} → total count
+# rastir_duration_seconds_sum{...}               → sum of all values
+# rastir_duration_seconds_count{...}             → same as +Inf bucket
+```
+
+### Percentiles — P50, P95, P99 with PromQL
+
+Histograms enable **percentile calculations** via PromQL's `histogram_quantile()` function. These give you tail-latency and token-usage insights.
+
+#### LLM Latency Percentiles
+
+```promql
+# P50 (median) LLM call duration
+histogram_quantile(0.50,
+  rate(rastir_duration_seconds_bucket{span_type="llm"}[5m])
+)
+
+# P95 LLM call duration — 95% of calls complete within this time
+histogram_quantile(0.95,
+  rate(rastir_duration_seconds_bucket{span_type="llm"}[5m])
+)
+
+# P99 LLM call duration — tail latency
+histogram_quantile(0.99,
+  rate(rastir_duration_seconds_bucket{span_type="llm"}[5m])
+)
+```
+
+#### Per-Model Latency Percentiles
+
+Use `sum by` to break down by model:
+
+```promql
+# P95 duration per model
+histogram_quantile(0.95,
+  sum by (model, le) (
+    rate(rastir_duration_seconds_bucket{span_type="llm"}[5m])
+  )
+)
+```
+
+#### Token Usage Percentiles
+
+```promql
+# P50 tokens per LLM call
+histogram_quantile(0.50,
+  rate(rastir_tokens_per_call_bucket[5m])
+)
+
+# P95 tokens per call — catches outlier prompts
+histogram_quantile(0.95,
+  rate(rastir_tokens_per_call_bucket[5m])
+)
+
+# P99 tokens per call by model
+histogram_quantile(0.99,
+  sum by (model, le) (
+    rate(rastir_tokens_per_call_bucket[5m])
+  )
+)
+```
+
+#### Agent & Tool Latency
+
+```promql
+# P95 tool execution time — detect slow tools
+histogram_quantile(0.95,
+  rate(rastir_duration_seconds_bucket{span_type="tool"}[5m])
+)
+
+# P95 agent end-to-end time — full loop duration
+histogram_quantile(0.95,
+  rate(rastir_duration_seconds_bucket{span_type="agent"}[5m])
+)
+
+# P95 retrieval latency — vector DB performance
+histogram_quantile(0.95,
+  rate(rastir_duration_seconds_bucket{span_type="retrieval"}[5m])
+)
+```
+
+#### Average & Throughput Queries
+
+```promql
+# Average LLM call duration
+rate(rastir_duration_seconds_sum{span_type="llm"}[5m])
+  /
+rate(rastir_duration_seconds_count{span_type="llm"}[5m])
+
+# LLM calls per second
+rate(rastir_llm_calls_total[5m])
+
+# Error rate as a percentage
+rate(rastir_errors_total[5m])
+  /
+rate(rastir_spans_ingested_total[5m]) * 100
+
+# Average tokens per call
+rate(rastir_tokens_per_call_sum[5m])
+  /
+rate(rastir_tokens_per_call_count[5m])
+```
+
+#### Grafana Dashboard Panel Examples
+
+Create a Grafana dashboard with these panels:
+
+| Panel | Type | PromQL |
+|-------|------|--------|
+| LLM Latency P50/P95/P99 | Time series | `histogram_quantile(0.50\|0.95\|0.99, rate(rastir_duration_seconds_bucket{span_type="llm"}[5m]))` |
+| Token Usage Distribution | Heatmap | `rastir_tokens_per_call_bucket` |
+| Calls per Second | Time series | `rate(rastir_llm_calls_total[5m])` |
+| Error Rate % | Stat | `rate(rastir_errors_total[5m]) / rate(rastir_spans_ingested_total[5m]) * 100` |
+| Token Cost by Model | Time series | `rate(rastir_tokens_input_total[5m])` + `rate(rastir_tokens_output_total[5m])` |
+
 ### Operational Metrics
 
 | Metric | Type | Description |
@@ -146,7 +295,16 @@ If unhealthy:
 
 ## Exemplar Support
 
-When enabled, `trace_id` exemplars are attached to `rastir_duration_seconds` and `rastir_llm_calls_total`. The `/metrics` endpoint switches to OpenMetrics format automatically.
+Exemplars attach a **trace_id** to histogram observations and counter increments, creating a direct link from a Prometheus metric to the distributed trace that produced it. This lets you click from a latency spike in Grafana directly to the trace in Jaeger/Tempo.
+
+### How It Works
+
+When exemplars are enabled:
+1. Every `rastir_duration_seconds.observe()` call includes `{trace_id: "abc-123"}` as an exemplar
+2. Every `rastir_llm_calls_total.inc()` call includes the same exemplar
+3. The `/metrics` endpoint automatically switches to **OpenMetrics** format (required for exemplars)
+
+### Enabling Exemplars
 
 ```yaml
 # server-config.yml
@@ -154,7 +312,75 @@ exemplars:
   enabled: true
 ```
 
-Enable in Grafana by configuring exemplar support on your Prometheus data source.
+Or via environment variable:
+
+```bash
+export RASTIR_SERVER_EXEMPLARS_ENABLED=true
+```
+
+### What the /metrics Output Looks Like
+
+**Without exemplars** (classic Prometheus format):
+
+```
+rastir_duration_seconds_bucket{service="my-app",env="prod",span_type="llm",le="1.0"} 42
+rastir_duration_seconds_bucket{service="my-app",env="prod",span_type="llm",le="2.0"} 58
+```
+
+**With exemplars** (OpenMetrics format):
+
+```
+rastir_duration_seconds_bucket{service="my-app",env="prod",span_type="llm",le="1.0"} 42 # {trace_id="a1b2c3d4-e5f6-7890"} 0.847 1709042400.0
+rastir_duration_seconds_bucket{service="my-app",env="prod",span_type="llm",le="2.0"} 58 # {trace_id="f9e8d7c6-b5a4-3210"} 1.923 1709042401.0
+rastir_llm_calls_total{service="my-app",env="prod",model="gpt-4",provider="openai",agent="qa_bot"} 145 # {trace_id="a1b2c3d4-e5f6-7890"} 1.0 1709042400.0
+```
+
+The exemplar fields are: `# {trace_id="..."} <observed_value> <timestamp>`
+
+### Grafana + Exemplars Setup
+
+#### 1. Configure Prometheus Data Source
+
+In Grafana, edit your Prometheus data source:
+- **Type:** Prometheus
+- Enable **"Exemplars"** toggle
+- Set **"Internal link"** → your Jaeger/Tempo data source
+- Map label **`trace_id`** → trace ID field
+
+#### 2. Create a Panel with Exemplars
+
+```promql
+# P95 LLM latency — exemplars shown as diamonds on the graph
+histogram_quantile(0.95,
+  rate(rastir_duration_seconds_bucket{span_type="llm"}[5m])
+)
+```
+
+In the panel options:
+- Toggle **"Exemplars"** on in the query editor
+- Exemplars appear as **diamond markers** on the time series
+- Click a diamond → follows the internal link to the trace in Jaeger/Tempo
+
+#### 3. Typical Workflow
+
+```
+Grafana: P95 latency spike at 14:32 →
+  Click exemplar diamond →
+    Jaeger: trace_id=a1b2c3d4 →
+      research_agent (2.3s)
+        ├─ plan_step (0.8s)        ✓ normal
+        ├─ web_search (1.2s)       ← slow! (timeout?)
+        └─ synthesize (0.3s)       ✓ normal
+```
+
+This bridges the gap between **metrics** (what's happening at scale) and **traces** (why a specific request was slow).
+
+### Metrics That Carry Exemplars
+
+| Metric | Exemplar Label |
+|--------|---------------|
+| `rastir_duration_seconds` | `trace_id` |
+| `rastir_llm_calls_total` | `trace_id` |
 
 ---
 

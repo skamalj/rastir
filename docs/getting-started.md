@@ -138,6 +138,192 @@ Each decorated function creates a span with:
 
 ---
 
+## Nested Spans — Agent Loop Example
+
+Rastir automatically builds parent-child span trees from your call graph.
+Here's a realistic **LangGraph-style agent** that loops over tool calls —
+each iteration creates nested spans under the agent.
+
+```
+trace("handle_request")
+ └─ agent("research_agent")          # agent loop
+     ├─ llm("plan")                  # 1st LLM call → decides to use tools
+     ├─ tool("web_search")           # tool execution
+     ├─ tool("calculator")           # another tool
+     ├─ llm("synthesize")            # 2nd LLM call → final answer
+     └─ retrieval("fetch_sources")   # optional retrieval step
+```
+
+### Full Code
+
+```python
+from rastir import configure, trace, agent, llm, tool, retrieval
+
+configure(
+    service="research-assistant",
+    env="production",
+    push_url="http://localhost:8080",
+)
+
+
+# ── Root entry point ──────────────────────────────────
+@trace
+def handle_request(user_query: str) -> str:
+    """Creates the top-level trace span."""
+    return research_agent(user_query)
+
+
+# ── Agent (may loop over LLM + tools) ────────────────
+@agent(agent_name="research_agent")
+def research_agent(query: str) -> str:
+    """
+    Agent span that orchestrates planning, tool use, and synthesis.
+    All child calls (llm, tool, retrieval) become nested spans.
+    """
+    # Step 1: Ask the LLM to plan which tools to call
+    plan = plan_step(query)
+
+    # Step 2: Execute tools based on the plan
+    results = {}
+    if "web_search" in plan:
+        results["web"] = web_search(plan["web_search"])
+    if "calculator" in plan:
+        results["calc"] = calculator(plan["calculator"])
+
+    # Step 3: Retrieve supporting documents
+    sources = fetch_sources(query)
+
+    # Step 4: Synthesize a final answer
+    return synthesize(query, results, sources)
+
+
+# ── LLM calls ────────────────────────────────────────
+@llm
+def plan_step(query: str) -> dict:
+    """LLM span — decides which tools to invoke."""
+    response = openai.chat.completions.create(
+        model="gpt-4",
+        messages=[
+            {"role": "system", "content": "Decide which tools to call."},
+            {"role": "user", "content": query},
+        ],
+    )
+    return parse_tool_calls(response)
+
+
+@llm
+def synthesize(query: str, tool_results: dict, sources: list[str]) -> str:
+    """LLM span — combines tool output + sources into a final answer."""
+    context = f"Tool results: {tool_results}\nSources: {sources}"
+    response = openai.chat.completions.create(
+        model="gpt-4",
+        messages=[
+            {"role": "system", "content": "Answer using the provided context."},
+            {"role": "user", "content": f"{query}\n\n{context}"},
+        ],
+    )
+    return response.choices[0].message.content
+
+
+# ── Tools ─────────────────────────────────────────────
+@tool
+def web_search(search_query: str) -> list[str]:
+    """Tool span — tracked as rastir_tool_calls_total{tool_name='web_search'}."""
+    return search_api.query(search_query, max_results=5)
+
+
+@tool
+def calculator(expression: str) -> float:
+    """Tool span — tracked as rastir_tool_calls_total{tool_name='calculator'}."""
+    return eval_expression(expression)
+
+
+# ── Retrieval ─────────────────────────────────────────
+@retrieval
+def fetch_sources(query: str) -> list[str]:
+    """Retrieval span — tracked as rastir_retrieval_calls_total."""
+    return vector_store.similarity_search(query, top_k=3)
+```
+
+### What Rastir Captures
+
+Calling `handle_request("What is the mass of Jupiter in kg?")` produces this span tree:
+
+```
+TraceID: abc123
+│
+├─ handle_request            type=trace     status=OK   dur=2.3s
+│  └─ research_agent         type=agent     status=OK   dur=2.2s
+│     ├─ plan_step           type=llm       status=OK   dur=0.8s
+│     │   model=gpt-4  provider=openai  tokens_in=45  tokens_out=32
+│     ├─ web_search          type=tool      status=OK   dur=0.5s
+│     │   tool_name=web_search  agent=research_agent
+│     ├─ calculator          type=tool      status=OK   dur=0.01s
+│     │   tool_name=calculator  agent=research_agent
+│     ├─ fetch_sources       type=retrieval status=OK   dur=0.3s
+│     │   agent=research_agent
+│     └─ synthesize          type=llm       status=OK   dur=1.1s
+│         model=gpt-4  provider=openai  tokens_in=210  tokens_out=85
+```
+
+Prometheus metrics emitted:
+- `rastir_llm_calls_total{model="gpt-4", provider="openai", agent="research_agent"}` → 2
+- `rastir_tool_calls_total{tool_name="web_search", agent="research_agent"}` → 1
+- `rastir_tool_calls_total{tool_name="calculator", agent="research_agent"}` → 1
+- `rastir_retrieval_calls_total{agent="research_agent"}` → 1
+- `rastir_tokens_input_total{model="gpt-4"}` → 255
+- `rastir_tokens_output_total{model="gpt-4"}` → 117
+- `rastir_duration_seconds` histogram buckets for each span
+
+### Multi-Agent Nesting
+
+Agents can call other agents — Rastir tracks the full hierarchy:
+
+```python
+@agent(agent_name="supervisor")
+def supervisor(task: str) -> str:
+    """Top-level agent that delegates to sub-agents."""
+    plan = plan_task(task)
+    research = research_agent(plan["research_query"])
+    code = coding_agent(plan["code_task"])
+    return combine_results(research, code)
+
+@agent(agent_name="coding_agent")
+def coding_agent(task: str) -> str:
+    """Sub-agent — its spans nest under the supervisor."""
+    code = generate_code(task)
+    result = run_code(code)
+    return result
+
+@llm
+def generate_code(task: str) -> str:
+    return anthropic.messages.create(
+        model="claude-sonnet-4-20250514",
+        messages=[{"role": "user", "content": f"Write code: {task}"}],
+    )
+
+@tool
+def run_code(code: str) -> str:
+    return sandbox.execute(code)
+```
+
+Resulting span tree:
+
+```
+supervisor (agent)
+ ├─ plan_task (llm)
+ ├─ research_agent (agent)        ← sub-agent
+ │   ├─ plan_step (llm)
+ │   ├─ web_search (tool)
+ │   └─ synthesize (llm)
+ ├─ coding_agent (agent)          ← sub-agent
+ │   ├─ generate_code (llm)
+ │   └─ run_code (tool)
+ └─ combine_results (llm)
+```
+
+---
+
 ## Docker Deployment
 
 ```bash
