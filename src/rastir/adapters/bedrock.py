@@ -26,6 +26,11 @@ class BedrockAdapter(BaseAdapter):
     kind = "provider"
     priority = 140
 
+    supports_tokens = True
+    supports_streaming = False
+    supports_request_metadata = False
+    supports_guardrail_metadata = False
+
     def can_handle(self, result: Any) -> bool:
         """Detect Bedrock dict responses by looking for characteristic keys."""
         if not isinstance(result, dict):

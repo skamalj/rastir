@@ -31,6 +31,9 @@ class LangChainAdapter(BaseAdapter):
     kind = "framework"
     priority = 250
 
+    supports_tokens = True
+    supports_streaming = True
+
     # LangChain message / result class names we look for
     _KNOWN_CLASSES = frozenset({
         "AIMessage",

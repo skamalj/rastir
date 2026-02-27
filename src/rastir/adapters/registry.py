@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from rastir.adapters.types import AdapterResult, BaseAdapter, TokenDelta
+from rastir.adapters.types import AdapterResult, BaseAdapter, RequestMetadata, TokenDelta
 
 logger = logging.getLogger("rastir")
 
@@ -117,6 +117,32 @@ def resolve_stream_chunk(chunk: object) -> Optional[TokenDelta]:
                 return adapter.extract_stream_delta(chunk)
             except Exception:
                 logger.debug("Stream adapter %s failed", adapter.name, exc_info=True)
+    return None
+
+
+def resolve_request(args: tuple, kwargs: dict) -> Optional[RequestMetadata]:
+    """Run request-phase extraction across adapters.
+
+    Called before function execution to extract request-level metadata
+    (e.g., Bedrock guardrail configuration from kwargs).
+
+    Only adapters with supports_request_metadata=True are considered.
+    Returns merged RequestMetadata from the first matching adapter,
+    or None if no adapter handles the request.
+    """
+    if not _adapters:
+        return None
+
+    _ensure_sorted()
+
+    for adapter in _adapters:
+        if not adapter.supports_request_metadata:
+            continue
+        if adapter.can_handle_request(args, kwargs):
+            try:
+                return adapter.extract_request_metadata(args, kwargs)
+            except Exception:
+                logger.debug("Request adapter %s failed", adapter.name, exc_info=True)
     return None
 
 

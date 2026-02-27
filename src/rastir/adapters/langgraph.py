@@ -28,7 +28,10 @@ class LangGraphAdapter(BaseAdapter):
 
     name = "langgraph"
     kind = "framework"
-    priority = 260  # Above LangChain (250)
+    priority = 260
+
+    supports_tokens = True
+    supports_streaming = True  # Above LangChain (250)
 
     def can_handle(self, result: Any) -> bool:
         """Detect LangGraph response patterns.

@@ -20,6 +20,9 @@ class AnthropicAdapter(BaseAdapter):
     kind = "provider"
     priority = 150
 
+    supports_tokens = True
+    supports_streaming = True
+
     def can_handle(self, result: Any) -> bool:
         """Detect Anthropic Message objects by class name."""
         cls_name = type(result).__name__

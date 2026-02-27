@@ -1,7 +1,14 @@
-"""OpenAI provider adapter.
+"""Mistral AI provider adapter.
 
-Handles ChatCompletion responses (non-streaming) and ChatCompletionChunk
-objects (streaming). Extracts model, provider, token usage, finish_reason.
+Handles responses from the ``mistralai`` Python SDK.
+
+Detection:
+  - ``ChatCompletionResponse`` class in ``mistralai`` module namespace.
+
+Metadata extraction:
+  - model: ``result.model``
+  - tokens: ``result.usage.prompt_tokens`` / ``completion_tokens``
+  - finish_reason: ``result.choices[0].finish_reason``
 
 Priority: 150 (standard provider range).
 """
@@ -13,61 +20,63 @@ from typing import Any
 from rastir.adapters.types import AdapterResult, BaseAdapter, TokenDelta
 
 
-class OpenAIAdapter(BaseAdapter):
-    """Adapter for OpenAI ChatCompletion and legacy Completion responses."""
+class MistralAdapter(BaseAdapter):
+    """Adapter for Mistral ChatCompletionResponse objects."""
 
-    name = "openai"
+    name = "mistral"
     kind = "provider"
     priority = 150
 
     supports_tokens = True
     supports_streaming = True
 
+    _KNOWN_CLASSES = frozenset({
+        "ChatCompletionResponse",
+    })
+
+    _STREAM_CLASSES = frozenset({
+        "CompletionChunk",
+        "ChatCompletionStreamResponse",
+    })
+
     def can_handle(self, result: Any) -> bool:
-        """Detect OpenAI response objects by class name to avoid hard import."""
         cls_name = type(result).__name__
         module = type(result).__module__ or ""
-        return (
-            cls_name in ("ChatCompletion", "Completion")
-            and "openai" in module
-        )
+        return cls_name in self._KNOWN_CLASSES and "mistralai" in module
 
     def transform(self, result: Any) -> AdapterResult:
         model = getattr(result, "model", None)
-        usage = getattr(result, "usage", None)
+
+        # Token usage
         tokens_input = None
         tokens_output = None
-
+        usage = getattr(result, "usage", None)
         if usage is not None:
             tokens_input = getattr(usage, "prompt_tokens", None)
             tokens_output = getattr(usage, "completion_tokens", None)
 
-        # Extract finish_reason from first choice
+        # Finish reason from first choice
         finish_reason = None
         choices = getattr(result, "choices", None)
         if choices and len(choices) > 0:
-            finish_reason = getattr(choices[0], "finish_reason", None)
+            fr = getattr(choices[0], "finish_reason", None)
+            if fr is not None:
+                finish_reason = str(fr.value) if hasattr(fr, "value") else str(fr)
 
         return AdapterResult(
             model=model,
-            provider="openai",
+            provider="mistral",
             tokens_input=tokens_input,
             tokens_output=tokens_output,
             finish_reason=finish_reason,
         )
 
     def can_handle_stream(self, chunk: Any) -> bool:
-        """Detect OpenAI streaming chunks."""
         cls_name = type(chunk).__name__
         module = type(chunk).__module__ or ""
-        return cls_name == "ChatCompletionChunk" and "openai" in module
+        return cls_name in self._STREAM_CLASSES and "mistralai" in module
 
     def extract_stream_delta(self, chunk: Any) -> TokenDelta:
-        """Extract token delta from a ChatCompletionChunk.
-
-        OpenAI streaming chunks include usage in the final chunk
-        (when stream_options={"include_usage": True}).
-        """
         model = getattr(chunk, "model", None)
         usage = getattr(chunk, "usage", None)
         tokens_input = None
@@ -79,7 +88,7 @@ class OpenAIAdapter(BaseAdapter):
 
         return TokenDelta(
             model=model,
-            provider="openai",
+            provider="mistral",
             tokens_input=tokens_input,
             tokens_output=tokens_output,
         )

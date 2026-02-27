@@ -18,6 +18,9 @@ class FallbackAdapter(BaseAdapter):
     kind = "fallback"
     priority = 0
 
+    supports_tokens = False
+    supports_streaming = False
+
     def can_handle(self, result: Any) -> bool:
         return True
 

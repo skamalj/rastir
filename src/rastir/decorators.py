@@ -325,6 +325,7 @@ def llm(
             async def async_gen_wrapper(*args: Any, **kwargs: Any) -> Any:
                 span, token = start_span(fn.__name__, SpanType.LLM)
                 _set_llm_base_attrs(span, model, provider)
+                _extract_request_metadata(span, args, kwargs)
                 try:
                     async for chunk in fn(*args, **kwargs):
                         yield chunk
@@ -347,6 +348,7 @@ def llm(
             def gen_wrapper(*args: Any, **kwargs: Any) -> Any:
                 span, token = start_span(fn.__name__, SpanType.LLM)
                 _set_llm_base_attrs(span, model, provider)
+                _extract_request_metadata(span, args, kwargs)
                 try:
                     for chunk in fn(*args, **kwargs):
                         yield chunk
@@ -369,6 +371,7 @@ def llm(
             async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
                 span, token = start_span(fn.__name__, SpanType.LLM)
                 _set_llm_base_attrs(span, model, provider)
+                _extract_request_metadata(span, args, kwargs)
                 try:
                     result = await fn(*args, **kwargs)
                     _extract_llm_metadata(span, result)
@@ -391,6 +394,7 @@ def llm(
             def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
                 span, token = start_span(fn.__name__, SpanType.LLM)
                 _set_llm_base_attrs(span, model, provider)
+                _extract_request_metadata(span, args, kwargs)
                 try:
                     result = fn(*args, **kwargs)
                     _extract_llm_metadata(span, result)
@@ -427,6 +431,27 @@ def _set_llm_base_attrs(
     agent_name = get_current_agent()
     if agent_name:
         span.set_attribute("agent", agent_name)
+
+
+def _extract_request_metadata(span: SpanRecord, args: tuple, kwargs: dict) -> None:
+    """Run request-phase adapter extraction (pre-invocation).
+
+    Provider-agnostic: passes args/kwargs to the adapter registry.
+    Adapters that support request metadata (e.g., Bedrock guardrails)
+    can inspect the call arguments and annotate the span.
+    """
+    try:
+        from rastir.adapters.registry import resolve_request
+        req_meta = resolve_request(args, kwargs)
+        if req_meta:
+            for k, v in req_meta.span_attributes.items():
+                span.set_attribute(k, v)
+            for k, v in req_meta.extra_attributes.items():
+                span.set_attribute(k, v)
+    except ImportError:
+        pass
+    except Exception:
+        logger.debug("Request metadata extraction failed", exc_info=True)
 
 
 def _extract_llm_metadata(span: SpanRecord, result: Any) -> None:

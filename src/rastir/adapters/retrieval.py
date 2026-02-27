@@ -26,6 +26,9 @@ class RetrievalAdapter(BaseAdapter):
     kind = "provider"
     priority = 50
 
+    supports_tokens = False
+    supports_streaming = False
+
     def can_handle(self, result: Any) -> bool:
         """Match list/tuple or objects with .documents or .page_content."""
         if isinstance(result, (list, tuple)):

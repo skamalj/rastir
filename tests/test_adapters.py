@@ -122,6 +122,153 @@ def _make_ai_message(content="Hello", response_metadata=None,
     return obj
 
 
+# ---- Azure OpenAI ----
+
+def _make_azure_openai_chat_completion(model="gpt-4o", prompt_tokens=10,
+                                        completion_tokens=20, finish_reason="stop"):
+    """Create a mock Azure OpenAI ChatCompletion with Azure headers."""
+    cls = type("ChatCompletion", (), {"__module__": "openai.types.chat.chat_completion"})
+    obj = cls.__new__(cls)
+    obj.model = model
+    obj.usage = _Usage(prompt_tokens=prompt_tokens,
+                       completion_tokens=completion_tokens,
+                       total_tokens=prompt_tokens + completion_tokens)
+    obj.choices = [_OpenAIChoice(finish_reason)]
+    # Add Azure-specific raw response with headers
+    raw_cls = type("_RawResponse", (), {})
+    raw = raw_cls.__new__(raw_cls)
+    raw.headers = {"x-ms-region": "eastus", "x-ms-client-request-id": "abc-123"}
+    obj._raw_response = raw
+    return obj
+
+
+def _make_azure_openai_chunk(model="gpt-4o"):
+    """Create a mock Azure OpenAI streaming chunk with Azure headers."""
+    cls = type("ChatCompletionChunk", (), {
+        "__module__": "openai.types.chat.chat_completion_chunk"})
+    obj = cls.__new__(cls)
+    obj.model = model
+    obj.usage = None
+    raw_cls = type("_RawResponse", (), {})
+    raw = raw_cls.__new__(raw_cls)
+    raw.headers = {"x-ms-region": "westus2"}
+    obj._raw_response = raw
+    return obj
+
+
+# ---- Gemini ----
+
+def _make_gemini_response(model_version="gemini-1.5-pro", prompt_tokens=12,
+                           candidates_tokens=22, finish_reason_name="STOP"):
+    cls = type("GenerateContentResponse", (), {
+        "__module__": "google.genai.types"})
+    obj = cls.__new__(cls)
+    obj.model_version = model_version
+    obj.usage_metadata = _Usage(prompt_token_count=prompt_tokens,
+                                 candidates_token_count=candidates_tokens)
+    # Finish reason as enum-like object
+    fr_cls = type("FinishReason", (), {"name": finish_reason_name})
+    cand_cls = type("Candidate", (), {})
+    cand = cand_cls.__new__(cand_cls)
+    cand.finish_reason = fr_cls()
+    obj.candidates = [cand]
+    return obj
+
+
+def _make_gemini_chunk(model_version="gemini-1.5-pro"):
+    cls = type("GenerateContentResponse", (), {
+        "__module__": "google.generativeai.types"})
+    obj = cls.__new__(cls)
+    obj.model_version = model_version
+    obj.usage_metadata = _Usage(prompt_token_count=5, candidates_token_count=10)
+    obj.candidates = []
+    return obj
+
+
+# ---- Cohere ----
+
+def _make_cohere_response(model="command-r-plus", input_tokens=15,
+                           output_tokens=25, finish_reason="COMPLETE"):
+    cls = type("NonStreamedChatResponse", (), {"__module__": "cohere.types"})
+    obj = cls.__new__(cls)
+    obj.model = model
+    obj.meta = _Usage(
+        billed_units=_Usage(input_tokens=input_tokens, output_tokens=output_tokens),
+        tokens=None,
+    )
+    # Finish reason as enum-like
+    fr_cls = type("FinishReason", (), {"value": finish_reason})
+    obj.finish_reason = fr_cls()
+    return obj
+
+
+def _make_cohere_stream_end(model="command-r-plus", input_tokens=15,
+                             output_tokens=25):
+    cls = type("StreamedChatResponse_StreamEnd", (), {"__module__": "cohere.types"})
+    obj = cls.__new__(cls)
+    resp = _Usage(
+        model=model,
+        meta=_Usage(
+            billed_units=_Usage(input_tokens=input_tokens, output_tokens=output_tokens),
+        ),
+    )
+    obj.response = resp
+    return obj
+
+
+# ---- Mistral ----
+
+def _make_mistral_response(model="mistral-large-latest", prompt_tokens=10,
+                            completion_tokens=20, finish_reason="stop"):
+    cls = type("ChatCompletionResponse", (), {"__module__": "mistralai.models"})
+    obj = cls.__new__(cls)
+    obj.model = model
+    obj.usage = _Usage(prompt_tokens=prompt_tokens, completion_tokens=completion_tokens)
+    fr_cls = type("FinishReason", (), {"value": finish_reason})
+    choice_cls = type("Choice", (), {})
+    choice = choice_cls.__new__(choice_cls)
+    choice.finish_reason = fr_cls()
+    obj.choices = [choice]
+    return obj
+
+
+def _make_mistral_chunk(model="mistral-large-latest", prompt_tokens=None,
+                         completion_tokens=None):
+    cls = type("CompletionChunk", (), {"__module__": "mistralai.models"})
+    obj = cls.__new__(cls)
+    obj.model = model
+    if prompt_tokens is not None or completion_tokens is not None:
+        obj.usage = _Usage(prompt_tokens=prompt_tokens,
+                           completion_tokens=completion_tokens)
+    else:
+        obj.usage = None
+    return obj
+
+
+# ---- Groq ----
+
+def _make_groq_response(model="llama-3.1-70b-versatile", prompt_tokens=8,
+                         completion_tokens=16, finish_reason="stop",
+                         queue_time=0.01, total_time=0.05):
+    cls = type("ChatCompletion", (), {"__module__": "groq.types.chat.chat_completion"})
+    obj = cls.__new__(cls)
+    obj.model = model
+    obj.usage = _Usage(prompt_tokens=prompt_tokens,
+                       completion_tokens=completion_tokens,
+                       queue_time=queue_time, total_time=total_time)
+    obj.choices = [_OpenAIChoice(finish_reason)]
+    return obj
+
+
+def _make_groq_chunk(model="llama-3.1-70b-versatile"):
+    cls = type("ChatCompletionChunk", (), {
+        "__module__": "groq.types.chat.chat_completion_chunk"})
+    obj = cls.__new__(cls)
+    obj.model = model
+    obj.usage = None
+    return obj
+
+
 # ========================================================================
 # Fixtures
 # ========================================================================
@@ -133,8 +280,13 @@ def _fresh_registry():
     clear_registry()
     # Import adapters module which auto-registers everything
     from rastir.adapters.openai import OpenAIAdapter
+    from rastir.adapters.azure_openai import AzureOpenAIAdapter
     from rastir.adapters.anthropic import AnthropicAdapter
     from rastir.adapters.bedrock import BedrockAdapter
+    from rastir.adapters.gemini import GeminiAdapter
+    from rastir.adapters.cohere import CohereAdapter
+    from rastir.adapters.mistral import MistralAdapter
+    from rastir.adapters.groq import GroqAdapter
     from rastir.adapters.langchain import LangChainAdapter
     from rastir.adapters.langgraph import LangGraphAdapter
     from rastir.adapters.retrieval import RetrievalAdapter
@@ -143,8 +295,13 @@ def _fresh_registry():
 
     register(LangGraphAdapter())
     register(LangChainAdapter())
+    register(AzureOpenAIAdapter())
+    register(GroqAdapter())
     register(OpenAIAdapter())
     register(AnthropicAdapter())
+    register(GeminiAdapter())
+    register(CohereAdapter())
+    register(MistralAdapter())
     register(BedrockAdapter())
     register(RetrievalAdapter())
     register(ToolAdapter())
@@ -163,8 +320,13 @@ class TestRegistry:
         adapters = get_registered_adapters()
         names = [a.name for a in adapters]
         assert "openai" in names
+        assert "azure_openai" in names
         assert "anthropic" in names
         assert "bedrock" in names
+        assert "gemini" in names
+        assert "cohere" in names
+        assert "mistral" in names
+        assert "groq" in names
         assert "langchain" in names
         assert "langgraph" in names
         assert "retrieval" in names
@@ -315,6 +477,253 @@ class TestBedrockAdapter:
         assert ar is not None
         assert ar.model == "unknown"
         assert ar.tokens_input == 5
+
+
+# ========================================================================
+# Azure OpenAI adapter tests
+# ========================================================================
+
+
+class TestAzureOpenAIAdapter:
+    def test_detect_azure_chat_completion(self):
+        result = _make_azure_openai_chat_completion()
+        ar = resolve(result)
+        assert ar is not None
+        assert ar.provider == "azure_openai"
+        assert ar.model == "gpt-4o"
+        assert ar.tokens_input == 10
+        assert ar.tokens_output == 20
+        assert ar.finish_reason == "stop"
+
+    def test_non_azure_openai_falls_through(self):
+        """Standard OpenAI (no Azure headers) should NOT match Azure adapter."""
+        result = _make_openai_chat_completion()
+        ar = resolve(result)
+        assert ar is not None
+        assert ar.provider == "openai"  # Should hit standard OpenAI adapter
+
+    def test_stream_chunk_azure(self):
+        chunk = _make_azure_openai_chunk(model="gpt-4o")
+        delta = resolve_stream_chunk(chunk)
+        assert delta is not None
+        assert delta.provider == "azure_openai"
+        assert delta.model == "gpt-4o"
+
+    def test_negative_plain_dict(self):
+        ar = resolve({"model": "gpt-4"})
+        assert ar.provider == "unknown"
+
+    def test_capability_flags(self):
+        from rastir.adapters.azure_openai import AzureOpenAIAdapter
+        a = AzureOpenAIAdapter()
+        assert a.supports_tokens is True
+        assert a.supports_streaming is True
+
+
+# ========================================================================
+# Gemini adapter tests
+# ========================================================================
+
+
+class TestGeminiAdapter:
+    def test_detect_gemini_response(self):
+        result = _make_gemini_response()
+        ar = resolve(result)
+        assert ar is not None
+        assert ar.provider == "gemini"
+        assert ar.model == "gemini-1.5-pro"
+        assert ar.tokens_input == 12
+        assert ar.tokens_output == 22
+        assert ar.finish_reason == "STOP"
+
+    def test_negative_non_gemini(self):
+        """Non-Gemini class should not match."""
+        cls = type("GenerateContentResponse", (), {"__module__": "some.other.module"})
+        obj = cls.__new__(cls)
+        ar = resolve(obj)
+        assert ar.provider == "unknown"
+
+    def test_stream_chunk(self):
+        chunk = _make_gemini_chunk()
+        delta = resolve_stream_chunk(chunk)
+        assert delta is not None
+        assert delta.provider == "gemini"
+        assert delta.model == "gemini-1.5-pro"
+        assert delta.tokens_input == 5
+        assert delta.tokens_output == 10
+
+    def test_capability_flags(self):
+        from rastir.adapters.gemini import GeminiAdapter
+        a = GeminiAdapter()
+        assert a.supports_tokens is True
+        assert a.supports_streaming is True
+
+
+# ========================================================================
+# Cohere adapter tests
+# ========================================================================
+
+
+class TestCohereAdapter:
+    def test_detect_cohere_response(self):
+        result = _make_cohere_response()
+        ar = resolve(result)
+        assert ar is not None
+        assert ar.provider == "cohere"
+        assert ar.model == "command-r-plus"
+        assert ar.tokens_input == 15
+        assert ar.tokens_output == 25
+        assert ar.finish_reason == "COMPLETE"
+
+    def test_negative_non_cohere(self):
+        cls = type("NonStreamedChatResponse", (), {"__module__": "other.module"})
+        obj = cls.__new__(cls)
+        ar = resolve(obj)
+        assert ar.provider == "unknown"
+
+    def test_stream_end(self):
+        chunk = _make_cohere_stream_end()
+        delta = resolve_stream_chunk(chunk)
+        assert delta is not None
+        assert delta.provider == "cohere"
+        assert delta.model == "command-r-plus"
+        assert delta.tokens_input == 15
+        assert delta.tokens_output == 25
+
+    def test_capability_flags(self):
+        from rastir.adapters.cohere import CohereAdapter
+        a = CohereAdapter()
+        assert a.supports_tokens is True
+        assert a.supports_streaming is True
+
+
+# ========================================================================
+# Mistral adapter tests
+# ========================================================================
+
+
+class TestMistralAdapter:
+    def test_detect_mistral_response(self):
+        result = _make_mistral_response()
+        ar = resolve(result)
+        assert ar is not None
+        assert ar.provider == "mistral"
+        assert ar.model == "mistral-large-latest"
+        assert ar.tokens_input == 10
+        assert ar.tokens_output == 20
+        assert ar.finish_reason == "stop"
+
+    def test_negative_non_mistral(self):
+        cls = type("ChatCompletionResponse", (), {"__module__": "other.module"})
+        obj = cls.__new__(cls)
+        ar = resolve(obj)
+        assert ar.provider == "unknown"
+
+    def test_stream_chunk(self):
+        chunk = _make_mistral_chunk(prompt_tokens=5, completion_tokens=10)
+        delta = resolve_stream_chunk(chunk)
+        assert delta is not None
+        assert delta.provider == "mistral"
+        assert delta.model == "mistral-large-latest"
+        assert delta.tokens_input == 5
+        assert delta.tokens_output == 10
+
+    def test_stream_chunk_no_usage(self):
+        chunk = _make_mistral_chunk()
+        delta = resolve_stream_chunk(chunk)
+        assert delta is not None
+        assert delta.tokens_input is None
+        assert delta.tokens_output is None
+
+    def test_capability_flags(self):
+        from rastir.adapters.mistral import MistralAdapter
+        a = MistralAdapter()
+        assert a.supports_tokens is True
+        assert a.supports_streaming is True
+
+
+# ========================================================================
+# Groq adapter tests
+# ========================================================================
+
+
+class TestGroqAdapter:
+    def test_detect_groq_response(self):
+        result = _make_groq_response()
+        ar = resolve(result)
+        assert ar is not None
+        assert ar.provider == "groq"
+        assert ar.model == "llama-3.1-70b-versatile"
+        assert ar.tokens_input == 8
+        assert ar.tokens_output == 16
+        assert ar.finish_reason == "stop"
+
+    def test_groq_extra_timing(self):
+        result = _make_groq_response(queue_time=0.01, total_time=0.05)
+        ar = resolve(result)
+        assert ar.extra_attributes.get("groq_queue_time") == 0.01
+        assert ar.extra_attributes.get("groq_total_time") == 0.05
+
+    def test_groq_not_confused_with_openai(self):
+        """Groq module should NOT match OpenAI adapter."""
+        result = _make_groq_response()
+        ar = resolve(result)
+        assert ar.provider == "groq"  # Not "openai"
+
+    def test_openai_not_confused_with_groq(self):
+        """OpenAI module should NOT match Groq adapter."""
+        result = _make_openai_chat_completion()
+        ar = resolve(result)
+        assert ar.provider == "openai"  # Not "groq"
+
+    def test_stream_chunk(self):
+        chunk = _make_groq_chunk()
+        delta = resolve_stream_chunk(chunk)
+        assert delta is not None
+        assert delta.provider == "groq"
+        assert delta.model == "llama-3.1-70b-versatile"
+
+    def test_negative_plain_dict(self):
+        ar = resolve({"model": "llama"})
+        assert ar.provider == "unknown"
+
+    def test_capability_flags(self):
+        from rastir.adapters.groq import GroqAdapter
+        a = GroqAdapter()
+        assert a.supports_tokens is True
+        assert a.supports_streaming is True
+
+
+# ========================================================================
+# Adapter capability flags tests
+# ========================================================================
+
+
+class TestAdapterCapabilities:
+    def test_all_adapters_have_capability_flags(self):
+        """Every registered adapter must declare capability flags."""
+        adapters = get_registered_adapters()
+        for adapter in adapters:
+            assert isinstance(adapter.supports_tokens, bool), \
+                f"{adapter.name} missing supports_tokens"
+            assert isinstance(adapter.supports_streaming, bool), \
+                f"{adapter.name} missing supports_streaming"
+
+    def test_request_metadata_defaults_false(self):
+        """Base adapters default supports_request_metadata to False."""
+        from rastir.adapters.types import BaseAdapter
+        base = BaseAdapter()
+        assert base.supports_request_metadata is False
+        assert base.supports_guardrail_metadata is False
+
+    def test_request_metadata_interface(self):
+        """Base adapter request methods return safe defaults."""
+        from rastir.adapters.types import BaseAdapter
+        base = BaseAdapter()
+        assert base.can_handle_request((), {}) is False
+        meta = base.extract_request_metadata((), {})
+        assert meta.span_attributes == {}
+        assert meta.extra_attributes == {}
 
 
 # ========================================================================
