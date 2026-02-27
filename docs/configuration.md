@@ -64,6 +64,9 @@ All settings can be set via environment variables with the `RASTIR_` prefix:
 
 **Precedence:** `configure()` arguments > environment variables > defaults.
 
+{: .warning }
+> `configure()` can only be called **once** per process. After initialization, configuration is frozen and immutable. Calling it again raises `RuntimeError: rastir.configure() has already been called`. This is by design — call it at application startup before any decorated functions run.
+
 ---
 
 ## Server Configuration
