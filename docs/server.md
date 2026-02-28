@@ -113,7 +113,7 @@ If unhealthy:
 | `rastir_llm_calls_total` | Counter | service, env, model, provider, agent |
 | `rastir_tokens_input_total` | Counter | service, env, model, provider, agent |
 | `rastir_tokens_output_total` | Counter | service, env, model, provider, agent |
-| `rastir_tool_calls_total` | Counter | service, env, tool_name, agent |
+| `rastir_tool_calls_total` | Counter | service, env, tool_name, agent, model, provider |
 | `rastir_retrieval_calls_total` | Counter | service, env, agent |
 | `rastir_errors_total` | Counter | service, env, span_type, error_type |
 | `rastir_duration_seconds` | Histogram | service, env, span_type |
@@ -123,8 +123,8 @@ If unhealthy:
 
 | Metric | Type | Labels |
 |--------|------|--------|
-| `rastir_guardrail_requests_total` | Counter | service, env, provider, guardrail_id, guardrail_version |
-| `rastir_guardrail_violations_total` | Counter | service, env, provider, model, guardrail_id, guardrail_action, guardrail_category |
+| `rastir_guardrail_requests_total` | Counter | service, env, provider, model, agent, guardrail_id, guardrail_version |
+| `rastir_guardrail_violations_total` | Counter | service, env, provider, model, agent, guardrail_id, guardrail_action, guardrail_category |
 
 Guardrail labels are **cardinality-guarded** with bounded enum validation:
 - `guardrail_category` must be one of: `CONTENT_POLICY`, `SENSITIVE_INFORMATION_POLICY`, `WORD_POLICY`, `TOPIC_POLICY`, `CONTEXTUAL_GROUNDING_POLICY`, `DENIED_TOPIC`

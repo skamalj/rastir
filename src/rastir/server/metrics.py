@@ -47,7 +47,7 @@ _DEFAULT_TOKENS_BUCKETS = (10, 50, 100, 250, 500, 1000, 2000, 4000, 8000, 16000,
 _MAX_BUCKET_COUNT = 20
 
 # Canonical span types — anything else is mapped to "system"
-_VALID_SPAN_TYPES = frozenset({"agent", "llm", "tool", "retrieval", "system", "infra"})
+_VALID_SPAN_TYPES = frozenset({"agent", "llm", "tool", "retrieval", "evaluation", "system", "infra"})
 
 # Bounded enums for guardrail labels (defence-in-depth; adapter also validates)
 _VALID_GUARDRAIL_CATEGORIES = frozenset({
@@ -175,7 +175,7 @@ class MetricsRegistry:
         self.tool_calls = Counter(
             "rastir_tool_calls_total",
             "Total tool invocations",
-            ["service", "env", "tool_name", "agent"],
+            ["service", "env", "tool_name", "agent", "model", "provider"],
             registry=self._registry,
         )
 
@@ -189,7 +189,7 @@ class MetricsRegistry:
         self.errors = Counter(
             "rastir_errors_total",
             "Total spans that finished with error status",
-            ["service", "env", "span_type", "error_type"],
+            ["service", "env", "span_type", "error_type", "model", "provider"],
             registry=self._registry,
         )
 
@@ -197,7 +197,7 @@ class MetricsRegistry:
         self.duration = Histogram(
             "rastir_duration_seconds",
             "Span duration in seconds",
-            ["service", "env", "span_type"],
+            ["service", "env", "span_type", "model", "provider"],
             buckets=self._duration_buckets,
             registry=self._registry,
         )
@@ -215,15 +215,15 @@ class MetricsRegistry:
         self.guardrail_requests = Counter(
             "rastir_guardrail_requests_total",
             "Total LLM calls with guardrail configuration enabled",
-            ["service", "env", "provider", "guardrail_id", "guardrail_version"],
+            ["service", "env", "provider", "model", "agent", "guardrail_id", "guardrail_version"],
             registry=self._registry,
         )
 
         self.guardrail_violations = Counter(
             "rastir_guardrail_violations_total",
             "Total guardrail interventions (violations)",
-            ["service", "env", "provider", "model", "guardrail_id",
-             "guardrail_action", "guardrail_category"],
+            ["service", "env", "provider", "model", "agent",
+             "guardrail_id", "guardrail_action", "guardrail_category"],
             registry=self._registry,
         )
 
@@ -302,11 +302,80 @@ class MetricsRegistry:
             registry=self._registry,
         )
 
+        # ---- Redaction counters ----
+        self.redaction_applied = Counter(
+            "rastir_redaction_applied_total",
+            "Total spans where redaction was successfully applied",
+            ["service", "env"],
+            registry=self._registry,
+        )
+
+        self.redaction_failures = Counter(
+            "rastir_redaction_failures_total",
+            "Total redaction failures (span dropped if drop_on_failure=True)",
+            ["service", "env"],
+            registry=self._registry,
+        )
+
         self.ingestion_rate = Gauge(
             "rastir_ingestion_rate",
             "Approximate span ingestion rate (spans per second)",
             registry=self._registry,
         )
+
+        # ---- Evaluation metrics ----
+        _eval_labels = ["service", "env", "model", "provider", "evaluation_type"]
+
+        self.evaluation_runs = Counter(
+            "rastir_evaluation_runs_total",
+            "Total evaluation runs by type",
+            _eval_labels,
+            registry=self._registry,
+        )
+
+        self.evaluation_failures = Counter(
+            "rastir_evaluation_failures_total",
+            "Total evaluation failures (timeout, error, etc.)",
+            _eval_labels,
+            registry=self._registry,
+        )
+
+        self.evaluation_latency = Histogram(
+            "rastir_evaluation_latency_seconds",
+            "Evaluation latency in seconds",
+            _eval_labels,
+            buckets=(0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0),
+            registry=self._registry,
+        )
+
+        self.evaluation_score = Gauge(
+            "rastir_evaluation_score",
+            "Latest evaluation score per type (0.0-1.0)",
+            _eval_labels,
+            registry=self._registry,
+        )
+
+        self.evaluation_queue_size = Gauge(
+            "rastir_evaluation_queue_size",
+            "Current number of tasks in the evaluation queue",
+            registry=self._registry,
+        )
+
+        self.evaluation_queue_utilization = Gauge(
+            "rastir_evaluation_queue_utilization_percent",
+            "Evaluation queue utilization as a percentage of max capacity",
+            registry=self._registry,
+        )
+
+        self.evaluation_dropped = Counter(
+            "rastir_evaluation_dropped_total",
+            "Total evaluation tasks dropped (queue full)",
+            ["service", "env"],
+            registry=self._registry,
+        )
+
+        # Evaluation type cardinality guard
+        self._seen_evaluation_types: set[str] = set()
 
         # Ingestion rate tracking state
         self._rate_spans: int = 0
@@ -351,12 +420,21 @@ class MetricsRegistry:
             status=status,
         ).inc()
 
+        # Extract model/provider early so duration & errors can use them
+        model_label = ""
+        provider_label = ""
+        if span_type == "llm":
+            model_label = self._guard_cardinality(attrs.get("model", "unknown"), self._seen_models, "model")
+            provider_label = self._guard_cardinality(attrs.get("provider", "unknown"), self._seen_providers, "provider")
+
         duration = span.get("duration_ms")
         if duration is not None:
             self.duration.labels(
                 service=self._clip(service),
                 env=self._clip(env),
                 span_type=span_type,
+                model=model_label,
+                provider=provider_label,
             ).observe(duration / 1000.0, exemplar=exemplar)
 
         # -- error counter
@@ -370,19 +448,20 @@ class MetricsRegistry:
                 env=self._clip(env),
                 span_type=span_type,
                 error_type=error_type,
+                model=model_label,
+                provider=provider_label,
             ).inc()
 
         # -- LLM-specific
         if span_type == "llm":
-            model = self._guard_cardinality(attrs.get("model", "unknown"), self._seen_models, "model")
-            provider = self._guard_cardinality(attrs.get("provider", "unknown"), self._seen_providers, "provider")
+            # model_label and provider_label already extracted above
             agent = self._guard_cardinality(attrs.get("agent", ""), self._seen_agents, "agent")
 
             self.llm_calls.labels(
                 service=self._clip(service),
                 env=self._clip(env),
-                model=model,
-                provider=provider,
+                model=model_label,
+                provider=provider_label,
                 agent=agent,
             ).inc(exemplar=exemplar)
 
@@ -393,8 +472,8 @@ class MetricsRegistry:
                 self.tokens_input.labels(
                     service=self._clip(service),
                     env=self._clip(env),
-                    model=model,
-                    provider=provider,
+                    model=model_label,
+                    provider=provider_label,
                     agent=agent,
                 ).inc(tokens_in)
 
@@ -402,8 +481,8 @@ class MetricsRegistry:
                 self.tokens_output.labels(
                     service=self._clip(service),
                     env=self._clip(env),
-                    model=model,
-                    provider=provider,
+                    model=model_label,
+                    provider=provider_label,
                     agent=agent,
                 ).inc(tokens_out)
 
@@ -412,8 +491,8 @@ class MetricsRegistry:
                 self.tokens_per_call.labels(
                     service=self._clip(service),
                     env=self._clip(env),
-                    model=model,
-                    provider=provider,
+                    model=model_label,
+                    provider=provider_label,
                 ).observe(total_tokens)
 
             # -- guardrail metrics (LLM spans with guardrail attrs)
@@ -426,7 +505,9 @@ class MetricsRegistry:
                 self.guardrail_requests.labels(
                     service=self._clip(service),
                     env=self._clip(env),
-                    provider=provider,
+                    provider=provider_label,
+                    model=model_label,
+                    agent=agent,
                     guardrail_id=safe_gr_id,
                     guardrail_version=guardrail_version,
                 ).inc()
@@ -453,8 +534,9 @@ class MetricsRegistry:
                 self.guardrail_violations.labels(
                     service=self._clip(service),
                     env=self._clip(env),
-                    provider=provider,
-                    model=model,
+                    provider=provider_label,
+                    model=model_label,
+                    agent=agent,
                     guardrail_id=safe_gr_id,
                     guardrail_action=safe_action,
                     guardrail_category=guardrail_category,
@@ -468,11 +550,19 @@ class MetricsRegistry:
             agent = self._guard_cardinality(
                 attrs.get("agent", "unknown"), self._seen_agents, "agent"
             )
+            tool_model = self._guard_cardinality(
+                attrs.get("model", ""), self._seen_models, "model"
+            )
+            tool_provider = self._guard_cardinality(
+                attrs.get("provider", ""), self._seen_providers, "provider"
+            )
             self.tool_calls.labels(
                 service=self._clip(service),
                 env=self._clip(env),
                 tool_name=tool_name,
                 agent=agent,
+                model=tool_model,
+                provider=tool_provider,
             ).inc()
 
         # -- retrieval-specific
@@ -503,6 +593,7 @@ class MetricsRegistry:
         queue_size: int,
         queue_maxsize: int,
         trace_store: Optional[object] = None,
+        eval_queue: Optional[object] = None,
     ) -> None:
         """Refresh all operational gauges (called periodically by the worker).
 
@@ -510,6 +601,7 @@ class MetricsRegistry:
             queue_size: Current queue depth.
             queue_maxsize: Maximum queue capacity.
             trace_store: Optional ``TraceStore`` instance for span/trace counts.
+            eval_queue: Optional ``EvaluationQueue`` for eval queue gauges.
         """
         self.queue_size.set(queue_size)
         pct = (queue_size / queue_maxsize * 100.0) if queue_maxsize else 0.0
@@ -525,6 +617,14 @@ class MetricsRegistry:
         if trace_store is not None:
             self.trace_store_size.set(trace_store.span_count)
             self.active_traces.set(trace_store.trace_count)
+
+        # Evaluation queue gauges
+        if eval_queue is not None:
+            eq_size = eval_queue.size()
+            eq_max = eval_queue.maxsize
+            self.evaluation_queue_size.set(eq_size)
+            eq_pct = (eq_size / eq_max * 100.0) if eq_max else 0.0
+            self.evaluation_queue_utilization.set(round(eq_pct, 1))
 
         # Update ingestion rate
         self._refresh_ingestion_rate()

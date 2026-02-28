@@ -1,0 +1,19 @@
+server:
+  host: "0.0.0.0"
+  port: 8080
+
+trace_store:
+  enabled: true
+
+redaction:
+  enabled: true
+
+evaluation:
+  enabled: true
+  queue_size: 10000
+  worker_concurrency: 4
+  judge_model: "gpt-4o-mini"
+  judge_provider: "openai"
+
+logging:
+  level: "INFO"

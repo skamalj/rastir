@@ -28,6 +28,12 @@ _current_span: ContextVar[Optional[SpanRecord]] = ContextVar("_current_span", de
 # only when running under an explicit @agent decorator.
 _current_agent: ContextVar[Optional[str]] = ContextVar("_current_agent", default=None)
 
+# Track model/provider from the most recent @llm call within the current
+# agent context.  This allows @tool spans to inherit the model/provider
+# of the LLM call that decided to invoke them.
+_current_model: ContextVar[Optional[str]] = ContextVar("_current_model", default=None)
+_current_provider: ContextVar[Optional[str]] = ContextVar("_current_provider", default=None)
+
 
 def get_current_span() -> Optional[SpanRecord]:
     """Return the currently active span, or None if outside a traced context."""
@@ -37,6 +43,26 @@ def get_current_span() -> Optional[SpanRecord]:
 def get_current_agent() -> Optional[str]:
     """Return the agent name from the nearest @agent ancestor, or None."""
     return _current_agent.get()
+
+
+def get_current_model() -> Optional[str]:
+    """Return the model from the most recent @llm call, or None."""
+    return _current_model.get()
+
+
+def get_current_provider() -> Optional[str]:
+    """Return the provider from the most recent @llm call, or None."""
+    return _current_provider.get()
+
+
+def set_current_model(model: str) -> None:
+    """Store the model from an @llm call so child @tool spans can inherit it."""
+    _current_model.set(model)
+
+
+def set_current_provider(provider: str) -> None:
+    """Store the provider from an @llm call so child @tool spans can inherit it."""
+    _current_provider.set(provider)
 
 
 def start_span(name: str, span_type: SpanType) -> tuple[SpanRecord, Token]:

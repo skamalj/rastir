@@ -32,6 +32,7 @@ class SpanType(str, Enum):
     METRIC = "metric"
     SYSTEM = "system"
     INFRA = "infra"
+    EVALUATION = "evaluation"
 
 
 @dataclass

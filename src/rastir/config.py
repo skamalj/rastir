@@ -41,6 +41,19 @@ class ExporterConfig:
 
 
 @dataclass(frozen=True)
+class EvaluationConfig:
+    """Client-side evaluation settings.
+
+    Controls whether evaluation metadata (prompt_text, completion_text)
+    is captured and embedded into LLM spans for server-side evaluation.
+    """
+
+    enabled: bool = False
+    capture_prompt: bool = True
+    capture_completion: bool = True
+
+
+@dataclass(frozen=True)
 class GlobalConfig:
     """Immutable global configuration for Rastir.
 
@@ -52,6 +65,7 @@ class GlobalConfig:
     env: str = "development"
     version: Optional[str] = None
     exporter: ExporterConfig = field(default_factory=ExporterConfig)
+    evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
 
     @property
     def global_labels(self) -> dict[str, str]:
@@ -77,6 +91,9 @@ def configure(
     max_retries: int | None = None,
     retry_backoff: float | None = None,
     shutdown_timeout: float | None = None,
+    evaluation_enabled: bool | None = None,
+    capture_prompt: bool | None = None,
+    capture_completion: bool | None = None,
 ) -> GlobalConfig:
     """Initialize Rastir configuration.
 
@@ -97,6 +114,9 @@ def configure(
         max_retries: Max retry attempts on transient failures (default 3).
         retry_backoff: Initial backoff seconds, doubles each retry (default 0.5).
         shutdown_timeout: Max seconds to wait for exporter thread on shutdown (default 5.0).
+        evaluation_enabled: Enable evaluation metadata capture on @llm spans.
+        capture_prompt: Capture prompt_text in LLM spans (default True).
+        capture_completion: Capture completion_text in LLM spans (default True).
 
     Returns:
         The frozen GlobalConfig instance.
@@ -124,6 +144,9 @@ def configure(
         resolved_max_retries = _resolve_int(max_retries, "RASTIR_MAX_RETRIES", 3)
         resolved_retry_backoff = _resolve_float(retry_backoff, "RASTIR_RETRY_BACKOFF", 0.5)
         resolved_shutdown_timeout = _resolve_float(shutdown_timeout, "RASTIR_SHUTDOWN_TIMEOUT", 5.0)
+        resolved_eval_enabled = _resolve_bool(evaluation_enabled, "RASTIR_EVALUATION_ENABLED", False)
+        resolved_capture_prompt = _resolve_bool(capture_prompt, "RASTIR_CAPTURE_PROMPT", True)
+        resolved_capture_completion = _resolve_bool(capture_completion, "RASTIR_CAPTURE_COMPLETION", True)
 
         exporter = ExporterConfig(
             push_url=resolved_push_url,
@@ -136,11 +159,18 @@ def configure(
             shutdown_timeout=resolved_shutdown_timeout,
         )
 
+        evaluation_cfg = EvaluationConfig(
+            enabled=resolved_eval_enabled,
+            capture_prompt=resolved_capture_prompt,
+            capture_completion=resolved_capture_completion,
+        )
+
         _global_config = GlobalConfig(
             service=resolved_service,
             env=resolved_env,
             version=resolved_version,
             exporter=exporter,
+            evaluation=evaluation_cfg,
         )
 
         _initialized = True
@@ -259,4 +289,14 @@ def _resolve_float(explicit: float | None, env_var: str, default: float) -> floa
         except ValueError:
             logger.warning("Invalid float for %s: %r, using default %s", env_var, env_val, default)
             return default
+    return default
+
+
+def _resolve_bool(explicit: bool | None, env_var: str, default: bool) -> bool:
+    """Resolve a boolean config value: explicit > env > default."""
+    if explicit is not None:
+        return explicit
+    env_val = os.environ.get(env_var)
+    if env_val is not None and env_val.strip():
+        return env_val.strip().lower() in ("1", "true", "yes", "on")
     return default

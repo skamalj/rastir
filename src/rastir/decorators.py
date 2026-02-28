@@ -24,8 +24,12 @@ from typing import Any, Callable, Optional, TypeVar, overload
 from rastir.context import (
     end_span,
     get_current_agent,
+    get_current_model,
+    get_current_provider,
     reset_current_agent,
     set_current_agent,
+    set_current_model,
+    set_current_provider,
     start_span,
 )
 from rastir.queue import enqueue_span
@@ -297,6 +301,10 @@ def llm(
     model: str | None = None,
     provider: str | None = None,
     streaming: bool | None = None,
+    evaluate: bool = False,
+    evaluation_types: list[str] | None = None,
+    evaluation_sample_rate: float | None = None,
+    evaluation_timeout_ms: int | None = None,
 ) -> F | Callable[[F], F]:
     """Instrument an LLM call.
 
@@ -311,6 +319,10 @@ def llm(
         provider: Override provider name (adapter auto-detects if not set).
         streaming: Force streaming mode. Auto-detected from return type
             if not set.
+        evaluate: Enable server-side evaluation for this LLM call.
+        evaluation_types: List of evaluation types (e.g. ["toxicity", "hallucination"]).
+        evaluation_sample_rate: Override evaluation sampling rate (0.0-1.0).
+        evaluation_timeout_ms: Timeout for evaluation in milliseconds.
     """
 
     def decorator(fn: F) -> F:
@@ -318,6 +330,10 @@ def llm(
         is_async = asyncio.iscoroutinefunction(fn)
         is_gen = inspect.isgeneratorfunction(fn)
         is_async_gen = inspect.isasyncgenfunction(fn)
+        # Cache signature at decoration time so default kwarg values
+        # (e.g. modelId with a default) are visible to request-phase
+        # enrichment and prompt capture.
+        _fn_sig = inspect.signature(fn)
 
         if is_async_gen or (streaming is True and is_async):
 
@@ -325,17 +341,26 @@ def llm(
             async def async_gen_wrapper(*args: Any, **kwargs: Any) -> Any:
                 span, token = start_span(fn.__name__, SpanType.LLM)
                 _set_llm_base_attrs(span, model, provider)
-                _extract_request_metadata(span, args, kwargs)
+                _set_evaluation_attrs(span, evaluate, evaluation_types, evaluation_sample_rate, evaluation_timeout_ms)
+                bound_kw = _bind_with_defaults(_fn_sig, args, kwargs)
+                _extract_request_metadata(span, args, bound_kw)
+                _capture_prompt_text(span, args, bound_kw)
+                collected_text: list[str] = []
                 try:
                     async for chunk in fn(*args, **kwargs):
                         yield chunk
                         _accumulate_stream_chunk(span, chunk)
+                        # Accumulate streaming text for evaluation
+                        if span.attributes.get("evaluation_enabled"):
+                            _accumulate_stream_text(collected_text, chunk)
                     span.finish(SpanStatus.OK)
                 except BaseException as exc:
                     span.record_error(exc)
                     span.finish(SpanStatus.ERROR)
                     raise
                 finally:
+                    if collected_text and span.attributes.get("evaluation_enabled"):
+                        span.set_attribute("completion_text", "".join(collected_text))
                     _finalize_llm_span(span)
                     end_span(token)
                     enqueue_span(span)
@@ -348,17 +373,25 @@ def llm(
             def gen_wrapper(*args: Any, **kwargs: Any) -> Any:
                 span, token = start_span(fn.__name__, SpanType.LLM)
                 _set_llm_base_attrs(span, model, provider)
-                _extract_request_metadata(span, args, kwargs)
+                _set_evaluation_attrs(span, evaluate, evaluation_types, evaluation_sample_rate, evaluation_timeout_ms)
+                bound_kw = _bind_with_defaults(_fn_sig, args, kwargs)
+                _extract_request_metadata(span, args, bound_kw)
+                _capture_prompt_text(span, args, bound_kw)
+                collected_text: list[str] = []
                 try:
                     for chunk in fn(*args, **kwargs):
                         yield chunk
                         _accumulate_stream_chunk(span, chunk)
+                        if span.attributes.get("evaluation_enabled"):
+                            _accumulate_stream_text(collected_text, chunk)
                     span.finish(SpanStatus.OK)
                 except BaseException as exc:
                     span.record_error(exc)
                     span.finish(SpanStatus.ERROR)
                     raise
                 finally:
+                    if collected_text and span.attributes.get("evaluation_enabled"):
+                        span.set_attribute("completion_text", "".join(collected_text))
                     _finalize_llm_span(span)
                     end_span(token)
                     enqueue_span(span)
@@ -371,10 +404,14 @@ def llm(
             async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
                 span, token = start_span(fn.__name__, SpanType.LLM)
                 _set_llm_base_attrs(span, model, provider)
-                _extract_request_metadata(span, args, kwargs)
+                _set_evaluation_attrs(span, evaluate, evaluation_types, evaluation_sample_rate, evaluation_timeout_ms)
+                bound_kw = _bind_with_defaults(_fn_sig, args, kwargs)
+                _extract_request_metadata(span, args, bound_kw)
+                _capture_prompt_text(span, args, bound_kw)
                 try:
                     result = await fn(*args, **kwargs)
                     _extract_llm_metadata(span, result)
+                    _capture_completion_text(span, result)
                     span.finish(SpanStatus.OK)
                     return result
                 except BaseException as exc:
@@ -394,10 +431,14 @@ def llm(
             def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
                 span, token = start_span(fn.__name__, SpanType.LLM)
                 _set_llm_base_attrs(span, model, provider)
-                _extract_request_metadata(span, args, kwargs)
+                _set_evaluation_attrs(span, evaluate, evaluation_types, evaluation_sample_rate, evaluation_timeout_ms)
+                bound_kw = _bind_with_defaults(_fn_sig, args, kwargs)
+                _extract_request_metadata(span, args, bound_kw)
+                _capture_prompt_text(span, args, bound_kw)
                 try:
                     result = fn(*args, **kwargs)
                     _extract_llm_metadata(span, result)
+                    _capture_completion_text(span, result)
                     span.finish(SpanStatus.OK)
                     return result
                 except BaseException as exc:
@@ -431,6 +472,24 @@ def _set_llm_base_attrs(
     agent_name = get_current_agent()
     if agent_name:
         span.set_attribute("agent", agent_name)
+
+
+def _bind_with_defaults(
+    sig: inspect.Signature, args: tuple, kwargs: dict,
+) -> dict:
+    """Bind *args/*kwargs to the original function signature, applying
+    default values so that parameters like ``modelId`` with a default
+    are visible to request-phase enrichment and prompt capture.
+
+    Falls back to the raw *kwargs* if binding fails (e.g. when the
+    function uses ``*args``/``**kwargs`` itself).
+    """
+    try:
+        bound = sig.bind(*args, **kwargs)
+        bound.apply_defaults()
+        return dict(bound.arguments)
+    except TypeError:
+        return kwargs
 
 
 def _extract_request_metadata(span: SpanRecord, args: tuple, kwargs: dict) -> None:
@@ -530,11 +589,145 @@ def _accumulate_stream_chunk(span: SpanRecord, chunk: Any) -> None:
 
 
 def _finalize_llm_span(span: SpanRecord) -> None:
-    """Ensure model/provider are set before the span is enqueued."""
+    """Ensure model/provider are set before the span is enqueued.
+
+    Also propagates model/provider into context so child @tool spans
+    can inherit them.
+    """
     if "model" not in span.attributes:
         span.set_attribute("model", "unknown")
     if "provider" not in span.attributes:
         span.set_attribute("provider", "unknown")
+    # Propagate to context for @tool inheritance
+    set_current_model(span.attributes["model"])
+    set_current_provider(span.attributes["provider"])
+
+
+def _set_evaluation_attrs(
+    span: SpanRecord,
+    evaluate: bool,
+    evaluation_types: list[str] | None,
+    evaluation_sample_rate: float | None,
+    evaluation_timeout_ms: int | None,
+) -> None:
+    """Embed evaluation configuration into span attributes."""
+    if not evaluate:
+        return
+    span.set_attribute("evaluation_enabled", True)
+    if evaluation_types:
+        span.set_attribute("evaluation_types", evaluation_types)
+    if evaluation_sample_rate is not None:
+        span.set_attribute("evaluation_sample_rate", evaluation_sample_rate)
+    if evaluation_timeout_ms is not None:
+        span.set_attribute("evaluation_timeout_ms", evaluation_timeout_ms)
+
+
+def _capture_prompt_text(span: SpanRecord, args: tuple, kwargs: dict) -> None:
+    """Extract prompt text from function arguments for evaluation.
+
+    Only captures if evaluation is enabled and the global config allows
+    prompt capture.  Supports common patterns: ``messages``, ``prompt``,
+    ``input``.
+    """
+    if not span.attributes.get("evaluation_enabled"):
+        return
+    try:
+        from rastir.config import get_config
+        cfg = get_config()
+        if not cfg.evaluation.capture_prompt:
+            return
+    except Exception:
+        return
+
+    text = None
+    # Try common kwarg names
+    for key in ("messages", "prompt", "input", "contents"):
+        val = kwargs.get(key)
+        if val is not None:
+            if isinstance(val, str):
+                text = val
+            elif isinstance(val, list):
+                # OpenAI-style messages list
+                parts = []
+                for item in val:
+                    if isinstance(item, dict):
+                        content = item.get("content", "")
+                        if isinstance(content, str):
+                            parts.append(content)
+                    elif isinstance(item, str):
+                        parts.append(item)
+                text = "\n".join(parts) if parts else None
+            break
+
+    if text:
+        span.set_attribute("prompt_text", text)
+
+
+def _capture_completion_text(span: SpanRecord, result: Any) -> None:
+    """Extract completion text from an LLM response for evaluation.
+
+    Only captures if evaluation is enabled and the global config allows
+    completion capture.  Supports common response shapes.
+    """
+    if not span.attributes.get("evaluation_enabled"):
+        return
+    try:
+        from rastir.config import get_config
+        cfg = get_config()
+        if not cfg.evaluation.capture_completion:
+            return
+    except Exception:
+        return
+
+    text = None
+    if isinstance(result, str):
+        text = result
+    elif hasattr(result, "choices") and result.choices:
+        # OpenAI-style ChatCompletion
+        choice = result.choices[0]
+        if hasattr(choice, "message") and hasattr(choice.message, "content"):
+            text = choice.message.content
+        elif hasattr(choice, "text"):
+            text = choice.text
+    elif hasattr(result, "content"):
+        # Anthropic-style
+        content = result.content
+        if isinstance(content, str):
+            text = content
+        elif isinstance(content, list) and content:
+            first = content[0]
+            if hasattr(first, "text"):
+                text = first.text
+            elif isinstance(first, str):
+                text = first
+    elif hasattr(result, "text"):
+        text = result.text
+
+    if text:
+        span.set_attribute("completion_text", text)
+
+
+def _accumulate_stream_text(collected: list[str], chunk: Any) -> None:
+    """Extract text content from a streaming chunk for evaluation."""
+    try:
+        # OpenAI-style streaming
+        if hasattr(chunk, "choices") and chunk.choices:
+            delta = getattr(chunk.choices[0], "delta", None)
+            if delta and hasattr(delta, "content") and delta.content:
+                collected.append(delta.content)
+                return
+        # Anthropic-style streaming
+        if hasattr(chunk, "type"):
+            if chunk.type == "content_block_delta" and hasattr(chunk, "delta"):
+                text = getattr(chunk.delta, "text", None)
+                if text:
+                    collected.append(text)
+                    return
+        # String chunks
+        if isinstance(chunk, str):
+            collected.append(chunk)
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -579,6 +772,13 @@ def tool(
                 agent_name = get_current_agent()
                 if agent_name:
                     span.set_attribute("agent", agent_name)
+                # Inherit model/provider from most recent @llm call
+                ctx_model = get_current_model()
+                if ctx_model:
+                    span.set_attribute("model", ctx_model)
+                ctx_provider = get_current_provider()
+                if ctx_provider:
+                    span.set_attribute("provider", ctx_provider)
                 try:
                     result = await fn(*args, **kwargs)
                     span.finish(SpanStatus.OK)
@@ -602,6 +802,13 @@ def tool(
                 agent_name = get_current_agent()
                 if agent_name:
                     span.set_attribute("agent", agent_name)
+                # Inherit model/provider from most recent @llm call
+                ctx_model = get_current_model()
+                if ctx_model:
+                    span.set_attribute("model", ctx_model)
+                ctx_provider = get_current_provider()
+                if ctx_provider:
+                    span.set_attribute("provider", ctx_provider)
                 try:
                     result = fn(*args, **kwargs)
                     span.finish(SpanStatus.OK)

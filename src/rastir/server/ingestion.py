@@ -15,8 +15,10 @@ import logging
 import random
 from typing import Any, Optional
 
-from rastir.server.config import BackpressureSection, SamplingSection
+from rastir.server.config import BackpressureSection, EvaluationSection, SamplingSection
+from rastir.server.evaluation_queue import EvaluationQueue, EvaluationTask
 from rastir.server.metrics import MetricsRegistry
+from rastir.server.redaction import Redactor, redact_span
 from rastir.server.trace_store import TraceStore
 
 logger = logging.getLogger("rastir.server")
@@ -37,6 +39,10 @@ class IngestionWorker:
         otlp_forwarder: Any = None,
         sampling: Optional[SamplingSection] = None,
         backpressure: Optional[BackpressureSection] = None,
+        redactor: Optional[Redactor] = None,
+        drop_on_redaction_failure: bool = True,
+        evaluation_queue: Optional[EvaluationQueue] = None,
+        evaluation_config: Optional[EvaluationSection] = None,
     ) -> None:
         self._metrics = metrics
         self._trace_store = trace_store
@@ -53,6 +59,14 @@ class IngestionWorker:
         # Backpressure config
         self._bp = backpressure or BackpressureSection()
         self._soft_warned = False  # avoid log spam
+
+        # Redaction config
+        self._redactor = redactor
+        self._drop_on_redaction_failure = drop_on_redaction_failure
+
+        # Evaluation config
+        self._eval_queue = evaluation_queue
+        self._eval_config = evaluation_config or EvaluationSection()
 
     # ----- lifecycle -------------------------------------------------------
 
@@ -202,12 +216,32 @@ class IngestionWorker:
             else:
                 self._metrics.spans_dropped_by_sampling.labels(service=service, env=env).inc()
 
-            # 3. Trace store (if enabled and sampled in)
+            # 3. Redaction (if sampled and redactor configured)
+            if store and self._redactor is not None:
+                attrs = span.get("attributes", {})
+                if attrs.get("prompt_text") or attrs.get("completion_text"):
+                    ok = redact_span(span, self._redactor, service, env)
+                    if ok:
+                        self._metrics.redaction_applied.labels(
+                            service=service, env=env,
+                        ).inc()
+                    else:
+                        self._metrics.redaction_failures.labels(
+                            service=service, env=env,
+                        ).inc()
+                        if self._drop_on_redaction_failure:
+                            logger.warning(
+                                "Dropping span %s due to redaction failure",
+                                span.get("span_id", "?"),
+                            )
+                            continue  # DROP — raw text never stored
+
+            # 4. Trace store (if enabled and sampled in)
             trace_id = span.get("trace_id")
             if store and self._trace_store is not None and trace_id:
                 self._trace_store.insert(trace_id, [span])
 
-            # 4. OTLP forward (if configured and sampled in)
+            # 5. OTLP forward (if configured and sampled in)
             if store and self._otlp is not None:
                 try:
                     self._otlp.export_span(span, service=service, env=env, version=version)
@@ -216,6 +250,67 @@ class IngestionWorker:
                     self._metrics.export_failures.labels(
                         service=service, env=env,
                     ).inc()
+
+            # 6. Evaluation enqueue (if evaluation enabled + sampled)
+            if store and self._eval_queue is not None:
+                self._maybe_enqueue_evaluation(span, service, env)
+
+    # ----- evaluation enqueue ----------------------------------------------
+
+    def _maybe_enqueue_evaluation(
+        self, span: dict, service: str, env: str,
+    ) -> None:
+        """Conditionally enqueue a span for async evaluation.
+
+        Only LLM spans with ``evaluation_enabled=True`` are considered.
+        Evaluation sampling (per-span or global default) is applied here
+        before enqueueing to avoid wasting queue capacity.
+        """
+        attrs = span.get("attributes", {})
+        if not attrs.get("evaluation_enabled"):
+            return
+
+        # Evaluation sampling decision
+        sample_rate = attrs.get(
+            "evaluation_sample_rate",
+            self._eval_config.default_sample_rate,
+        )
+        if sample_rate < 1.0 and random.random() >= sample_rate:
+            return
+
+        # Build evaluation task from the (already-redacted) span
+        eval_types = attrs.get("evaluation_types", [])
+        if not eval_types:
+            return
+
+        timeout_ms = attrs.get(
+            "evaluation_timeout_ms",
+            self._eval_config.default_timeout_ms,
+        )
+
+        task = EvaluationTask(
+            trace_id=span.get("trace_id", ""),
+            parent_span_id=span.get("span_id", ""),
+            service=service,
+            env=env,
+            model=attrs.get("model", "unknown"),
+            provider=attrs.get("provider", "unknown"),
+            agent=attrs.get("agent"),
+            prompt_text=attrs.get("prompt_text"),
+            completion_text=attrs.get("completion_text"),
+            evaluation_types=list(eval_types),
+            timeout_ms=timeout_ms,
+        )
+
+        accepted = self._eval_queue.put(task)
+        if not accepted:
+            try:
+                self._metrics.evaluation_dropped.labels(
+                    service=service, env=env,
+                ).inc()
+            except AttributeError:
+                pass  # metrics not yet defined
+            logger.debug("Evaluation task dropped (queue full)")
 
     # ----- sampling --------------------------------------------------------
 
@@ -260,4 +355,5 @@ class IngestionWorker:
             queue_size=self._queue.qsize(),
             queue_maxsize=self._queue.maxsize,
             trace_store=self._trace_store,
+            eval_queue=self._eval_queue,
         )

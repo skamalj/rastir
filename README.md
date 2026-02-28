@@ -277,7 +277,7 @@ Raw exception types are normalised into six fixed categories to prevent label ex
 | `rastir_tokens_output_total` | Counter | Output token consumption |
 | `rastir_duration_seconds` | Histogram | Latency with P50/P95/P99 + exemplars |
 | `rastir_tokens_per_call` | Histogram | Token distribution per LLM call |
-| `rastir_tool_calls_total` | Counter | Tool invocations by name and agent |
+| `rastir_tool_calls_total` | Counter | Tool invocations by name, agent, model, provider |
 | `rastir_retrieval_calls_total` | Counter | Retrieval operations by agent |
 | `rastir_errors_total` | Counter | Failures by span type and normalised error type |
 | `rastir_guardrail_requests_total` | Counter | LLM calls with guardrail config |
@@ -367,6 +367,22 @@ pytest                            # 232+ unit/mock tests, 36+ integration tests
 ruff check src/ tests/            # linting
 ```
 
+## Grafana Dashboards
+
+Rastir ships five pre-built Grafana dashboards in `grafana/dashboards/`:
+
+| Dashboard | Description |
+|-----------|-------------|
+| **LLM Performance** | Token usage, latency percentiles, throughput by model, error tracking |
+| **Agent & Tool** | Agent execution patterns, tool calls with model/provider context |
+| **Evaluation** | Eval runs/success/failures, scores by type and model, queue health |
+| **Guardrail** | Guardrail violations by category and model, request volumes |
+| **System Health** | Ingestion rate, queue pressure, memory, backpressure, OTLP export health |
+
+All dashboards include template variables for filtering by service, environment, model, provider, and agent. Import via Grafana UI or API.
+
+Full dashboard documentation → [Dashboards](https://skamalj.github.io/rastir/dashboards)
+
 ## Documentation
 
 Full documentation at **[skamalj.github.io/rastir](https://skamalj.github.io/rastir/)**:
@@ -376,6 +392,8 @@ Full documentation at **[skamalj.github.io/rastir](https://skamalj.github.io/ras
 - [Adapters](https://skamalj.github.io/rastir/adapters) — 15 adapters with two-phase enrichment
 - [Server](https://skamalj.github.io/rastir/server) — Collector, metrics, histograms, exemplars, OTLP, sampling
 - [Configuration](https://skamalj.github.io/rastir/configuration) — Client & server config reference
+- [Dashboards](https://skamalj.github.io/rastir/dashboards) — Five pre-built Grafana dashboards
+- [Environment Variables](https://skamalj.github.io/rastir/environment-variables) — Complete env var reference
 - [Contributing Adapters](https://skamalj.github.io/rastir/contributing-adapters) — Write your own adapter
 
 ## License

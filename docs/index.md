@@ -94,4 +94,6 @@ That's it. Rastir automatically:
 - [Adapters](adapters.md) — 15 adapters with two-phase enrichment
 - [Server](server.md) — Collector, metrics, guardrails, error normalisation, sampling
 - [Configuration](configuration.md) — Client and server configuration reference
+- [Dashboards](dashboards.md) — Five pre-built Grafana dashboards for LLM observability
+- [Environment Variables](environment-variables.md) — Complete reference of all environment variables
 - [Contributing Adapters](contributing-adapters.md) — How to write and register custom adapters

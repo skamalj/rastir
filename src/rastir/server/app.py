@@ -23,6 +23,7 @@ Or programmatically::
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import Any, Optional
@@ -31,13 +32,76 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import PlainTextResponse, Response
 
 from rastir.server.config import ServerConfig, load_config, validate_config
+from rastir.server.evaluation_queue import InMemoryEvaluationQueue
+from rastir.server.evaluation_worker import EvaluationWorkerPool
+from rastir.server.evaluators.builtins import (
+    HallucinationEvaluator,
+    JudgeConfig,
+    ToxicityEvaluator,
+)
+from rastir.server.evaluators.registry import EvaluatorRegistry
 from rastir.server.ingestion import IngestionWorker
 from rastir.server.metrics import MetricsRegistry
 from rastir.server.rate_limiter import RateLimiter
+from rastir.server.redaction import NoOpRedactor, RegexRedactor
 from rastir.server.structured_logging import configure_logging
 from rastir.server.trace_store import TraceStore
 
 logger = logging.getLogger("rastir.server")
+
+
+# ---------------------------------------------------------------------------
+# Helper factories
+# ---------------------------------------------------------------------------
+
+
+def _build_redactor(cfg: ServerConfig):
+    """Build the redactor from server config."""
+    if not cfg.redaction.enabled:
+        return NoOpRedactor()
+
+    custom = list(cfg.redaction.custom_patterns) if cfg.redaction.custom_patterns else None
+    return RegexRedactor(
+        extra_patterns=custom,
+        max_text_length=cfg.redaction.max_text_length,
+    )
+
+
+def _build_evaluation_components(cfg: ServerConfig):
+    """Build evaluation queue and evaluator registry.
+
+    Returns ``(eval_queue, eval_registry)``; both may be ``None``
+    when evaluation is disabled.
+    """
+    if not cfg.evaluation.enabled:
+        return None, None
+
+    eval_queue = InMemoryEvaluationQueue(
+        max_size=cfg.evaluation.queue_size,
+        drop_policy=cfg.evaluation.drop_policy,
+    )
+
+    eval_registry = EvaluatorRegistry(
+        max_types=cfg.evaluation.max_evaluation_types,
+    )
+
+    # Register built-in evaluators
+    judge_cfg = JudgeConfig(
+        model=cfg.evaluation.judge_model,
+        provider=cfg.evaluation.judge_provider,
+        api_key=cfg.evaluation.judge_api_key,
+        base_url=cfg.evaluation.judge_base_url,
+    )
+    eval_registry.register(ToxicityEvaluator(config=judge_cfg))
+    eval_registry.register(HallucinationEvaluator(config=judge_cfg))
+
+    logger.info(
+        "Evaluation pipeline enabled: queue_size=%d, evaluators=%s",
+        cfg.evaluation.queue_size,
+        eval_registry.list_types(),
+    )
+
+    return eval_queue, eval_registry
 
 
 # ---------------------------------------------------------------------------
@@ -85,6 +149,9 @@ def _build_components(cfg: ServerConfig) -> dict[str, Any]:
                 "Install with: pip install rastir[server]"
             )
 
+    # Evaluation queue + registry (must exist before IngestionWorker)
+    eval_queue, eval_registry = _build_evaluation_components(cfg)
+
     worker = IngestionWorker(
         metrics=metrics,
         trace_store=trace_store,
@@ -92,7 +159,22 @@ def _build_components(cfg: ServerConfig) -> dict[str, Any]:
         otlp_forwarder=otlp_forwarder,
         sampling=cfg.sampling,
         backpressure=cfg.backpressure,
+        redactor=_build_redactor(cfg),
+        drop_on_redaction_failure=cfg.redaction.drop_on_failure,
+        evaluation_queue=eval_queue,
+        evaluation_config=cfg.evaluation,
     )
+
+    # Evaluation worker pool
+    eval_worker: Optional[EvaluationWorkerPool] = None
+    if cfg.evaluation.enabled and eval_queue is not None:
+        eval_worker = EvaluationWorkerPool(
+            evaluation_queue=eval_queue,
+            registry=eval_registry,
+            metrics=metrics,
+            concurrency=cfg.evaluation.worker_concurrency,
+            emit_fn=worker.enqueue,
+        )
 
     rate_limiter: Optional[RateLimiter] = None
     if cfg.rate_limit.enabled:
@@ -109,6 +191,9 @@ def _build_components(cfg: ServerConfig) -> dict[str, Any]:
         "otlp_forwarder": otlp_forwarder,
         "worker": worker,
         "rate_limiter": rate_limiter,
+        "eval_queue": eval_queue,
+        "eval_registry": eval_registry,
+        "eval_worker": eval_worker,
     }
 
 
@@ -122,6 +207,12 @@ async def lifespan(app: FastAPI):
     """Start and stop background components with graceful shutdown."""
     worker: IngestionWorker = app.state.worker
     worker.start()
+
+    # Start evaluation worker pool (if enabled)
+    eval_worker: Optional[EvaluationWorkerPool] = app.state.eval_worker
+    if eval_worker is not None:
+        eval_worker.start()
+
     cfg: ServerConfig = app.state.config
     logger.info(
         "Rastir server started on %s:%d",
@@ -133,9 +224,15 @@ async def lifespan(app: FastAPI):
     grace = cfg.shutdown.grace_period_seconds
     logger.info("Shutting down (grace_period=%ds, drain_queue=%s)", grace, cfg.shutdown.drain_queue)
 
+    # Stop evaluation workers first (they emit spans back to ingestion)
+    if eval_worker is not None:
+        try:
+            await asyncio.wait_for(eval_worker.stop(), timeout=grace // 2 or grace)
+        except asyncio.TimeoutError:
+            logger.warning("Evaluation worker shutdown timed out")
+
     if cfg.shutdown.drain_queue:
         # Allow worker to drain remaining items within the grace period
-        import asyncio
         try:
             await asyncio.wait_for(worker.stop(), timeout=grace)
         except asyncio.TimeoutError:
@@ -258,6 +355,7 @@ def _register_routes(app: FastAPI, cfg: ServerConfig) -> None:
             queue_size=worker.queue_size,
             queue_maxsize=worker.queue_maxsize,
             trace_store=trace_store,
+            eval_queue=request.app.state.eval_queue,
         )
         data, content_type = registry.generate()
         return Response(content=data, media_type=content_type)

@@ -149,6 +149,35 @@ class LoggingSection:
 
 
 @dataclass(frozen=True)
+class RedactionSection:
+    """Server-side redaction settings.
+
+    Redaction applies to ``prompt_text`` and ``completion_text`` attributes
+    after sampling, before store/export/evaluation enqueue.
+    """
+    enabled: bool = False
+    max_text_length: int = 50_000
+    custom_patterns: tuple[tuple[str, str], ...] = ()  # (regex, replacement) pairs
+    drop_on_failure: bool = True  # drop span if redaction fails (security-first)
+
+
+@dataclass(frozen=True)
+class EvaluationSection:
+    """Server-side async evaluation settings."""
+    enabled: bool = False
+    queue_size: int = 10_000
+    drop_policy: str = "drop_new"  # "drop_new" | "drop_oldest"
+    worker_concurrency: int = 4
+    default_sample_rate: float = 1.0
+    default_timeout_ms: int = 30_000
+    max_evaluation_types: int = 20
+    judge_model: str = "gpt-4o-mini"
+    judge_provider: str = "openai"
+    judge_api_key: Optional[str] = None
+    judge_base_url: Optional[str] = None
+
+
+@dataclass(frozen=True)
 class ServerConfig:
     """Top-level server configuration."""
     server: ServerSection = field(default_factory=ServerSection)
@@ -163,6 +192,8 @@ class ServerConfig:
     exemplars: ExemplarSection = field(default_factory=ExemplarSection)
     shutdown: ShutdownSection = field(default_factory=ShutdownSection)
     logging: LoggingSection = field(default_factory=LoggingSection)
+    redaction: RedactionSection = field(default_factory=RedactionSection)
+    evaluation: EvaluationSection = field(default_factory=EvaluationSection)
 
 
 # ---------------------------------------------------------------------------
@@ -358,6 +389,36 @@ def load_config(config_path: Optional[str] = None) -> ServerConfig:
         level=_get("logging", "level", "INFO"),
     )
 
+    # -- redaction --
+    custom_patterns_raw = yaml_data.get("redaction", {}).get("custom_patterns", [])
+    custom_patterns: list[tuple[str, str]] = []
+    if isinstance(custom_patterns_raw, list):
+        for item in custom_patterns_raw:
+            if isinstance(item, dict) and "pattern" in item and "replacement" in item:
+                custom_patterns.append((item["pattern"], item["replacement"]))
+
+    redaction = RedactionSection(
+        enabled=_get("redaction", "enabled", False, as_type=bool),
+        max_text_length=_get("redaction", "max_text_length", 50_000, as_type=int),
+        custom_patterns=tuple(custom_patterns),
+        drop_on_failure=_get("redaction", "drop_on_failure", True, as_type=bool),
+    )
+
+    # -- evaluation --
+    eval_section = EvaluationSection(
+        enabled=_get("evaluation", "enabled", False, as_type=bool),
+        queue_size=_get("evaluation", "queue_size", 10_000, as_type=int),
+        drop_policy=_get("evaluation", "drop_policy", "drop_new"),
+        worker_concurrency=_get("evaluation", "worker_concurrency", 4, as_type=int),
+        default_sample_rate=_get_float("evaluation", "default_sample_rate", 1.0),
+        default_timeout_ms=_get("evaluation", "default_timeout_ms", 30_000, as_type=int),
+        max_evaluation_types=_get("evaluation", "max_evaluation_types", 20, as_type=int),
+        judge_model=_get("evaluation", "judge_model", "gpt-4o-mini"),
+        judge_provider=_get("evaluation", "judge_provider", "openai"),
+        judge_api_key=_get("evaluation", "judge_api_key", None),
+        judge_base_url=_get("evaluation", "judge_base_url", None),
+    )
+
     return ServerConfig(
         server=server,
         limits=limits,
@@ -371,6 +432,8 @@ def load_config(config_path: Optional[str] = None) -> ServerConfig:
         exemplars=exemplars,
         shutdown=shutdown,
         logging=logging_cfg,
+        redaction=redaction,
+        evaluation=eval_section,
     )
 
 
@@ -522,6 +585,47 @@ def validate_config(cfg: ServerConfig) -> None:
     if cfg.logging.level.upper() not in valid_levels:
         errors.append(
             f"logging.level must be one of {valid_levels} (got {cfg.logging.level!r})"
+        )
+
+    # Redaction validation
+    if cfg.redaction.max_text_length <= 0:
+        errors.append(
+            f"redaction.max_text_length must be positive (got {cfg.redaction.max_text_length})"
+        )
+
+    # Evaluation validation
+    if cfg.evaluation.queue_size <= 0:
+        errors.append(
+            f"evaluation.queue_size must be positive (got {cfg.evaluation.queue_size})"
+        )
+    if cfg.evaluation.queue_size > _MAX_QUEUE_SIZE:
+        errors.append(
+            f"evaluation.queue_size={cfg.evaluation.queue_size} exceeds safe limit ({_MAX_QUEUE_SIZE})"
+        )
+    if cfg.evaluation.drop_policy not in ("drop_new", "drop_oldest"):
+        errors.append(
+            f"evaluation.drop_policy must be 'drop_new' or 'drop_oldest' "
+            f"(got {cfg.evaluation.drop_policy!r})"
+        )
+    if cfg.evaluation.worker_concurrency <= 0:
+        errors.append(
+            f"evaluation.worker_concurrency must be positive "
+            f"(got {cfg.evaluation.worker_concurrency})"
+        )
+    if cfg.evaluation.default_sample_rate < 0.0 or cfg.evaluation.default_sample_rate > 1.0:
+        errors.append(
+            f"evaluation.default_sample_rate must be 0.0-1.0 "
+            f"(got {cfg.evaluation.default_sample_rate})"
+        )
+    if cfg.evaluation.default_timeout_ms <= 0:
+        errors.append(
+            f"evaluation.default_timeout_ms must be positive "
+            f"(got {cfg.evaluation.default_timeout_ms})"
+        )
+    if cfg.evaluation.max_evaluation_types <= 0:
+        errors.append(
+            f"evaluation.max_evaluation_types must be positive "
+            f"(got {cfg.evaluation.max_evaluation_types})"
         )
 
     if errors:
