@@ -44,10 +44,17 @@ Your Python App                          Rastir Collector
 | Provider | Auto-detection | Tokens | Model | Streaming |
 |----------|:-:|:-:|:-:|:-:|
 | **OpenAI** | ✅ | ✅ | ✅ | ✅ |
+| **Azure OpenAI** | ✅ | ✅ | ✅ | ✅ |
 | **Anthropic** | ✅ | ✅ | ✅ | ✅ |
 | **AWS Bedrock** | ✅ | ✅ | ✅ | ✅ |
+| **Google Gemini** | ✅ | ✅ | ✅ | ✅ |
+| **Cohere** | ✅ | ✅ | ✅ | — |
+| **Mistral** | ✅ | ✅ | ✅ | ✅ |
+| **Groq** | ✅ | ✅ | ✅ | ✅ |
 | **LangChain** | ✅ | ✅ | ✅ | ✅ |
 | **LangGraph** | ✅ | ✅ | ✅ | ✅ |
+| **LlamaIndex** | ✅ | ✅ | ✅ | ✅ |
+| **CrewAI** | ✅ | ✅ | — | — |
 
 Adapters are priority-ordered and composable: LangGraph → LangChain → OpenAI resolution happens automatically.
 
@@ -160,6 +167,50 @@ def run(query: str):
     # Extracts: model, tokens, tool calls, message counts — zero config
 ```
 
+## Generic Object Wrapper
+
+Instrument any object without decorator access using `rastir.wrap()`:
+
+```python
+import rastir
+
+# Wrap a Redis client, vector store, or any infrastructure component
+wrapped_cache = rastir.wrap(redis_client, name="redis")
+wrapped_cache.get("key")       # creates INFRA span: "redis.get"
+wrapped_cache.set("key", val)  # creates INFRA span: "redis.set"
+
+# Wrap with filtering
+wrapped_db = rastir.wrap(db_client, name="postgres",
+                         include=["query", "execute"],
+                         span_type="tool")
+```
+
+- Supports sync + async methods
+- Preserves `isinstance()` behaviour
+- Prevents double-wrapping
+- Configurable `span_type`: infra, tool, llm, trace, agent, retrieval
+
+## Bedrock Guardrail Observability
+
+Rastir automatically detects and tracks AWS Bedrock guardrails:
+
+```python
+@llm
+def call_bedrock(prompt: str):
+    return bedrock.converse(
+        modelId="anthropic.claude-3-sonnet",
+        messages=[...],
+        guardrailIdentifier="my-guardrail",  # auto-detected
+        guardrailVersion="1",
+    )
+```
+
+Produces metrics:
+```
+rastir_guardrail_requests_total{guardrail_id="my-guardrail",provider="bedrock"} 42
+rastir_guardrail_violations_total{guardrail_action="GUARDRAIL_INTERVENED",model="claude-3"} 3
+```
+
 ## Key Metrics at a Glance
 
 | Metric | Type | What it tracks |
@@ -170,6 +221,8 @@ def run(query: str):
 | `rastir_duration_seconds` | Histogram | Latency with P50/P95/P99 + exemplars |
 | `rastir_tool_calls_total` | Counter | Tool invocations by name and agent |
 | `rastir_errors_total` | Counter | Failures by span type and error type |
+| `rastir_guardrail_requests_total` | Counter | LLM calls with guardrail config |
+| `rastir_guardrail_violations_total` | Counter | Guardrail interventions by action/category |
 | `rastir_queue_size` | Gauge | Collector backpressure indicator |
 
 Full metrics reference → [Server Documentation](https://skamalj.github.io/rastir/server)
@@ -212,14 +265,15 @@ Full configuration reference → [Configuration Documentation](https://skamalj.g
 
 ```
 src/rastir/
-├── __init__.py          # Public API: configure, trace, agent, llm, tool, retrieval
+├── __init__.py          # Public API: configure, trace, agent, llm, tool, retrieval, wrap
 ├── config.py            # GlobalConfig, configure()
 ├── context.py           # Span & agent context (ContextVar-based)
 ├── decorators.py        # All decorator implementations
+├── wrapper.py           # rastir.wrap() generic object wrapper
 ├── spans.py             # SpanRecord data model
 ├── queue.py             # Bounded in-memory span queue
 ├── transport.py         # TelemetryClient + BackgroundExporter
-├── adapters/            # Auto-detection for OpenAI, Anthropic, Bedrock, LangChain, LangGraph
+├── adapters/            # 15 adapters: OpenAI, Azure, Anthropic, Bedrock, Gemini, Cohere, Mistral, Groq, LangChain, LangGraph, LlamaIndex, CrewAI, ...
 └── server/              # FastAPI collector with Prometheus, trace store, OTLP export
 ```
 
@@ -227,7 +281,7 @@ src/rastir/
 
 ```bash
 pip install -e ".[all]"           # editable install with all extras
-pytest                            # 337 tests (unit + integration)
+pytest                            # 411 tests (unit + integration)
 ruff check src/ tests/            # linting
 ```
 
@@ -237,7 +291,7 @@ Full documentation at **[skamalj.github.io/rastir](https://skamalj.github.io/ras
 
 - [Getting Started](https://skamalj.github.io/rastir/getting-started) — Installation, quick start, nested spans
 - [Decorators](https://skamalj.github.io/rastir/decorators) — `@trace`, `@agent`, `@llm`, `@tool`, `@retrieval`, `@metric`
-- [Adapters](https://skamalj.github.io/rastir/adapters) — OpenAI, Anthropic, Bedrock, LangChain, LangGraph
+- [Adapters](https://skamalj.github.io/rastir/adapters) — OpenAI, Azure, Anthropic, Bedrock, Gemini, Cohere, Mistral, Groq, LangChain, LangGraph, LlamaIndex, CrewAI
 - [Server](https://skamalj.github.io/rastir/server) — Collector, metrics, histograms, exemplars, OTLP
 - [Configuration](https://skamalj.github.io/rastir/configuration) — Client & server config reference
 - [Contributing Adapters](https://skamalj.github.io/rastir/contributing-adapters) — Write your own adapter
