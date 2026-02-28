@@ -164,6 +164,36 @@ def resolve_request(args: tuple, kwargs: dict) -> Optional[RequestMetadata]:
                 return adapter.extract_request_metadata(args, kwargs)
             except Exception:
                 logger.debug("Request adapter %s failed", adapter.name, exc_info=True)
+
+    # Generic fallback: scan kwargs for common model parameter names.
+    # This captures model metadata even when no provider adapter matches,
+    # ensuring model survives on the span even if the call fails.
+    meta = _scan_common_model_kwargs(kwargs)
+    if meta:
+        return meta
+
+    return None
+
+
+# Common parameter names for model across SDKs / user functions.
+_COMMON_MODEL_KWARGS = ("model", "model_id", "modelId", "model_name")
+
+
+def _scan_common_model_kwargs(kwargs: dict) -> Optional[RequestMetadata]:
+    """Fallback: extract model from common kwarg names.
+
+    When no adapter's can_handle_request() matched, look for well-known
+    parameter names (model, model_id, modelId, model_name).  This
+    ensures request-phase metadata is captured even for unknown
+    providers, improving resilience when the API call fails.
+    """
+    for key in _COMMON_MODEL_KWARGS:
+        value = kwargs.get(key)
+        if value and isinstance(value, str):
+            return RequestMetadata(
+                span_attributes={"model": value},
+                extra_attributes={},
+            )
     return None
 
 

@@ -457,18 +457,32 @@ def _extract_request_metadata(span: SpanRecord, args: tuple, kwargs: dict) -> No
 def _extract_llm_metadata(span: SpanRecord, result: Any) -> None:
     """Run adapter resolution on a non-streaming LLM result.
 
-    Adapters are imported lazily to avoid circular dependencies.
-    If no adapter is registered yet, falls back to unknown.
+    Two-phase enrichment strategy:
+    - Request phase already set model/provider from args/kwargs.
+    - Response phase now fills in or upgrades those values.
+    - Response wins when it returns a concrete (non-unknown) value,
+      otherwise the request-phase value is preserved.  This ensures
+      metadata survives even if the API call fails before producing
+      a response.
     """
     try:
         from rastir.adapters.registry import resolve
         adapter_result = resolve(result)
         if adapter_result:
-            # Only set if not already overridden by decorator params
-            if "model" not in span.attributes:
-                span.set_attribute("model", adapter_result.model or "unknown")
-            if "provider" not in span.attributes:
-                span.set_attribute("provider", adapter_result.provider or "unknown")
+            # Response-phase model/provider: upgrade if concrete,
+            # preserve request-phase value otherwise.
+            resp_model = adapter_result.model
+            if resp_model and resp_model != "unknown":
+                span.set_attribute("model", resp_model)
+            elif "model" not in span.attributes:
+                span.set_attribute("model", "unknown")
+
+            resp_provider = adapter_result.provider
+            if resp_provider and resp_provider != "unknown":
+                span.set_attribute("provider", resp_provider)
+            elif "provider" not in span.attributes:
+                span.set_attribute("provider", "unknown")
+
             if adapter_result.tokens_input is not None:
                 span.set_attribute("tokens_input", adapter_result.tokens_input)
             if adapter_result.tokens_output is not None:

@@ -379,8 +379,10 @@ class TestAnthropicIntegration:
 
 # =====================================================================
 # 3. AWS Bedrock — Converse API, streaming
-#    Note: Bedrock Converse response does NOT contain modelId,
-#    so adapter returns provider="bedrock", model="unknown".
+#    Bedrock Converse response does NOT contain modelId, so
+#    resolve() alone returns provider="bedrock", model="unknown".
+#    With two-phase enrichment, the @llm decorator captures
+#    model/provider from the request-phase modelId kwarg.
 # =====================================================================
 
 @skip_no_aws
@@ -400,7 +402,7 @@ class TestBedrockIntegration:
         _print_ar("Bedrock Haiku", ar)
 
         assert ar is not None
-        # Bedrock Converse response doesn't include modelId in response body
+        # resolve() only sees response — Bedrock response has no modelId
         assert ar.provider == "bedrock"
         assert ar.tokens_input is not None and ar.tokens_input > 0
         assert ar.tokens_output is not None and ar.tokens_output > 0
@@ -474,8 +476,42 @@ class TestBedrockIntegration:
             print(f"  Attrs: {span['attributes']}")
             assert span["span_type"] == "llm"
             assert span["status"] == "OK"
-            # Bedrock response doesn't include modelId
+            # modelId is hardcoded inside fn body, not in decorated fn kwargs,
+            # so request-phase enrichment doesn't see it.
             assert span["attributes"].get("provider") == "bedrock"
+            assert span["attributes"].get("tokens_input") > 0
+        finally:
+            _restore_enqueue(originals)
+
+    def test_two_phase_enrichment_decorator(self):
+        """Two-phase enrichment: modelId as kwarg flows through decorator."""
+        import boto3
+
+        captured, originals = _capture_spans()
+        try:
+            @llm
+            def call_bedrock(prompt: str, *, modelId: str = "anthropic.claude-3-haiku-20240307-v1:0") -> dict:
+                client = boto3.client("bedrock-runtime", region_name="us-east-1")
+                return client.converse(
+                    modelId=modelId,
+                    messages=[{"role": "user", "content": [{"text": prompt}]}],
+                    inferenceConfig={"maxTokens": 10},
+                )
+
+            result = call_bedrock("Say hello.")
+
+            assert len(captured) >= 1
+            span = captured[0]
+            print(f"\n  Span: type={span['span_type']}, status={span['status']}, "
+                  f"dur={span['duration_seconds']*1000:.0f}ms")
+            print(f"  Attrs: {span['attributes']}")
+            assert span["span_type"] == "llm"
+            assert span["status"] == "OK"
+            # Two-phase: request-phase extracts model/provider from modelId kwarg;
+            # response "unknown" model doesn't overwrite.
+            # Provider: response "bedrock" is concrete and wins.
+            assert span["attributes"].get("provider") == "bedrock"
+            assert "haiku" in span["attributes"].get("model", "")
             assert span["attributes"].get("tokens_input") > 0
         finally:
             _restore_enqueue(originals)

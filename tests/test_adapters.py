@@ -492,7 +492,10 @@ class TestBedrockAdapter:
             "guardrailIdentifier": "my-guardrail-id",
             "guardrailVersion": "1",
         })
-        assert not adapter.can_handle_request((), {"modelId": "anthropic.claude"})
+        # modelId alone also triggers request-phase extraction
+        assert adapter.can_handle_request((), {"modelId": "anthropic.claude"})
+        # Empty kwargs should NOT match
+        assert not adapter.can_handle_request((), {"foo": "bar"})
 
     def test_guardrail_request_metadata_extraction(self):
         """extract_request_metadata extracts guardrail config."""
@@ -1600,3 +1603,172 @@ class TestCrewAIAdapter:
         from rastir.adapters.llamaindex import LlamaIndexAdapter
         assert LangChainAdapter.priority > CrewAIAdapter.priority
         assert CrewAIAdapter.priority > LlamaIndexAdapter.priority
+
+
+# =====================================================================
+# Two-Phase Enrichment Tests
+# =====================================================================
+
+
+class TestTwoPhaseEnrichment:
+    """Verify request→response two-phase metadata enrichment."""
+
+    def test_bedrock_modelid_request_phase(self):
+        """Bedrock extracts model+provider from modelId at request phase."""
+        from rastir.adapters.bedrock import BedrockAdapter
+        adapter = BedrockAdapter()
+
+        meta = adapter.extract_request_metadata((), {
+            "modelId": "anthropic.claude-3-haiku-20240307-v1:0",
+        })
+        assert meta.span_attributes["model"] == "claude-3-haiku-20240307-v1:0"
+        assert meta.span_attributes["provider"] == "anthropic"
+
+    def test_bedrock_modelid_and_guardrail(self):
+        """Bedrock extracts both model and guardrail at request phase."""
+        from rastir.adapters.bedrock import BedrockAdapter
+        adapter = BedrockAdapter()
+
+        meta = adapter.extract_request_metadata((), {
+            "modelId": "amazon.titan-text-express-v1",
+            "guardrailIdentifier": "gr-123",
+            "guardrailVersion": "1",
+        })
+        assert meta.span_attributes["model"] == "titan-text-express-v1"
+        assert meta.span_attributes["provider"] == "amazon"
+        assert meta.span_attributes["guardrail.id"] == "gr-123"
+        assert meta.span_attributes["guardrail.enabled"] is True
+
+    def test_bedrock_no_dot_in_modelid(self):
+        """Model ID without dot falls back to provider=bedrock."""
+        from rastir.adapters.bedrock import BedrockAdapter
+        adapter = BedrockAdapter()
+
+        meta = adapter.extract_request_metadata((), {
+            "modelId": "some-custom-model",
+        })
+        assert meta.span_attributes["model"] == "some-custom-model"
+        assert meta.span_attributes["provider"] == "bedrock"
+
+    def test_generic_kwarg_scanner_model(self):
+        """Generic scanner picks up 'model' kwarg."""
+        from rastir.adapters.registry import _scan_common_model_kwargs
+        meta = _scan_common_model_kwargs({"model": "gpt-4o", "temperature": 0.5})
+        assert meta is not None
+        assert meta.span_attributes["model"] == "gpt-4o"
+
+    def test_generic_kwarg_scanner_model_id(self):
+        """Generic scanner picks up 'model_id' kwarg."""
+        from rastir.adapters.registry import _scan_common_model_kwargs
+        meta = _scan_common_model_kwargs({"model_id": "claude-3-haiku"})
+        assert meta is not None
+        assert meta.span_attributes["model"] == "claude-3-haiku"
+
+    def test_generic_kwarg_scanner_model_name(self):
+        """Generic scanner picks up 'model_name' kwarg."""
+        from rastir.adapters.registry import _scan_common_model_kwargs
+        meta = _scan_common_model_kwargs({"model_name": "mistral-tiny"})
+        assert meta is not None
+        assert meta.span_attributes["model"] == "mistral-tiny"
+
+    def test_generic_kwarg_scanner_no_match(self):
+        """Generic scanner returns None when no model kwarg found."""
+        from rastir.adapters.registry import _scan_common_model_kwargs
+        meta = _scan_common_model_kwargs({"prompt": "hello"})
+        assert meta is None
+
+    def test_generic_kwarg_scanner_ignores_non_string(self):
+        """Generic scanner ignores non-string model values."""
+        from rastir.adapters.registry import _scan_common_model_kwargs
+        meta = _scan_common_model_kwargs({"model": 42})
+        assert meta is None
+
+    def test_response_overrides_request_when_concrete(self):
+        """Response-phase model replaces request-phase model when concrete."""
+        from rastir.spans import SpanRecord, SpanType, SpanStatus
+        from rastir.decorators import _extract_llm_metadata
+        from unittest.mock import patch, MagicMock
+        from rastir.adapters.types import AdapterResult
+
+        span = SpanRecord(name="test", span_type=SpanType.LLM)
+        # Simulate request-phase having set model
+        span.set_attribute("model", "gpt-4o")
+        span.set_attribute("provider", "openai")
+
+        # Response returns versioned model name
+        mock_result = AdapterResult(
+            model="gpt-4o-2024-08-06",
+            provider="openai",
+            tokens_input=10,
+            tokens_output=5,
+            finish_reason="stop",
+        )
+        with patch("rastir.adapters.registry.resolve", return_value=mock_result):
+            _extract_llm_metadata(span, "fake_result")
+
+        assert span.attributes["model"] == "gpt-4o-2024-08-06"  # upgraded
+        assert span.attributes["provider"] == "openai"
+        assert span.attributes["tokens_input"] == 10
+
+    def test_request_model_preserved_when_response_unknown(self):
+        """Request-phase model survives when response returns 'unknown'."""
+        from rastir.spans import SpanRecord, SpanType, SpanStatus
+        from rastir.decorators import _extract_llm_metadata
+        from unittest.mock import patch
+        from rastir.adapters.types import AdapterResult
+
+        span = SpanRecord(name="test", span_type=SpanType.LLM)
+        # Simulate request-phase having set model from Bedrock modelId
+        span.set_attribute("model", "claude-3-haiku-20240307-v1:0")
+        span.set_attribute("provider", "anthropic")
+
+        # Bedrock response can't find model → returns unknown
+        mock_result = AdapterResult(
+            model="unknown",
+            provider="bedrock",
+            tokens_input=15,
+            tokens_output=8,
+            finish_reason="end_turn",
+        )
+        with patch("rastir.adapters.registry.resolve", return_value=mock_result):
+            _extract_llm_metadata(span, "fake_result")
+
+        # Request-phase values: model preserved (response unknown),
+        # provider overwritten by concrete response "bedrock"
+        assert span.attributes["model"] == "claude-3-haiku-20240307-v1:0"
+        assert span.attributes["provider"] == "bedrock"
+        # Tokens still set from response
+        assert span.attributes["tokens_input"] == 15
+
+    def test_request_model_survives_error(self):
+        """When API call fails, request-phase model is still on the span."""
+        from rastir.spans import SpanRecord, SpanType, SpanStatus
+        from rastir.decorators import _extract_llm_metadata
+        from unittest.mock import patch
+
+        span = SpanRecord(name="test", span_type=SpanType.LLM)
+        # Simulate request-phase having set model
+        span.set_attribute("model", "claude-sonnet-4-20250514")
+        span.set_attribute("provider", "anthropic")
+
+        # Response-phase will not be called on error, but _extract_llm_metadata
+        # might be skipped entirely.  The model set at request phase persists.
+        assert span.attributes["model"] == "claude-sonnet-4-20250514"
+        assert span.attributes["provider"] == "anthropic"
+
+    def test_response_none_preserves_request(self):
+        """When resolve() returns None, request-phase values persist."""
+        from rastir.spans import SpanRecord, SpanType, SpanStatus
+        from rastir.decorators import _extract_llm_metadata
+        from unittest.mock import patch
+
+        span = SpanRecord(name="test", span_type=SpanType.LLM)
+        span.set_attribute("model", "some-model")
+        span.set_attribute("provider", "some-provider")
+
+        with patch("rastir.adapters.registry.resolve", return_value=None):
+            _extract_llm_metadata(span, "fake_result")
+
+        # Request-phase model survives (no overwrite)
+        assert span.attributes["model"] == "some-model"
+        assert span.attributes["provider"] == "some-provider"

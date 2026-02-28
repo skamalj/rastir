@@ -1,4 +1,4 @@
-# Rastir --- V3 Requirements (Refined v2)
+# Rastir --- V3 Requirements (Refined v3)
 
 ## 1. Objective
 
@@ -8,10 +8,14 @@ backward-compatible metrics.
 
 V3 introduces:
 
--   Expanded provider & framework adapters
--   Generic infrastructure object wrapper
+-   Expanded provider & framework adapters (15 total)
+-   Generic infrastructure object wrapper (`rastir.wrap()`)
 -   Bedrock guardrail observability (request + response level)
 -   Structured guardrail metrics with model-level visibility
+-   **Two-phase enrichment architecture** — metadata captured at
+    request phase (pre-invocation) and refined at response phase
+-   **Generic model kwarg scanner** — fallback extraction of model
+    from common parameter names across SDKs
 
 No enforcement logic is included in V3.
 
@@ -19,15 +23,20 @@ No enforcement logic is included in V3.
 
 # 2. Ecosystem Expansion
 
-## 2.1 Provider Adapters (Extended)
+## 2.1 Provider Adapters
 
-Add support for:
+Supported providers (8 adapters):
 
--   Azure OpenAI
--   Google Gemini
--   Cohere
--   Mistral (API)
--   Groq (optional)
+| Adapter            | Priority | Streaming | Tokens | Request Metadata | Guardrails |
+|--------------------|----------|-----------|--------|------------------|------------|
+| AzureOpenAI        | 155      | Yes       | Yes    | No               | No         |
+| Groq               | 152      | Yes       | Yes    | No               | No         |
+| OpenAI             | 150      | Yes       | Yes    | No               | No         |
+| Anthropic          | 150      | Yes       | Yes    | No               | No         |
+| Gemini             | 150      | Yes       | Yes    | No               | No         |
+| Cohere             | 150      | Yes       | Yes    | No               | No         |
+| Mistral            | 150      | Yes       | Yes    | No               | No         |
+| Bedrock (Converse) | 140      | Yes       | Yes    | Yes              | Yes        |
 
 All provider adapters must:
 
@@ -39,18 +48,33 @@ All provider adapters must:
 
 ------------------------------------------------------------------------
 
-## 2.2 Framework Adapters (Extended)
+## 2.2 Framework Adapters
 
-Add support for:
+Supported frameworks (4 adapters):
 
--   LlamaIndex
--   CrewAI
+| Adapter   | Priority | Kind      |
+|-----------|----------|-----------|
+| LangGraph | 260      | framework |
+| LangChain | 250      | framework |
+| CrewAI    | 245      | framework |
+| LlamaIndex| 240      | framework |
 
 Framework integration must:
 
 -   Wrap execution entrypoints only (invoke/run/stream)
 -   Avoid patching internal classes
 -   Preserve span hierarchy
+
+## 2.3 Utility Adapters
+
+| Adapter   | Priority | Kind      |
+|-----------|----------|-----------|
+| Retrieval | 50       | provider  |
+| Tool      | 10       | provider  |
+| Fallback  | 0        | fallback  |
+
+**Total: 15 registered adapters**, sorted by descending priority at
+resolution time.
 
 ------------------------------------------------------------------------
 
@@ -84,7 +108,88 @@ Wrapper must:
 
 ------------------------------------------------------------------------
 
-# 4. Bedrock Guardrail Observability (Metadata-Only)
+# 4. Two-Phase Enrichment Architecture
+
+## 4.1 Overview
+
+Metadata is captured in two phases:
+
+1.  **Request phase** (pre-invocation) — extract from function
+    args/kwargs before the call executes.
+2.  **Response phase** (post-invocation) — extract from the API
+    response/result.
+
+This ensures metadata (model, provider, guardrails) survives even
+when the API call fails, since request-phase attributes are set on
+the span before function execution.
+
+## 4.2 Request-Phase Extraction
+
+The `@llm` decorator calls `resolve_request(args, kwargs)` before
+function execution.  Resolution follows adapter priority order:
+
+1.  Each adapter with `supports_request_metadata=True` is checked
+    via `can_handle_request(args, kwargs)`.
+2.  First matching adapter's `extract_request_metadata()` is called.
+3.  If no adapter matches, the **generic kwarg scanner** runs as
+    fallback.
+
+### 4.2.1 Bedrock Request Metadata
+
+The Bedrock adapter matches on `modelId`, `guardrailIdentifier`, or
+`guardrailConfig` in kwargs.  It extracts:
+
+-   **model / provider** from `modelId` (e.g.,
+    `"anthropic.claude-3-haiku-v1:0"` → model=`"claude-3-haiku-v1:0"`,
+    provider=`"anthropic"`)
+-   **guardrail.id**, **guardrail.version**, **guardrail.enabled**
+    from guardrail configuration
+
+### 4.2.2 Generic Kwarg Scanner
+
+When no adapter's `can_handle_request()` matches, a fallback scanner
+checks kwargs for common model parameter names:
+
+    _COMMON_MODEL_KWARGS = ("model", "model_id", "modelId", "model_name")
+
+The first string-valued match is used as `model`.  This covers
+arbitrary user functions that pass model names as keyword arguments.
+
+## 4.3 Response-Phase Override Logic
+
+After function execution, the `@llm` decorator calls `resolve(result)`
+and applies this merge strategy:
+
+-   **Concrete response value wins**: if the response returns a model
+    or provider that is not `"unknown"`, it overwrites the
+    request-phase value.
+-   **Request-phase value preserved**: if the response returns
+    `"unknown"` or `None`, the request-phase value remains on the
+    span.
+-   **Fallback**: if neither phase sets a value, `"unknown"` is used.
+
+This handles the **Bedrock Converse limitation**: the Converse API
+does not return `modelId` in its response body or headers, so the
+response adapter always returns `model="unknown"`, `provider="bedrock"`.
+With two-phase enrichment, the model value (e.g.,
+`"claude-3-haiku-20240307-v1:0"`) is preserved from the request phase
+since the response `"unknown"` does not overwrite.  The provider
+attribute resolves to `"bedrock"` (concrete response value wins),
+which correctly indicates the service endpoint.
+
+## 4.4 Error Resilience
+
+If a decorated function raises an exception:
+
+-   Request-phase attributes (model, provider, guardrails) are already
+    set on the span and persist.
+-   Response-phase extraction is skipped.
+-   The span is marked with `status="ERROR"` and captures the
+    exception info.
+
+------------------------------------------------------------------------
+
+# 5. Bedrock Guardrail Observability (Metadata-Only)
 
 V3 introduces structured observability for Bedrock guardrails.
 
@@ -97,17 +202,18 @@ No enforcement, blocking, or policy engine is included.
 
 ------------------------------------------------------------------------
 
-## 4.1 Request-Level Guardrail Detection
+## 5.1 Request-Level Guardrail Detection
 
-When request contains guardrail configuration (e.g.,
-guardrailIdentifier, guardrailVersion):
+When request kwargs contain guardrail configuration
+(`guardrailIdentifier`, `guardrailVersion`, or `guardrailConfig`):
 
-Decorator must:
+Span annotations:
 
--   Annotate span with: guardrail.id guardrail.version guardrail.enabled
-    = true
+-   `guardrail.id`
+-   `guardrail.version`
+-   `guardrail.enabled = true`
 
-Emit metric:
+Metric emitted:
 
     rastir_guardrail_requests_total
 
@@ -123,23 +229,24 @@ This measures guardrail adoption.
 
 ------------------------------------------------------------------------
 
-## 4.2 Response-Level Guardrail Intervention Detection
+## 5.2 Response-Level Guardrail Intervention Detection
 
 When response metadata indicates guardrail action (e.g., action !=
 NONE):
 
-Adapter must extract structured metadata only (no text inspection):
+Adapter extracts structured metadata only (no text inspection):
 
 -   guardrail_action (e.g., GUARDRAIL_INTERVENED)
 -   guardrail_category (from structured assessments)
 -   guardrail_reason (optional, not used as metric label)
 
-Decorator must:
+Span annotations:
 
--   Annotate span with: guardrail.triggered = true guardrail.action
-    guardrail.category (bounded)
+-   `guardrail.triggered = true`
+-   `guardrail.action`
+-   `guardrail.category` (bounded)
 
-Emit metric:
+Metric emitted:
 
     rastir_guardrail_violations_total
 
@@ -160,7 +267,7 @@ guardrail analysis.
 
 ------------------------------------------------------------------------
 
-## 4.3 Guardrail Cardinality Controls
+## 5.3 Guardrail Cardinality Controls
 
 To prevent explosion:
 
@@ -176,7 +283,7 @@ Overflow must map to:
 
 ------------------------------------------------------------------------
 
-## 4.4 Span Status Rules
+## 5.4 Span Status Rules
 
 Guardrail intervention does NOT mark span as ERROR.
 
@@ -184,7 +291,7 @@ Span status remains OK unless provider returns actual invocation error.
 
 ------------------------------------------------------------------------
 
-# 5. Streaming Guardrail Handling
+# 6. Streaming Guardrail Handling
 
 For streaming APIs:
 
@@ -196,40 +303,126 @@ For streaming APIs:
 
 ------------------------------------------------------------------------
 
-# 6. Adapter Capability Registry
+# 7. Adapter Capability Registry
 
-Each adapter must declare capability flags:
+Each adapter declares capability flags:
 
--   supports_tokens
--   supports_streaming
--   supports_guardrail_metadata
--   supports_request_guardrail_detection
+```python
+supports_tokens: bool = False
+supports_streaming: bool = False
+supports_request_metadata: bool = False
+supports_guardrail_metadata: bool = False
+```
 
 Decorator must not assume capabilities not declared.
 
+**Implementation note:** The flag name is `supports_request_metadata`
+(not `supports_request_guardrail_detection`).  This reflects the
+expanded scope — request-phase extraction now covers model/provider
+in addition to guardrail configuration.
+
 ------------------------------------------------------------------------
 
-# 7. Integration Test Requirements
+# 8. Integration Test Coverage
 
-V3 must include integration tests for:
+V3 includes 34 live integration tests across 7 test classes:
 
--   LangGraph + MemorySaver (wrapped)
--   LangGraph + DynamoDB checkpointer (wrapped)
--   Bedrock LLM with guardrails configured but not triggered
--   Bedrock LLM with guardrails triggered
--   Streaming Bedrock guardrail response
+### 8.1 OpenAI Tests (`TestOpenAI`)
+-   Chat completion (non-streaming)
+-   Streaming chat completion
+-   resolve() result validation
 
-Tests must validate:
+### 8.2 Anthropic Tests (`TestAnthropic`)
+-   Messages API (non-streaming)
+-   Streaming messages
+-   resolve() result validation
 
--   Correct span annotations
--   Correct metric emission
+### 8.3 Bedrock Tests (`TestBedrock`)
+-   Converse API (non-streaming)
+-   Streaming Converse
+-   System prompt token counting
+-   Guardrail configuration detection (request-level)
+-   @llm decorator wrapping (response-phase)
+-   **Two-phase enrichment** — modelId as kwarg to decorated function
+
+### 8.4 LangChain Tests (`TestLangChain`)
+-   ChatOpenAI invoke
+-   ChatAnthropic invoke
+-   ChatBedrock invoke
+-   Streaming output
+
+### 8.5 LangGraph Tests (`TestLangGraph`)
+-   Simple graph execution
+-   Graph with wrapped MemorySaver
+-   Multi-turn with checkpointer
+
+### 8.6 LlamaIndex Tests (`TestLlamaIndex`)
+-   OpenAI LLM complete
+-   Anthropic LLM complete
+-   Bedrock LLM complete
+
+### 8.7 Cross-Cutting Tests (`TestCrossCutting`)
+-   `wrap()` on arbitrary objects
+-   Nested decorators (@agent → @llm)
+-   @llm decorator with each provider
+
+Tests validate:
+
+-   Correct span annotations (model, provider, tokens)
+-   Correct metric emission (guardrail metrics)
 -   Model label presence on violations metric
 -   No cardinality explosion
 -   Proper separation of request-level vs response-level metrics
+-   Two-phase enrichment preserves request-phase metadata
 
 ------------------------------------------------------------------------
 
-# 8. Non-Goals (V3)
+# 9. Architecture Decisions
+
+## 9.1 Adapter Resolution Pipeline
+
+Resolution uses a 3-phase pipeline:
+
+1.  **Sorting**: adapters sorted by descending priority (once, cached)
+2.  **Matching**: `can_handle()` predicate evaluated per adapter
+3.  **Extraction**: first matching adapter's `resolve()` normalizes
+    the result
+
+Higher-priority adapters shadow lower ones.  Framework adapters
+(priority 240-260) are evaluated before provider adapters
+(priority 140-155) to catch framework-wrapped responses.
+
+## 9.2 Bedrock Converse API Limitation
+
+The AWS Bedrock Converse API does NOT return `modelId` in the
+response body or response headers.  This means:
+
+-   `resolve(response_dict)` alone → `model="unknown"`, `provider="bedrock"`
+-   Two-phase enrichment via `@llm` decorator → model/provider captured
+    from request kwargs, survives the unknown response
+
+This is a known AWS API design characteristic. The two-phase
+architecture was designed specifically to handle this pattern.
+
+## 9.3 Span Type Semantics
+
+Six decorator types map to span types:
+
+| Decorator   | Span Type  |
+|-------------|------------|
+| `@trace`    | trace      |
+| `@agent`    | agent      |
+| `@llm`      | llm        |
+| `@tool`     | tool       |
+| `@retrieval`| retrieval  |
+| `@metric`   | metric     |
+
+Only `@llm` runs adapter resolution.  All decorators support sync
+and async functions, and capture duration, status, and exceptions.
+
+------------------------------------------------------------------------
+
+# 10. Non-Goals (V3)
 
 V3 must NOT:
 
@@ -241,15 +434,16 @@ V3 must NOT:
 
 ------------------------------------------------------------------------
 
-# 9. Strategic Positioning
+# 11. Strategic Positioning
 
 V3 establishes Rastir as:
 
--   Framework-aware
--   Infrastructure-extensible
+-   Framework-aware (LangChain, LangGraph, LlamaIndex, CrewAI)
+-   Infrastructure-extensible (`wrap()`)
 -   Guardrail-aware (request + response level)
 -   Model-level guardrail analytics capable
+-   **Error-resilient** (two-phase enrichment)
 -   Enterprise-observable
 -   Still lightweight and stateless
 
-End of V3 Requirements (Refined v2).
+End of V3 Requirements (Refined v3).

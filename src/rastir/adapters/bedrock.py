@@ -97,19 +97,32 @@ class BedrockAdapter(BaseAdapter):
         )
 
     def can_handle_request(self, args: tuple, kwargs: dict) -> bool:
-        """Detect guardrail configuration in Bedrock API call kwargs."""
+        """Detect Bedrock request by modelId or guardrail configuration."""
         return (
-            "guardrailIdentifier" in kwargs
+            "modelId" in kwargs
+            or "guardrailIdentifier" in kwargs
             or "guardrailConfig" in kwargs
         )
 
     def extract_request_metadata(
         self, args: tuple, kwargs: dict
     ) -> RequestMetadata:
-        """Extract guardrail config from request kwargs."""
+        """Extract model/provider and guardrail config from request kwargs.
+
+        Two-phase enrichment: set whatever we can at request time so
+        that metadata survives even if the API call fails.
+        """
         span_attrs: dict[str, Any] = {}
         extra_attrs: dict[str, Any] = {}
 
+        # ── Model / provider from modelId ───────────────────────
+        model_id = kwargs.get("modelId")
+        if model_id:
+            model, provider = self._parse_model_id(model_id)
+            span_attrs["model"] = model
+            span_attrs["provider"] = provider
+
+        # ── Guardrail configuration ─────────────────────────────
         guardrail_id = kwargs.get("guardrailIdentifier")
         guardrail_version = kwargs.get("guardrailVersion")
 
