@@ -1564,3 +1564,204 @@ class TestIngestionRate:
         assert registry._rate_spans == 50
         registry.record_ingested_spans(30)
         assert registry._rate_spans == 80
+
+
+# ========================================================================
+# End-to-end: POST /v1/telemetry → worker → GET /metrics verification
+# ========================================================================
+
+
+class TestEndToEndMetricsAggregation:
+    """True E2E tests: POST spans to the running server, then GET /metrics
+    and verify the Prometheus counters reflect the correct aggregates.
+
+    Unlike the unit tests that call ``record_span()`` directly, these
+    exercise the full pipeline: HTTP POST → queue → IngestionWorker →
+    MetricsRegistry → GET /metrics.
+    """
+
+    @staticmethod
+    def _parse_metric(text: str, metric_name: str, labels: dict[str, str]) -> float | None:
+        """Extract a counter/gauge value from Prometheus exposition text."""
+        for line in text.splitlines():
+            if line.startswith("#") or not line.startswith(metric_name):
+                continue
+            if all(f'{k}="{v}"' in line for k, v in labels.items()):
+                return float(line.rsplit(" ", 1)[-1])
+        return None
+
+    def test_e2e_llm_call_counts_by_provider(self):
+        """POST 3 OpenAI + 2 Anthropic LLM spans, verify per-provider counts."""
+        cfg = ServerConfig(limits=LimitsSection(max_queue_size=1000))
+        app = create_app(config=cfg)
+        with TestClient(app) as c:
+            # 3 OpenAI spans
+            for i in range(3):
+                c.post("/v1/telemetry", json=_payload([
+                    _span(name=f"openai-{i}", span_type="llm", trace_id=f"oa-{i}",
+                          model="gpt-4o-mini", provider="openai",
+                          tokens_input=100, tokens_output=40),
+                ]))
+            # 2 Anthropic spans
+            for i in range(2):
+                c.post("/v1/telemetry", json=_payload([
+                    _span(name=f"anthropic-{i}", span_type="llm", trace_id=f"an-{i}",
+                          model="claude-3-haiku", provider="anthropic",
+                          tokens_input=150, tokens_output=60),
+                ]))
+
+            time.sleep(0.8)
+            text = c.get("/metrics").text
+
+            assert self._parse_metric(text, "rastir_llm_calls_total",
+                                      {"provider": "openai"}) == 3.0
+            assert self._parse_metric(text, "rastir_llm_calls_total",
+                                      {"provider": "anthropic"}) == 2.0
+
+            # Token totals: 3×100=300 input for openai
+            assert self._parse_metric(text, "rastir_tokens_input_total",
+                                      {"provider": "openai"}) == 300.0
+            assert self._parse_metric(text, "rastir_tokens_output_total",
+                                      {"provider": "openai"}) == 120.0
+            # 2×150=300 input for anthropic
+            assert self._parse_metric(text, "rastir_tokens_input_total",
+                                      {"provider": "anthropic"}) == 300.0
+            assert self._parse_metric(text, "rastir_tokens_output_total",
+                                      {"provider": "anthropic"}) == 120.0
+
+    def test_e2e_mixed_span_types(self):
+        """POST mixed span types in a single batch, verify /metrics ingested counts."""
+        cfg = ServerConfig(limits=LimitsSection(max_queue_size=1000))
+        app = create_app(config=cfg)
+        with TestClient(app) as c:
+            spans = [
+                _span(name="llm-1", span_type="llm", trace_id="mix-1",
+                      model="gpt-4", provider="openai"),
+                _span(name="llm-2", span_type="llm", trace_id="mix-1",
+                      model="gpt-4", provider="openai"),
+                _span(name="search", span_type="tool", trace_id="mix-1"),
+                _span(name="lookup", span_type="tool", trace_id="mix-1"),
+                _span(name="lookup2", span_type="tool", trace_id="mix-1"),
+                _span(name="rag", span_type="retrieval", trace_id="mix-1"),
+            ]
+            c.post("/v1/telemetry", json=_payload(spans))
+            time.sleep(0.8)
+
+            text = c.get("/metrics").text
+
+            assert self._parse_metric(text, "rastir_spans_ingested_total",
+                                      {"span_type": "llm", "status": "OK"}) == 2.0
+            assert self._parse_metric(text, "rastir_spans_ingested_total",
+                                      {"span_type": "tool", "status": "OK"}) == 3.0
+            assert self._parse_metric(text, "rastir_spans_ingested_total",
+                                      {"span_type": "retrieval", "status": "OK"}) == 1.0
+
+            # Tool calls counter
+            assert self._parse_metric(text, "rastir_tool_calls_total",
+                                      {"tool_name": "search"}) == 1.0
+            # Retrieval counter
+            assert self._parse_metric(text, "rastir_retrieval_calls_total", {}) == 1.0
+
+    def test_e2e_error_spans_aggregation(self):
+        """POST OK + ERROR spans, verify both ingested and errors counters."""
+        cfg = ServerConfig(limits=LimitsSection(max_queue_size=1000))
+        app = create_app(config=cfg)
+        with TestClient(app) as c:
+            # 4 OK + 2 ERROR
+            for i in range(4):
+                c.post("/v1/telemetry", json=_payload([
+                    _span(name=f"ok-{i}", span_type="llm", trace_id=f"err-ok-{i}",
+                          model="gpt-4", provider="openai",
+                          tokens_input=50, tokens_output=20),
+                ]))
+            for i in range(2):
+                c.post("/v1/telemetry", json=_payload([
+                    _span(name=f"err-{i}", span_type="llm", trace_id=f"err-e-{i}",
+                          model="gpt-4", provider="openai", status="ERROR",
+                          events=[{"name": "exception", "attributes": {
+                              "exception.type": "openai.RateLimitError"}}]),
+                ]))
+
+            time.sleep(0.8)
+            text = c.get("/metrics").text
+
+            # Total LLM calls = 6 (OK + ERROR both count)
+            assert self._parse_metric(text, "rastir_llm_calls_total",
+                                      {"model": "gpt-4"}) == 6.0
+            # Ingested breakdown
+            assert self._parse_metric(text, "rastir_spans_ingested_total",
+                                      {"span_type": "llm", "status": "OK"}) == 4.0
+            assert self._parse_metric(text, "rastir_spans_ingested_total",
+                                      {"span_type": "llm", "status": "ERROR"}) == 2.0
+            # Error counter with normalised type
+            assert self._parse_metric(text, "rastir_errors_total",
+                                      {"error_type": "rate_limit"}) == 2.0
+            # Tokens only from 4 OK spans: 4×50=200
+            assert self._parse_metric(text, "rastir_tokens_input_total",
+                                      {"model": "gpt-4"}) == 200.0
+
+    def test_e2e_multiple_batches_accumulate(self):
+        """POST spans in separate HTTP requests, verify they all accumulate."""
+        cfg = ServerConfig(limits=LimitsSection(max_queue_size=1000))
+        app = create_app(config=cfg)
+        with TestClient(app) as c:
+            # Batch 1: 2 spans
+            c.post("/v1/telemetry", json=_payload([
+                _span(name="b1-s1", span_type="llm", trace_id="batch-1",
+                      model="gpt-4", provider="openai",
+                      tokens_input=100, tokens_output=50),
+                _span(name="b1-s2", span_type="llm", trace_id="batch-1",
+                      model="gpt-4", provider="openai",
+                      tokens_input=200, tokens_output=80),
+            ]))
+            # Batch 2: 3 spans (same service so counters accumulate)
+            c.post("/v1/telemetry", json=_payload([
+                _span(name="b2-s1", span_type="llm", trace_id="batch-2",
+                      model="gpt-4", provider="openai",
+                      tokens_input=300, tokens_output=100),
+                _span(name="calc", span_type="tool", trace_id="batch-2"),
+                _span(name="b2-s3", span_type="llm", trace_id="batch-2",
+                      model="claude-3", provider="anthropic",
+                      tokens_input=250, tokens_output=90),
+            ]))
+
+            time.sleep(0.8)
+            text = c.get("/metrics").text
+
+            # Total LLM calls across both services for openai model gpt-4 = 3
+            openai_calls = self._parse_metric(text, "rastir_llm_calls_total",
+                                              {"model": "gpt-4", "provider": "openai"})
+            assert openai_calls == 3.0
+
+            # Anthropic calls = 1
+            anth_calls = self._parse_metric(text, "rastir_llm_calls_total",
+                                            {"model": "claude-3", "provider": "anthropic"})
+            assert anth_calls == 1.0
+
+    def test_e2e_metrics_endpoint_returns_prometheus_format(self):
+        """Verify /metrics returns correct content-type and parseable output."""
+        cfg = ServerConfig()
+        app = create_app(config=cfg)
+        with TestClient(app) as c:
+            c.post("/v1/telemetry", json=_payload([
+                _span(span_type="llm", model="gpt-4", provider="openai",
+                      tokens_input=500, tokens_output=200),
+            ]))
+            time.sleep(0.5)
+
+            resp = c.get("/metrics")
+            assert resp.status_code == 200
+            assert "text/plain" in resp.headers["content-type"]
+
+            # All major metric families present
+            text = resp.text
+            for metric in [
+                "rastir_spans_ingested_total",
+                "rastir_llm_calls_total",
+                "rastir_tokens_input_total",
+                "rastir_tokens_output_total",
+                "rastir_duration_seconds",
+                "rastir_queue_size",
+                "rastir_queue_utilization_percent",
+            ]:
+                assert metric in text, f"Missing metric: {metric}"
