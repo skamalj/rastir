@@ -160,6 +160,7 @@ class IngestionWorker:
 
     async def _run(self) -> None:
         """Drain items from the queue and process them."""
+        logger.debug("[WORKER] consumer loop started")
         while self._running:
             try:
                 item = await asyncio.wait_for(self._queue.get(), timeout=1.0)
@@ -167,17 +168,21 @@ class IngestionWorker:
                 # Periodic gauge refresh even when idle
                 self._update_gauges()
                 continue
+            except Exception:
+                logger.error("[WORKER] unexpected error getting from queue", exc_info=True)
+                continue
 
             self._update_gauges()
 
             service, env, version, spans = item
             if service == "__stop__":
+                logger.debug("[WORKER] received stop signal")
                 break
 
             try:
                 self._process_batch(service, env, version, spans)
             except Exception:
-                logger.exception("Error processing span batch")
+                logger.exception("[WORKER] CATCH-ALL: Error processing span batch")
 
         # Final drain — process whatever remains
         while not self._queue.empty():
@@ -204,13 +209,37 @@ class IngestionWorker:
         the configured sampling policy.
         """
         self._metrics.record_ingested_spans(len(spans))
+        logger.debug(
+            "[BATCH] Processing %d spans  service=%s env=%s version=%s  otlp=%s",
+            len(spans), service, env, version,
+            self._otlp is not None,
+        )
 
-        for span in spans:
+        for idx, span in enumerate(spans):
+            span_id = span.get("span_id", "?")[:12]
+            trace_id = span.get("trace_id", "?")[:12]
+            span_type = span.get("span_type", "?")
+            span_name = span.get("name", "?")
+            logger.debug(
+                "[SPAN %d/%d] name=%s type=%s trace=%s… span=%s…",
+                idx + 1, len(spans), span_name, span_type, trace_id, span_id,
+            )
+            logger.debug("[SPAN %d/%d] keys=%s", idx + 1, len(spans), sorted(span.keys()))
+            logger.debug(
+                "[SPAN %d/%d] attr_keys=%s",
+                idx + 1, len(spans), sorted(span.get("attributes", {}).keys()),
+            )
+
             # 1. Prometheus metrics — ALWAYS recorded
-            self._metrics.record_span(span, service=service, env=env)
+            try:
+                self._metrics.record_span(span, service=service, env=env)
+                logger.debug("[SPAN %d] step-1 metrics OK", idx + 1)
+            except Exception:
+                logger.error("[SPAN %d] step-1 metrics FAILED", idx + 1, exc_info=True)
 
             # 2. Sampling decision (only affects storage + export)
             store = self._should_store(span)
+            logger.debug("[SPAN %d] step-2 sampling → store=%s", idx + 1, store)
             if store:
                 self._metrics.spans_sampled.labels(service=service, env=env).inc()
             else:
@@ -220,40 +249,87 @@ class IngestionWorker:
             if store and self._redactor is not None:
                 attrs = span.get("attributes", {})
                 if attrs.get("prompt_text") or attrs.get("completion_text"):
-                    ok = redact_span(span, self._redactor, service, env)
+                    logger.debug("[SPAN %d] step-3 redaction running…", idx + 1)
+                    try:
+                        ok = redact_span(span, self._redactor, service, env)
+                    except Exception:
+                        ok = False
+                        logger.error("[SPAN %d] step-3 redaction EXCEPTION", idx + 1, exc_info=True)
                     if ok:
                         self._metrics.redaction_applied.labels(
                             service=service, env=env,
                         ).inc()
+                        logger.debug("[SPAN %d] step-3 redaction OK", idx + 1)
                     else:
                         self._metrics.redaction_failures.labels(
                             service=service, env=env,
                         ).inc()
                         if self._drop_on_redaction_failure:
                             logger.warning(
-                                "Dropping span %s due to redaction failure",
-                                span.get("span_id", "?"),
+                                "[SPAN %d] step-3 DROPPING span %s due to redaction failure",
+                                idx + 1, span.get("span_id", "?"),
                             )
                             continue  # DROP — raw text never stored
+                else:
+                    logger.debug("[SPAN %d] step-3 redaction skipped (no text)", idx + 1)
+            else:
+                logger.debug(
+                    "[SPAN %d] step-3 skip  store=%s redactor=%s",
+                    idx + 1, store, self._redactor is not None,
+                )
 
             # 4. Trace store (if enabled and sampled in)
-            trace_id = span.get("trace_id")
-            if store and self._trace_store is not None and trace_id:
-                self._trace_store.insert(trace_id, [span])
+            trace_id_full = span.get("trace_id")
+            if store and self._trace_store is not None and trace_id_full:
+                try:
+                    self._trace_store.insert(trace_id_full, [span])
+                    logger.debug("[SPAN %d] step-4 trace_store OK", idx + 1)
+                except Exception:
+                    logger.error("[SPAN %d] step-4 trace_store FAILED", idx + 1, exc_info=True)
+            else:
+                logger.debug(
+                    "[SPAN %d] step-4 skip  store=%s trace_store=%s trace_id=%s",
+                    idx + 1, store, self._trace_store is not None, bool(trace_id_full),
+                )
 
             # 5. OTLP forward (if configured and sampled in)
             if store and self._otlp is not None:
+                logger.debug(
+                    "[SPAN %d] step-5 OTLP forward starting…  span_keys=%s",
+                    idx + 1, sorted(span.keys()),
+                )
                 try:
                     self._otlp.export_span(span, service=service, env=env, version=version)
+                    logger.debug("[SPAN %d] step-5 OTLP forward OK (enqueued)", idx + 1)
                 except Exception:
-                    logger.debug("OTLP forward error", exc_info=True)
+                    logger.error(
+                        "[SPAN %d] step-5 OTLP forward FAILED  span=%s",
+                        idx + 1, span, exc_info=True,
+                    )
                     self._metrics.export_failures.labels(
                         service=service, env=env,
                     ).inc()
+            else:
+                logger.debug(
+                    "[SPAN %d] step-5 skip  store=%s otlp=%s",
+                    idx + 1, store, self._otlp is not None,
+                )
 
             # 6. Evaluation enqueue (if evaluation enabled + sampled)
             if store and self._eval_queue is not None:
-                self._maybe_enqueue_evaluation(span, service, env)
+                logger.debug("[SPAN %d] step-6 eval enqueue check…", idx + 1)
+                try:
+                    self._maybe_enqueue_evaluation(span, service, env)
+                    logger.debug("[SPAN %d] step-6 eval enqueue done", idx + 1)
+                except Exception:
+                    logger.error("[SPAN %d] step-6 eval enqueue FAILED", idx + 1, exc_info=True)
+            else:
+                logger.debug(
+                    "[SPAN %d] step-6 skip  store=%s eval_queue=%s",
+                    idx + 1, store, self._eval_queue is not None,
+                )
+
+        logger.debug("[BATCH] Finished processing %d spans", len(spans))
 
     # ----- evaluation enqueue ----------------------------------------------
 

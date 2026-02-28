@@ -36,20 +36,29 @@ class StructuredFormatter(logging.Formatter):
         return json.dumps(obj, default=str)
 
 
-def configure_logging(structured: bool = False, level: str = "INFO") -> None:
+def configure_logging(
+    structured: bool = False,
+    level: str = "INFO",
+    log_file: str | None = None,
+) -> None:
     """Set up logging for the Rastir server.
 
     Args:
         structured: If ``True``, use JSON structured format.
         level: Log level name (``DEBUG``, ``INFO``, etc.).
+        log_file: Optional path to a debug log file.  When set, a
+                  ``FileHandler`` at DEBUG level is added so *every*
+                  log message (including exceptions) is persisted.
     """
     root = logging.getLogger("rastir")
-    root.setLevel(getattr(logging, level.upper(), logging.INFO))
+    root.setLevel(logging.DEBUG)  # always capture everything at root
 
     # Remove existing handlers to avoid duplicates
     root.handlers.clear()
 
+    # Console handler — respects configured level
     handler = logging.StreamHandler()
+    handler.setLevel(getattr(logging, level.upper(), logging.INFO))
     if structured:
         handler.setFormatter(StructuredFormatter())
     else:
@@ -57,3 +66,16 @@ def configure_logging(structured: bool = False, level: str = "INFO") -> None:
             logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s")
         )
     root.addHandler(handler)
+
+    # File handler — always DEBUG, captures everything
+    if log_file:
+        fh = logging.FileHandler(log_file, mode="w", encoding="utf-8")
+        fh.setLevel(logging.DEBUG)
+        fh.setFormatter(
+            logging.Formatter(
+                "%(asctime)s.%(msecs)03d %(levelname)-5s [%(name)s] %(message)s",
+                datefmt="%H:%M:%S",
+            )
+        )
+        root.addHandler(fh)
+        root.info("File logging enabled → %s", log_file)

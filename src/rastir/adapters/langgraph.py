@@ -20,7 +20,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from rastir.adapters.types import AdapterResult, BaseAdapter, TokenDelta
+from rastir.adapters.types import (
+    AdapterResult,
+    BaseAdapter,
+    RequestMetadata,
+    TokenDelta,
+    detect_provider_from_module,
+)
 
 
 class LangGraphAdapter(BaseAdapter):
@@ -32,6 +38,7 @@ class LangGraphAdapter(BaseAdapter):
 
     supports_tokens = True
     supports_streaming = True  # Above LangChain (250)
+    supports_request_metadata = True
 
     def can_handle(self, result: Any) -> bool:
         """Detect LangGraph response patterns.
@@ -142,6 +149,117 @@ class LangGraphAdapter(BaseAdapter):
             )
 
         return TokenDelta()
+
+    # ---- Request-phase metadata ----
+
+    def can_handle_request(self, args: tuple, kwargs: dict) -> bool:
+        """Detect CompiledGraph (or CompiledStateGraph) in request args."""
+        return self._find_compiled_graph(args, kwargs) is not None
+
+    def extract_request_metadata(
+        self, args: tuple, kwargs: dict,
+    ) -> RequestMetadata:
+        """Walk CompiledGraph nodes to find the underlying chat model.
+
+        Traverses PregelNode → closures / bound runnables to locate
+        the chat model, then extracts model name and infers provider
+        from the model object's module.
+        """
+        graph = self._find_compiled_graph(args, kwargs)
+        if graph is None:
+            return RequestMetadata()
+
+        nodes = getattr(graph, "nodes", None)
+        if not isinstance(nodes, dict):
+            return RequestMetadata()
+
+        # Walk each node looking for a chat model buried inside.
+        for node in nodes.values():
+            result = self._extract_model_from_node(node)
+            if result:
+                return result
+
+        return RequestMetadata()
+
+    def _find_compiled_graph(self, args: tuple, kwargs: dict) -> Any:
+        """Find a LangGraph CompiledGraph in args/kwargs."""
+        return self._find_in_args(args, kwargs, self._is_compiled_graph)
+
+    @staticmethod
+    def _is_compiled_graph(obj: Any) -> bool:
+        """Check if obj is a LangGraph CompiledGraph."""
+        module = getattr(type(obj), "__module__", "") or ""
+        cls_name = type(obj).__name__
+        return "langgraph" in module and "Compiled" in cls_name
+
+    def _extract_model_from_node(self, node: Any) -> RequestMetadata | None:
+        """Recursively search a graph node for a chat model.
+
+        Supports PregelNode → bound → RunnableBinding → ChatModel
+        and PregelNode → func (closure) → __closure__ cells.
+        """
+        # Try direct attributes: .bound, .func
+        for accessor in ("bound", "func"):
+            inner = getattr(node, accessor, None)
+            if inner is None:
+                continue
+            result = self._try_extract_from_runnable(inner)
+            if result:
+                return result
+
+        return None
+
+    def _try_extract_from_runnable(
+        self, obj: Any, _seen: set | None = None,
+    ) -> RequestMetadata | None:
+        """Try to extract model/provider from a Runnable or closure."""
+        if _seen is None:
+            _seen = set()
+        obj_id = id(obj)
+        if obj_id in _seen:
+            return None
+        _seen.add(obj_id)
+
+        # Direct model attribute
+        model_name = self._extract_model_attr(obj)
+        if model_name:
+            module = getattr(type(obj), "__module__", "") or ""
+            provider = detect_provider_from_module(module)
+            # If provider is unknown (e.g. RunnableBinding from
+            # langchain_core), check the inner .bound for a more
+            # specific module.
+            if provider == "unknown":
+                inner = getattr(obj, "bound", None)
+                if inner is not None:
+                    inner_module = getattr(type(inner), "__module__", "") or ""
+                    provider = detect_provider_from_module(inner_module)
+            return RequestMetadata(
+                span_attributes={"model": model_name, "provider": provider},
+            )
+
+        # Traverse chain: .bound, .func, .first (covers RunnableBinding,
+        # RunnableCallable, RunnableSequence)
+        for attr in ("bound", "func", "first"):
+            inner = getattr(obj, attr, None)
+            if inner is not None and id(inner) not in _seen:
+                result = self._try_extract_from_runnable(inner, _seen)
+                if result:
+                    return result
+
+        # Closure cells (lambda s: {… bound_model.invoke(…)})
+        closure = getattr(obj, "__closure__", None)
+        if closure:
+            for cell in closure:
+                try:
+                    cell_val = cell.cell_contents
+                except ValueError:
+                    continue
+                if id(cell_val) not in _seen:
+                    result = self._try_extract_from_runnable(cell_val, _seen)
+                    if result:
+                        return result
+
+        return None
 
     # ---- Private helpers ----
 

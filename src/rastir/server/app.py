@@ -265,7 +265,11 @@ def create_app(config: Optional[ServerConfig] = None) -> FastAPI:
     validate_config(cfg)
 
     # Configure logging before anything else
-    configure_logging(structured=cfg.logging.structured, level=cfg.logging.level)
+    configure_logging(
+        structured=cfg.logging.structured,
+        level=cfg.logging.level,
+        log_file=cfg.logging.log_file,
+    )
 
     components = _build_components(cfg)
 
@@ -304,6 +308,7 @@ def _register_routes(app: FastAPI, cfg: ServerConfig) -> None:
         try:
             body = await request.json()
         except Exception:
+            logger.error("[ROUTE] Failed to parse JSON body", exc_info=True)
             raise HTTPException(status_code=400, detail="Invalid JSON")
 
         # Validate required fields
@@ -317,6 +322,22 @@ def _register_routes(app: FastAPI, cfg: ServerConfig) -> None:
         service = body.get("service", "unknown")
         env = body.get("env", "unknown")
         version = body.get("version", "")
+
+        logger.debug(
+            "[ROUTE] POST /v1/telemetry  service=%s env=%s version=%s spans=%d",
+            service, env, version, len(spans),
+        )
+        for i, s in enumerate(spans):
+            logger.debug(
+                "[ROUTE] span[%d] name=%s type=%s trace=%s span=%s parent=%s start=%s end=%s keys=%s",
+                i,
+                s.get("name"), s.get("span_type"),
+                str(s.get("trace_id", ""))[:12],
+                str(s.get("span_id", ""))[:12],
+                s.get("parent_span_id") or s.get("parent_id"),
+                s.get("start_time"), s.get("end_time"),
+                sorted(s.keys()),
+            )
 
         # Rate limiting
         rl: Optional[RateLimiter] = request.app.state.rate_limiter
@@ -453,7 +474,13 @@ def main() -> None:
 
     cfg = load_config()
     app = create_app(cfg)
-    uvicorn.run(app, host=cfg.server.host, port=cfg.server.port)
+    # log_config=None prevents uvicorn from overriding our handlers
+    uvicorn.run(
+        app,
+        host=cfg.server.host,
+        port=cfg.server.port,
+        log_config=None,
+    )
 
 
 if __name__ == "__main__":

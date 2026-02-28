@@ -15,5 +15,11 @@ evaluation:
   judge_model: "gpt-4o-mini"
   judge_provider: "openai"
 
+exporter:
+  otlp_endpoint: "http://localhost:4318"
+  batch_size: 200
+  flush_interval: 5
+
 logging:
   level: "INFO"
+  log_file: "/tmp/rastir_debug.log"

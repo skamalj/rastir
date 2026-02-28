@@ -21,7 +21,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from rastir.adapters.types import AdapterResult, BaseAdapter
+from rastir.adapters.types import (
+    AdapterResult,
+    BaseAdapter,
+    RequestMetadata,
+    detect_provider_from_module,
+)
 
 
 class LangChainAdapter(BaseAdapter):
@@ -33,6 +38,7 @@ class LangChainAdapter(BaseAdapter):
 
     supports_tokens = True
     supports_streaming = True
+    supports_request_metadata = True
 
     # LangChain message / result class names we look for
     _KNOWN_CLASSES = frozenset({
@@ -108,7 +114,65 @@ class LangChainAdapter(BaseAdapter):
             extra_attributes=extras,
         )
 
-    # ---- helpers ----
+    # ---- Request-phase metadata ----
+
+    def can_handle_request(self, args: tuple, kwargs: dict) -> bool:
+        """Detect LangChain chat-model objects in request arguments.
+
+        Matches objects whose module starts with ``langchain`` and that
+        expose a model attribute (``model_name``, ``model``, ``model_id``).
+        Also matches ``RunnableBinding`` wrappers around such models.
+        """
+        return self._find_lc_model(args, kwargs) is not None
+
+    def extract_request_metadata(
+        self, args: tuple, kwargs: dict,
+    ) -> RequestMetadata:
+        """Extract model and provider from a LangChain model object."""
+        obj = self._find_lc_model(args, kwargs)
+        if obj is None:
+            return RequestMetadata()
+
+        # Unwrap RunnableBinding → .bound
+        inner = getattr(obj, "bound", None)
+        if inner is not None and inner is not obj:
+            model_name = self._extract_model_attr(inner) or self._extract_model_attr(obj)
+            module = getattr(type(inner), "__module__", "") or ""
+        else:
+            model_name = self._extract_model_attr(obj)
+            module = getattr(type(obj), "__module__", "") or ""
+
+        provider = detect_provider_from_module(module)
+        return RequestMetadata(
+            span_attributes={
+                "model": model_name or "unknown",
+                "provider": provider,
+            },
+        )
+
+    def _find_lc_model(self, args: tuple, kwargs: dict) -> Any:
+        """Find a LangChain model object in args/kwargs."""
+        return self._find_in_args(args, kwargs, self._is_lc_model)
+
+    @staticmethod
+    def _is_lc_model(obj: Any) -> bool:
+        """Check if obj looks like a LangChain chat model or RunnableBinding."""
+        module = getattr(type(obj), "__module__", "") or ""
+        if not module.startswith("langchain"):
+            return False
+        cls_name = type(obj).__name__
+        # Direct model class (ChatOpenAI, ChatAnthropic, ChatBedrock, ...)
+        if cls_name.startswith("Chat") or cls_name.endswith("LLM"):
+            return True
+        # RunnableBinding from .bind_tools()
+        if cls_name == "RunnableBinding":
+            inner = getattr(obj, "bound", None)
+            if inner is not None:
+                inner_cls = type(inner).__name__
+                return inner_cls.startswith("Chat") or inner_cls.endswith("LLM")
+        return False
+
+    # ---- Response helpers ----
 
     @staticmethod
     def _extract_native(result: Any) -> Any:

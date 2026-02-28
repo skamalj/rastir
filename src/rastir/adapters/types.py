@@ -48,6 +48,46 @@ class TokenDelta:
     provider: Optional[str] = None
 
 
+# ── Provider detection from module name ──────────────────────────────
+# Maps module prefixes to canonical provider names. Used by framework
+# adapters (LangChain, LangGraph) to determine the provider when they
+# find a model object in request arguments.
+_MODULE_PROVIDER_MAP: dict[str, str] = {
+    "langchain_openai": "openai",
+    "langchain_anthropic": "anthropic",
+    "langchain_aws": "bedrock",
+    "langchain_google": "gemini",
+    "langchain_groq": "groq",
+    "langchain_mistralai": "mistral",
+    "langchain_cohere": "cohere",
+    "openai": "openai",
+    "anthropic": "anthropic",
+    "google.genai": "gemini",
+    "google.generativeai": "gemini",
+    "groq": "groq",
+    "mistralai": "mistral",
+    "cohere": "cohere",
+}
+
+
+def detect_provider_from_module(module: str) -> str:
+    """Map a Python module name to a canonical provider string.
+
+    Used by framework adapters to determine the provider from
+    a model object's ``__module__``.
+    """
+    for prefix, provider in _MODULE_PROVIDER_MAP.items():
+        if module.startswith(prefix):
+            return provider
+    return "unknown"
+
+
+# ── Common model attribute names ────────────────────────────────────
+# Ordered by specificity: ``model_name`` (LangChain-OpenAI),
+# ``model`` (Anthropic, native SDKs), ``model_id`` (Bedrock).
+COMMON_MODEL_ATTRS: tuple[str, ...] = ("model_name", "model", "model_id", "modelId")
+
+
 class BaseAdapter:
     """Base class for all adapters.
 
@@ -96,6 +136,39 @@ class BaseAdapter:
         Returns span attributes to set before the function runs.
         """
         return RequestMetadata()
+
+    # ---- Helpers for request-phase scanning ----
+
+    @staticmethod
+    def _find_in_args(
+        args: tuple,
+        kwargs: dict[str, Any],
+        predicate: Any,
+    ) -> Any:
+        """Scan positional args and kwarg values for the first match.
+
+        ``predicate(obj) -> bool`` is called for each value. Returns
+        the first matching object or ``None``.
+        """
+        for arg in args:
+            if predicate(arg):
+                return arg
+        for val in kwargs.values():
+            if predicate(val):
+                return val
+        return None
+
+    @staticmethod
+    def _extract_model_attr(obj: Any) -> Optional[str]:
+        """Read the first non-empty model attribute from an object."""
+        for attr in COMMON_MODEL_ATTRS:
+            try:
+                val = getattr(obj, attr, None)
+                if val and isinstance(val, str):
+                    return val
+            except Exception:
+                continue
+        return None
 
     def can_handle_stream(self, chunk: Any) -> bool:
         """Return True if this adapter can handle a streaming chunk."""

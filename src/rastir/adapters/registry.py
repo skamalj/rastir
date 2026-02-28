@@ -11,7 +11,7 @@ the number of registered adapters.
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 from rastir.adapters.types import AdapterResult, BaseAdapter, RequestMetadata, TokenDelta
 
@@ -178,15 +178,24 @@ def resolve_request(args: tuple, kwargs: dict) -> Optional[RequestMetadata]:
 # Common parameter names for model across SDKs / user functions.
 _COMMON_MODEL_KWARGS = ("model", "model_id", "modelId", "model_name")
 
+# Attribute names to probe on objects passed as arguments (e.g.
+# LangChain chat model objects like ChatOpenAI, ChatAnthropic, ChatBedrock).
+_COMMON_MODEL_ATTRS = ("model_name", "model", "model_id", "modelId")
+
 
 def _scan_common_model_kwargs(kwargs: dict) -> Optional[RequestMetadata]:
-    """Fallback: extract model from common kwarg names.
+    """Fallback: extract model from common kwarg names or object attributes.
 
-    When no adapter's can_handle_request() matched, look for well-known
-    parameter names (model, model_id, modelId, model_name).  This
-    ensures request-phase metadata is captured even for unknown
-    providers, improving resilience when the API call fails.
+    When no adapter's can_handle_request() matched:
+    1. Look for well-known parameter names (model, model_id, …) with string values.
+    2. Scan the *values* of all arguments for objects that expose a model
+       attribute (e.g. ``ChatOpenAI.model_name``, ``ChatAnthropic.model``).
+
+    This ensures request-phase metadata is captured even for unknown
+    providers, improving resilience when the API call fails before
+    producing a response.
     """
+    # 1. String kwargs named "model", "model_id", etc.
     for key in _COMMON_MODEL_KWARGS:
         value = kwargs.get(key)
         if value and isinstance(value, str):
@@ -194,6 +203,60 @@ def _scan_common_model_kwargs(kwargs: dict) -> Optional[RequestMetadata]:
                 span_attributes={"model": value},
                 extra_attributes={},
             )
+
+    # 2. Object introspection: scan all kwarg values for model attributes.
+    for value in kwargs.values():
+        meta = _extract_model_from_object(value)
+        if meta:
+            return meta
+
+    return None
+
+
+def _extract_model_from_object(obj: Any) -> Optional[RequestMetadata]:
+    """Try to read a model name from an object's attributes.
+
+    Handles LangChain chat model objects (ChatOpenAI, ChatAnthropic,
+    ChatBedrock) and LangGraph CompiledGraph objects that contain
+    a chat model inside their nodes.
+    """
+    # Direct attribute probe on the object itself
+    for attr in _COMMON_MODEL_ATTRS:
+        try:
+            val = getattr(obj, attr, None)
+            if val and isinstance(val, str):
+                return RequestMetadata(
+                    span_attributes={"model": val},
+                    extra_attributes={},
+                )
+        except Exception:
+            continue
+
+    # LangGraph CompiledGraph: walk nodes to find the bound chat model.
+    nodes = getattr(obj, "nodes", None)
+    if isinstance(nodes, dict):
+        for node in nodes.values():
+            for accessor in ("bound", "func"):
+                inner = getattr(node, accessor, None)
+                if inner is not None:
+                    meta = _extract_model_from_object(inner)
+                    if meta:
+                        return meta
+
+    # RunnableBinding (LangChain) wraps another Runnable in .bound
+    bound = getattr(obj, "bound", None)
+    if bound is not None and bound is not obj:
+        meta = _extract_model_from_object(bound)
+        if meta:
+            return meta
+
+    # RunnableSequence first/last
+    first = getattr(obj, "first", None)
+    if first is not None and first is not obj:
+        meta = _extract_model_from_object(first)
+        if meta:
+            return meta
+
     return None
 
 

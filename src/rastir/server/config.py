@@ -146,6 +146,7 @@ class LoggingSection:
     """Structured logging settings."""
     structured: bool = False  # enable JSON structured logs
     level: str = "INFO"
+    log_file: Optional[str] = None  # path to debug log file (None = disabled)
 
 
 @dataclass(frozen=True)
@@ -387,6 +388,7 @@ def load_config(config_path: Optional[str] = None) -> ServerConfig:
     logging_cfg = LoggingSection(
         structured=_get("logging", "structured", False, as_type=bool),
         level=_get("logging", "level", "INFO"),
+        log_file=_get("logging", "log_file", None),
     )
 
     # -- redaction --
