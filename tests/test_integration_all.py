@@ -972,6 +972,113 @@ class TestNestedDecoratorIntegration:
 
 
 # =====================================================================
+# 9. Metrics aggregation with real API spans
+# =====================================================================
+
+@skip_no_openai
+@skip_no_anthropic
+class TestMetricsAggregation:
+    """Feed real API spans into MetricsRegistry, verify aggregate counts."""
+
+    @staticmethod
+    def _parse_metric(output: str, metric_name: str, labels: dict[str, str]) -> float | None:
+        """Parse a counter/gauge value from Prometheus text output."""
+        for line in output.splitlines():
+            if line.startswith("#") or not line.startswith(metric_name):
+                continue
+            if all(f'{k}="{v}"' in line for k, v in labels.items()):
+                return float(line.rsplit(" ", 1)[-1])
+        return None
+
+    def test_multi_model_aggregate_metrics(self):
+        """Make 2 OpenAI + 3 Anthropic real calls, verify /metrics counts & tokens."""
+        import openai
+        import anthropic
+        from rastir.server.metrics import MetricsRegistry
+
+        captured, originals = _capture_spans()
+        try:
+            @llm
+            def call_openai(prompt: str, model: str = "gpt-4o-mini") -> object:
+                client = openai.OpenAI()
+                return client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=5,
+                )
+
+            @llm
+            def call_anthropic(prompt: str, model: str = "claude-3-haiku-20240307") -> object:
+                client = anthropic.Anthropic()
+                return client.messages.create(
+                    model=model,
+                    max_tokens=5,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+
+            # 2 OpenAI calls
+            call_openai("Say hi")
+            call_openai("Say bye")
+
+            # 3 Anthropic calls
+            call_anthropic("Say hello")
+            call_anthropic("Say goodbye")
+            call_anthropic("Say thanks")
+
+        finally:
+            _restore_enqueue(originals)
+
+        assert len(captured) == 5, f"Expected 5 spans, got {len(captured)}"
+
+        # Feed real spans into MetricsRegistry
+        reg = MetricsRegistry()
+        for span in captured:
+            reg.record_span(span, service="integ-test", env="test")
+
+        output = reg.generate()[0].decode()
+        print(f"\n  --- /metrics output (excerpt) ---")
+        for line in output.splitlines():
+            if "rastir_llm_calls_total" in line or "rastir_tokens" in line:
+                if not line.startswith("#"):
+                    print(f"  {line}")
+
+        # Verify call counts
+        openai_calls = self._parse_metric(output, "rastir_llm_calls_total",
+                                          {"provider": "openai"})
+        anthropic_calls = self._parse_metric(output, "rastir_llm_calls_total",
+                                             {"provider": "anthropic"})
+        assert openai_calls == 2.0, f"Expected 2 OpenAI calls, got {openai_calls}"
+        assert anthropic_calls == 3.0, f"Expected 3 Anthropic calls, got {anthropic_calls}"
+
+        # Verify tokens are real (non-zero, non-round)
+        openai_tokens_in = self._parse_metric(output, "rastir_tokens_input_total",
+                                              {"provider": "openai"})
+        anthropic_tokens_in = self._parse_metric(output, "rastir_tokens_input_total",
+                                                 {"provider": "anthropic"})
+        assert openai_tokens_in is not None and openai_tokens_in > 0, \
+            f"OpenAI input tokens should be > 0, got {openai_tokens_in}"
+        assert anthropic_tokens_in is not None and anthropic_tokens_in > 0, \
+            f"Anthropic input tokens should be > 0, got {anthropic_tokens_in}"
+
+        openai_tokens_out = self._parse_metric(output, "rastir_tokens_output_total",
+                                               {"provider": "openai"})
+        anthropic_tokens_out = self._parse_metric(output, "rastir_tokens_output_total",
+                                                  {"provider": "anthropic"})
+        assert openai_tokens_out is not None and openai_tokens_out > 0
+        assert anthropic_tokens_out is not None and anthropic_tokens_out > 0
+
+        # Verify total spans ingested = 5
+        total_llm = self._parse_metric(output, "rastir_spans_ingested_total",
+                                       {"span_type": "llm", "status": "OK"})
+        assert total_llm == 5.0
+
+        # Print actual token values for visibility
+        print(f"\n  Real token totals:")
+        print(f"    OpenAI:    in={openai_tokens_in}, out={openai_tokens_out}")
+        print(f"    Anthropic: in={anthropic_tokens_in}, out={anthropic_tokens_out}")
+
+
+# =====================================================================
 # Direct run
 # =====================================================================
 
