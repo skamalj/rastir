@@ -22,6 +22,7 @@ from rastir.config import configure
 from rastir.context import get_current_span
 from rastir.decorators import agent, llm, metric, retrieval, tool, trace
 from rastir.transport import get_export_stats, stop_exporter
+from rastir.wrapper import wrap
 
 __all__ = [
     "configure",
@@ -32,6 +33,7 @@ __all__ = [
     "llm",
     "tool",
     "retrieval",
+    "wrap",
     "stop_exporter",
     "get_export_stats",
 ]

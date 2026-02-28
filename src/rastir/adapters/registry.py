@@ -54,6 +54,10 @@ def resolve(result: object) -> Optional[AdapterResult]:
 
     unwrapped = result
     framework_attrs: dict[str, object] = {}
+    framework_tokens_input: int | None = None
+    framework_tokens_output: int | None = None
+    framework_model: str | None = None
+    framework_finish_reason: str | None = None
 
     # Phase 1: Framework unwrap
     max_unwrap = 5  # prevent infinite loops
@@ -67,6 +71,15 @@ def resolve(result: object) -> Optional[AdapterResult]:
                     ar = adapter.transform(unwrapped)
                     # Always capture framework extra_attributes
                     framework_attrs.update(ar.extra_attributes)
+                    # Capture framework-level metadata if provided
+                    if ar.tokens_input is not None:
+                        framework_tokens_input = ar.tokens_input
+                    if ar.tokens_output is not None:
+                        framework_tokens_output = ar.tokens_output
+                    if ar.model and ar.model != "unknown":
+                        framework_model = ar.model
+                    if ar.finish_reason and ar.finish_reason != "unknown":
+                        framework_finish_reason = ar.finish_reason
                     if ar.unwrapped_result is not None:
                         unwrapped = ar.unwrapped_result
                         matched = True
@@ -76,6 +89,21 @@ def resolve(result: object) -> Optional[AdapterResult]:
         if not matched:
             break
 
+    def _merge_framework_metadata(ar: AdapterResult) -> AdapterResult:
+        """Merge framework-level metadata into the adapter result."""
+        for k, v in framework_attrs.items():
+            if k not in ar.extra_attributes:
+                ar.extra_attributes[k] = v
+        if ar.tokens_input is None and framework_tokens_input is not None:
+            ar.tokens_input = framework_tokens_input
+        if ar.tokens_output is None and framework_tokens_output is not None:
+            ar.tokens_output = framework_tokens_output
+        if (ar.model is None or ar.model == "unknown") and framework_model:
+            ar.model = framework_model
+        if (ar.finish_reason is None or ar.finish_reason == "unknown") and framework_finish_reason:
+            ar.finish_reason = framework_finish_reason
+        return ar
+
     # Phase 2: Provider extraction
     for adapter in _adapters:
         if adapter.kind != "provider":
@@ -83,11 +111,7 @@ def resolve(result: object) -> Optional[AdapterResult]:
         if adapter.can_handle(unwrapped):
             try:
                 ar = adapter.transform(unwrapped)
-                # Merge framework attributes
-                for k, v in framework_attrs.items():
-                    if k not in ar.extra_attributes:
-                        ar.extra_attributes[k] = v
-                return ar
+                return _merge_framework_metadata(ar)
             except Exception:
                 logger.debug("Provider adapter %s failed", adapter.name, exc_info=True)
 
@@ -97,10 +121,7 @@ def resolve(result: object) -> Optional[AdapterResult]:
             continue
         try:
             ar = adapter.transform(unwrapped)
-            for k, v in framework_attrs.items():
-                if k not in ar.extra_attributes:
-                    ar.extra_attributes[k] = v
-            return ar
+            return _merge_framework_metadata(ar)
         except Exception:
             logger.debug("Fallback adapter %s failed", adapter.name, exc_info=True)
 

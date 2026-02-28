@@ -501,6 +501,63 @@ class TestMetricsRegistry:
         output = reg.generate()[0].decode()
         assert 'error_type="unknown"' in output
 
+    def test_guardrail_request_metric(self):
+        """LLM span with guardrail_id emits rastir_guardrail_requests_total."""
+        reg = MetricsRegistry()
+        reg.record_span(
+            _span(
+                span_type="llm",
+                model="claude-3",
+                provider="bedrock",
+                guardrail_id="gr-abc123",
+                guardrail_version="3",
+                guardrail_enabled=True,
+            ),
+            service="svc",
+            env="prod",
+        )
+        output = reg.generate()[0].decode()
+        assert "rastir_guardrail_requests_total" in output
+        assert 'guardrail_id="gr-abc123"' in output
+        assert 'guardrail_version="3"' in output
+
+    def test_guardrail_violation_metric(self):
+        """LLM span with guardrail_action emits rastir_guardrail_violations_total."""
+        reg = MetricsRegistry()
+        reg.record_span(
+            _span(
+                span_type="llm",
+                model="claude-3",
+                provider="bedrock",
+                guardrail_id="gr-abc123",
+                guardrail_action="GUARDRAIL_INTERVENED",
+                guardrail_category="CONTENT_POLICY",
+            ),
+            service="svc",
+            env="prod",
+        )
+        output = reg.generate()[0].decode()
+        assert "rastir_guardrail_violations_total" in output
+        assert 'guardrail_action="GUARDRAIL_INTERVENED"' in output
+        assert 'guardrail_category="CONTENT_POLICY"' in output
+        assert 'model="claude-3"' in output
+
+    def test_guardrail_no_metric_without_guardrail(self):
+        """LLM span without guardrail attributes doesn't increment guardrail counters."""
+        reg = MetricsRegistry()
+        reg.record_span(
+            _span(
+                span_type="llm",
+                model="gpt-4",
+                provider="openai",
+            ),
+            service="svc",
+            env="prod",
+        )
+        output = reg.generate()[0].decode()
+        # Counters still registered but no samples
+        assert 'guardrail_id=' not in output
+
 
 # ========================================================================
 # IngestionWorker tests

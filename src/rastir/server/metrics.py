@@ -38,6 +38,7 @@ _DEFAULT_CARDINALITY_CAPS: dict[str, int] = {
     "tool_name": 200,
     "agent": 200,
     "error_type": 50,
+    "guardrail_id": 100,
 }
 
 # Default histogram buckets optimised for LLM workloads
@@ -46,7 +47,7 @@ _DEFAULT_TOKENS_BUCKETS = (10, 50, 100, 250, 500, 1000, 2000, 4000, 8000, 16000,
 _MAX_BUCKET_COUNT = 20
 
 # Canonical span types — anything else is mapped to "system"
-_VALID_SPAN_TYPES = frozenset({"agent", "llm", "tool", "retrieval", "system"})
+_VALID_SPAN_TYPES = frozenset({"agent", "llm", "tool", "retrieval", "system", "infra"})
 
 # --------------------------------------------------------------------------
 # Error-type normalisation: raw exception → fixed category
@@ -195,6 +196,24 @@ class MetricsRegistry:
         )
 
         # ---- Server-internal counters ----
+        # ---- Guardrail counters ----
+        self.guardrail_requests = Counter(
+            "rastir_guardrail_requests_total",
+            "Total LLM calls with guardrail configuration enabled",
+            ["service", "env", "provider", "guardrail_id", "guardrail_version"],
+            registry=self._registry,
+        )
+
+        self.guardrail_violations = Counter(
+            "rastir_guardrail_violations_total",
+            "Total guardrail interventions (violations)",
+            ["service", "env", "provider", "model", "guardrail_id",
+             "guardrail_action", "guardrail_category"],
+            registry=self._registry,
+        )
+
+        self._seen_guardrail_ids: set[str] = set()
+
         self.ingestion_rejections = Counter(
             "rastir_ingestion_rejections_total",
             "Total spans rejected due to full queue",
@@ -381,6 +400,42 @@ class MetricsRegistry:
                     model=model,
                     provider=provider,
                 ).observe(total_tokens)
+
+            # -- guardrail metrics (LLM spans with guardrail attrs)
+            guardrail_id = attrs.get("guardrail_id")
+            if guardrail_id:
+                safe_gr_id = self._guard_cardinality(
+                    guardrail_id, self._seen_guardrail_ids, "guardrail_id"
+                )
+                guardrail_version = str(attrs.get("guardrail_version", ""))
+                self.guardrail_requests.labels(
+                    service=self._clip(service),
+                    env=self._clip(env),
+                    provider=provider,
+                    guardrail_id=safe_gr_id,
+                    guardrail_version=guardrail_version,
+                ).inc()
+
+            # Guardrail violation (intervention occurred)
+            guardrail_action = attrs.get("guardrail_action")
+            if guardrail_action and guardrail_action != "NONE":
+                safe_gr_id = self._guard_cardinality(
+                    attrs.get("guardrail_id", "unknown"),
+                    self._seen_guardrail_ids,
+                    "guardrail_id",
+                )
+                guardrail_category = attrs.get(
+                    "guardrail_category", "unknown"
+                )
+                self.guardrail_violations.labels(
+                    service=self._clip(service),
+                    env=self._clip(env),
+                    provider=provider,
+                    model=model,
+                    guardrail_id=safe_gr_id,
+                    guardrail_action=guardrail_action,
+                    guardrail_category=guardrail_category,
+                ).inc()
 
         # -- tool-specific
         elif span_type == "tool":

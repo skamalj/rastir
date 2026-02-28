@@ -285,16 +285,20 @@ def _fresh_registry():
     from rastir.adapters.bedrock import BedrockAdapter
     from rastir.adapters.gemini import GeminiAdapter
     from rastir.adapters.cohere import CohereAdapter
+    from rastir.adapters.crewai import CrewAIAdapter
     from rastir.adapters.mistral import MistralAdapter
     from rastir.adapters.groq import GroqAdapter
     from rastir.adapters.langchain import LangChainAdapter
     from rastir.adapters.langgraph import LangGraphAdapter
+    from rastir.adapters.llamaindex import LlamaIndexAdapter
     from rastir.adapters.retrieval import RetrievalAdapter
     from rastir.adapters.tool import ToolAdapter
     from rastir.adapters.fallback import FallbackAdapter
 
     register(LangGraphAdapter())
     register(LangChainAdapter())
+    register(LlamaIndexAdapter())
+    register(CrewAIAdapter())
     register(AzureOpenAIAdapter())
     register(GroqAdapter())
     register(OpenAIAdapter())
@@ -329,6 +333,8 @@ class TestRegistry:
         assert "groq" in names
         assert "langchain" in names
         assert "langgraph" in names
+        assert "llamaindex" in names
+        assert "crewai" in names
         assert "retrieval" in names
         assert "fallback" in names
 
@@ -477,6 +483,120 @@ class TestBedrockAdapter:
         assert ar is not None
         assert ar.model == "unknown"
         assert ar.tokens_input == 5
+
+    def test_guardrail_request_detection(self):
+        """can_handle_request detects guardrailIdentifier in kwargs."""
+        from rastir.adapters.bedrock import BedrockAdapter
+        adapter = BedrockAdapter()
+        assert adapter.can_handle_request((), {
+            "guardrailIdentifier": "my-guardrail-id",
+            "guardrailVersion": "1",
+        })
+        assert not adapter.can_handle_request((), {"modelId": "anthropic.claude"})
+
+    def test_guardrail_request_metadata_extraction(self):
+        """extract_request_metadata extracts guardrail config."""
+        from rastir.adapters.bedrock import BedrockAdapter
+        adapter = BedrockAdapter()
+        meta = adapter.extract_request_metadata((), {
+            "guardrailIdentifier": "gr-abc123",
+            "guardrailVersion": "3",
+        })
+        assert meta.span_attributes["guardrail.id"] == "gr-abc123"
+        assert meta.span_attributes["guardrail.version"] == "3"
+        assert meta.span_attributes["guardrail.enabled"] is True
+        assert meta.extra_attributes["guardrail_id"] == "gr-abc123"
+
+    def test_guardrail_config_nested(self):
+        """Nested guardrailConfig dict is also detected."""
+        from rastir.adapters.bedrock import BedrockAdapter
+        adapter = BedrockAdapter()
+        assert adapter.can_handle_request((), {
+            "guardrailConfig": {
+                "guardrailIdentifier": "gr-nested",
+                "guardrailVersion": "2",
+            }
+        })
+        meta = adapter.extract_request_metadata((), {
+            "guardrailConfig": {
+                "guardrailIdentifier": "gr-nested",
+                "guardrailVersion": "2",
+            }
+        })
+        assert meta.span_attributes["guardrail.id"] == "gr-nested"
+
+    def test_guardrail_response_intervention(self):
+        """Response with guardrail intervention is detected."""
+        result = {
+            "output": {"message": {"content": [{"text": "Blocked"}]}},
+            "usage": {"inputTokens": 10, "outputTokens": 5},
+            "ResponseMetadata": {"HTTPHeaders": {}},
+            "amazon-bedrock-guardrailAction": "GUARDRAIL_INTERVENED",
+        }
+        ar = resolve(result)
+        assert ar is not None
+        assert ar.extra_attributes.get("guardrail.triggered") is True
+        assert ar.extra_attributes.get("guardrail.action") == "GUARDRAIL_INTERVENED"
+
+    def test_guardrail_response_no_intervention(self):
+        """Response without guardrail intervention has no guardrail attrs."""
+        result = _bedrock_response()
+        ar = resolve(result)
+        assert ar is not None
+        assert "guardrail.triggered" not in ar.extra_attributes
+
+    def test_guardrail_trace_with_assessment(self):
+        """Response with trace.guardrail containing assessments."""
+        result = {
+            "output": {"message": {"content": [{"text": "Blocked"}]}},
+            "usage": {"inputTokens": 10, "outputTokens": 5},
+            "ResponseMetadata": {"HTTPHeaders": {}},
+            "trace": {
+                "guardrail": {
+                    "action": "GUARDRAIL_INTERVENED",
+                    "inputAssessment": {
+                        "contentPolicy": [
+                            {"type": "CONTENT_POLICY", "action": "BLOCKED"}
+                        ]
+                    },
+                    "outputAssessments": [],
+                }
+            },
+        }
+        ar = resolve(result)
+        assert ar is not None
+        assert ar.extra_attributes.get("guardrail.triggered") is True
+        assert ar.extra_attributes.get("guardrail.category") == "CONTENT_POLICY"
+        assert ar.extra_attributes.get("guardrail_category") == "CONTENT_POLICY"
+
+    def test_guardrail_category_overflow(self):
+        """Unknown category maps to __cardinality_overflow__."""
+        from rastir.adapters.bedrock import BedrockAdapter
+        adapter = BedrockAdapter()
+        assert adapter._safe_category("UNKNOWN_POLICY") == "__cardinality_overflow__"
+        assert adapter._safe_category("CONTENT_POLICY") == "CONTENT_POLICY"
+
+    def test_guardrail_stream_chunk_metadata(self):
+        """Bedrock streaming metadata chunk yields tokens."""
+        from rastir.adapters.bedrock import BedrockAdapter
+        adapter = BedrockAdapter()
+        chunk = {
+            "metadata": {
+                "usage": {"inputTokens": 50, "outputTokens": 30},
+            }
+        }
+        assert adapter.can_handle_stream(chunk)
+        delta = adapter.extract_stream_delta(chunk)
+        assert delta.tokens_input == 50
+        assert delta.tokens_output == 30
+
+    def test_capability_flags_guardrail(self):
+        """Bedrock adapter has guardrail capability flags."""
+        from rastir.adapters.bedrock import BedrockAdapter
+        a = BedrockAdapter()
+        assert a.supports_request_metadata is True
+        assert a.supports_guardrail_metadata is True
+        assert a.supports_streaming is True
 
 
 # ========================================================================
@@ -1206,3 +1326,277 @@ class TestLangGraphAdapter:
         from rastir.adapters.langgraph import LangGraphAdapter
         from rastir.adapters.langchain import LangChainAdapter
         assert LangGraphAdapter.priority > LangChainAdapter.priority
+
+
+# ========================================================================
+# LlamaIndex mock factories
+# ========================================================================
+
+
+def _make_llamaindex_response(response_text="Answer", source_node_count=2,
+                               metadata=None, raw=None):
+    """Create a mock LlamaIndex Response object."""
+    cls = type("Response", (), {
+        "__module__": "llama_index.core.base.response.schema"
+    })
+    obj = cls.__new__(cls)
+    obj.response = response_text
+    obj.source_nodes = [object() for _ in range(source_node_count)]
+    obj.metadata = metadata or {}
+    obj.raw = raw
+    return obj
+
+
+def _make_llamaindex_agent_response(response_text="Agent answer", raw=None):
+    """Create a mock LlamaIndex AgentChatResponse."""
+    cls = type("AgentChatResponse", (), {
+        "__module__": "llama_index.core.base.response.schema"
+    })
+    obj = cls.__new__(cls)
+    obj.response = response_text
+    obj.source_nodes = []
+    obj.metadata = {}
+    obj.raw = raw
+    return obj
+
+
+def _make_llamaindex_chat_response(raw=None):
+    """Create a mock LlamaIndex ChatResponse with message."""
+    cls = type("ChatResponse", (), {
+        "__module__": "llama_index.core.llms.types"
+    })
+    obj = cls.__new__(cls)
+    obj.source_nodes = None
+    obj.metadata = {}
+    obj.raw = raw
+    # ChatResponse has .message with raw
+    msg = type("ChatMessage", (), {"__module__": "llama_index.core.llms.types"})
+    msg_obj = msg.__new__(msg)
+    msg_obj.raw = raw
+    msg_obj.additional_kwargs = {}
+    obj.message = msg_obj
+    return obj
+
+
+def _make_llamaindex_streaming_response():
+    """Create a mock LlamaIndex StreamingResponse chunk."""
+    cls = type("StreamingResponse", (), {
+        "__module__": "llama_index.core.base.response.schema"
+    })
+    obj = cls.__new__(cls)
+    obj.source_nodes = None
+    obj.metadata = None
+    obj.raw = None
+    return obj
+
+
+# ========================================================================
+# LlamaIndex adapter tests
+# ========================================================================
+
+
+class TestLlamaIndexAdapter:
+    """Tests for the LlamaIndex framework adapter."""
+
+    def test_detect_response(self):
+        """LlamaIndex Response object is detected."""
+        resp = _make_llamaindex_response()
+        ar = resolve(resp)
+        assert ar is not None
+        assert ar.extra_attributes.get("llamaindex_source_node_count") == 2
+
+    def test_detect_agent_chat_response(self):
+        """AgentChatResponse is detected."""
+        resp = _make_llamaindex_agent_response()
+        ar = resolve(resp)
+        assert ar is not None
+        assert ar.extra_attributes.get("llamaindex_source_node_count") == 0
+
+    def test_unwrap_raw_openai(self):
+        """Raw OpenAI response inside LlamaIndex Response is unwrapped."""
+        openai_resp = _make_openai_chat_completion(
+            model="gpt-4o", prompt_tokens=50, completion_tokens=25,
+        )
+        resp = _make_llamaindex_response(raw=openai_resp, source_node_count=3)
+        ar = resolve(resp)
+        assert ar is not None
+        assert ar.provider == "openai"
+        assert ar.model == "gpt-4o"
+        assert ar.tokens_input == 50
+        assert ar.tokens_output == 25
+        assert ar.extra_attributes.get("llamaindex_source_node_count") == 3
+
+    def test_unwrap_raw_anthropic(self):
+        """Raw Anthropic response inside LlamaIndex Response is unwrapped."""
+        anthropic_resp = _make_anthropic_message(
+            model="claude-3-5-sonnet", input_tokens=40, output_tokens=60,
+        )
+        resp = _make_llamaindex_response(raw=anthropic_resp)
+        ar = resolve(resp)
+        assert ar is not None
+        assert ar.provider == "anthropic"
+        assert ar.model == "claude-3-5-sonnet"
+        assert ar.tokens_input == 40
+        assert ar.tokens_output == 60
+
+    def test_chat_response_unwrap_via_message(self):
+        """ChatResponse unwraps via .message.raw."""
+        openai_resp = _make_openai_chat_completion(model="gpt-4o-mini")
+        resp = _make_llamaindex_chat_response(raw=openai_resp)
+        ar = resolve(resp)
+        assert ar is not None
+        assert ar.provider == "openai"
+        assert ar.model == "gpt-4o-mini"
+
+    def test_metadata_extraction(self):
+        """Response metadata dict entries are prefixed with llamaindex_."""
+        resp = _make_llamaindex_response(
+            metadata={"model": "gpt-4o", "pipeline_type": "query"},
+        )
+        ar = resolve(resp)
+        assert ar is not None
+        assert ar.extra_attributes.get("llamaindex_model") == "gpt-4o"
+        assert ar.extra_attributes.get("llamaindex_pipeline_type") == "query"
+
+    def test_streaming_response_detected(self):
+        """StreamingResponse is detected by can_handle."""
+        resp = _make_llamaindex_streaming_response()
+        ar = resolve(resp)
+        assert ar is not None
+
+    def test_negative_wrong_module(self):
+        """Response-like object from wrong module should NOT match."""
+        cls = type("Response", (), {"__module__": "fastapi"})
+        obj = cls.__new__(cls)
+        ar = resolve(obj)
+        assert ar is not None
+        assert ar.provider == "unknown"  # fallback
+
+    def test_priority_between_langchain_and_providers(self):
+        """LlamaIndex (240) should be below LangChain (250) and above providers."""
+        from rastir.adapters.llamaindex import LlamaIndexAdapter
+        from rastir.adapters.langchain import LangChainAdapter
+        from rastir.adapters.openai import OpenAIAdapter
+        assert LangChainAdapter.priority > LlamaIndexAdapter.priority
+        assert LlamaIndexAdapter.priority > OpenAIAdapter.priority
+
+
+# ========================================================================
+# CrewAI mock factories
+# ========================================================================
+
+
+def _make_crewai_crew_output(raw="Final crew output", token_usage=None,
+                              tasks_output=None, json_dict=None, pydantic=None):
+    """Create a mock CrewAI CrewOutput object."""
+    cls = type("CrewOutput", (), {"__module__": "crewai.crews.crew_output"})
+    obj = cls.__new__(cls)
+    obj.raw = raw
+    obj.token_usage = token_usage or {}
+    obj.tasks_output = tasks_output or []
+    obj.json_dict = json_dict
+    obj.pydantic = pydantic
+    return obj
+
+
+def _make_crewai_task_output(description="Research task", agent="Researcher",
+                              raw="Task result", token_usage=None):
+    """Create a mock CrewAI TaskOutput object."""
+    cls = type("TaskOutput", (), {"__module__": "crewai.tasks.task_output"})
+    obj = cls.__new__(cls)
+    obj.description = description
+    obj.agent = agent
+    obj.raw = raw
+    obj.name = None
+    obj.token_usage = token_usage
+    return obj
+
+
+# ========================================================================
+# CrewAI adapter tests
+# ========================================================================
+
+
+class TestCrewAIAdapter:
+    """Tests for the CrewAI framework adapter."""
+
+    def test_detect_crew_output(self):
+        """CrewOutput object is detected."""
+        resp = _make_crewai_crew_output()
+        ar = resolve(resp)
+        assert ar is not None
+
+    def test_detect_task_output(self):
+        """TaskOutput object is detected."""
+        resp = _make_crewai_task_output()
+        ar = resolve(resp)
+        assert ar is not None
+        assert ar.extra_attributes.get("crewai_task_description") == "Research task"
+        assert ar.extra_attributes.get("crewai_agent") == "Researcher"
+
+    def test_crew_output_token_usage(self):
+        """Token usage is extracted from CrewOutput."""
+        resp = _make_crewai_crew_output(
+            token_usage={
+                "prompt_tokens": 500,
+                "completion_tokens": 200,
+                "total_tokens": 700,
+                "successful_requests": 3,
+            }
+        )
+        ar = resolve(resp)
+        assert ar is not None
+        assert ar.tokens_input == 500
+        assert ar.tokens_output == 200
+        assert ar.extra_attributes.get("crewai_total_tokens") == 700
+        assert ar.extra_attributes.get("crewai_successful_requests") == 3
+
+    def test_crew_output_tasks_metadata(self):
+        """Tasks metadata is extracted from CrewOutput."""
+        t1 = _make_crewai_task_output(description="Research", agent="Researcher")
+        t2 = _make_crewai_task_output(description="Write", agent="Writer")
+        resp = _make_crewai_crew_output(tasks_output=[t1, t2])
+        ar = resolve(resp)
+        assert ar is not None
+        assert ar.extra_attributes.get("crewai_task_count") == 2
+        tasks = ar.extra_attributes.get("crewai_tasks")
+        assert len(tasks) == 2
+        assert tasks[0]["agent"] == "Researcher"
+        assert tasks[1]["description"] == "Write"
+
+    def test_crew_output_json_and_pydantic(self):
+        """JSON and pydantic output flags are detected."""
+        resp = _make_crewai_crew_output(
+            json_dict={"key": "value"},
+            pydantic=object(),
+        )
+        ar = resolve(resp)
+        assert ar is not None
+        assert ar.extra_attributes.get("crewai_has_json_output") is True
+        assert ar.extra_attributes.get("crewai_has_pydantic_output") is True
+
+    def test_task_output_token_usage(self):
+        """Token usage on individual task."""
+        resp = _make_crewai_task_output(
+            token_usage={"prompt_tokens": 100, "completion_tokens": 50},
+        )
+        ar = resolve(resp)
+        assert ar is not None
+        assert ar.tokens_input == 100
+        assert ar.tokens_output == 50
+
+    def test_negative_wrong_module(self):
+        """CrewOutput-like class from wrong module should NOT match."""
+        cls = type("CrewOutput", (), {"__module__": "mylib.types"})
+        obj = cls.__new__(cls)
+        ar = resolve(obj)
+        assert ar is not None
+        assert ar.provider == "unknown"  # fallback
+
+    def test_priority_in_framework_range(self):
+        """CrewAI (245) should be in framework range."""
+        from rastir.adapters.crewai import CrewAIAdapter
+        from rastir.adapters.langchain import LangChainAdapter
+        from rastir.adapters.llamaindex import LlamaIndexAdapter
+        assert LangChainAdapter.priority > CrewAIAdapter.priority
+        assert CrewAIAdapter.priority > LlamaIndexAdapter.priority

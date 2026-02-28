@@ -31,6 +31,7 @@ class SpanType(str, Enum):
     RETRIEVAL = "retrieval"
     METRIC = "metric"
     SYSTEM = "system"
+    INFRA = "infra"
 
 
 @dataclass
