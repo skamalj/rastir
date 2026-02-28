@@ -119,6 +119,36 @@ If unhealthy:
 | `rastir_duration_seconds` | Histogram | service, env, span_type |
 | `rastir_tokens_per_call` | Histogram | service, env, model, provider |
 
+### Guardrail Metrics
+
+| Metric | Type | Labels |
+|--------|------|--------|
+| `rastir_guardrail_requests_total` | Counter | service, env, provider, guardrail_id, guardrail_version |
+| `rastir_guardrail_violations_total` | Counter | service, env, provider, model, guardrail_id, guardrail_action, guardrail_category |
+
+Guardrail labels are **cardinality-guarded** with bounded enum validation:
+- `guardrail_category` must be one of: `CONTENT_POLICY`, `SENSITIVE_INFORMATION_POLICY`, `WORD_POLICY`, `TOPIC_POLICY`, `CONTEXTUAL_GROUNDING_POLICY`, `DENIED_TOPIC`
+- `guardrail_action` must be one of: `GUARDRAIL_INTERVENED`, `NONE`
+- `guardrail_id` is subject to the standard cardinality cap (default: 100)
+- Unknown values are replaced with `__cardinality_overflow__`
+
+This defence-in-depth validation runs on **both** the client adapter and the server, preventing label explosion from malformed or injected span data.
+
+### Error Type Normalisation
+
+The `rastir_errors_total` counter uses normalised error categories instead of raw exception class names. This prevents unbounded label cardinality from arbitrary exception types.
+
+| Normalised category | Matched exception patterns |
+|---------------------|---------------------------|
+| `timeout` | `TimeoutError`, `asyncio.TimeoutError`, `httpx.TimeoutException`, `httpx.ReadTimeout`, `httpx.ConnectTimeout`, `openai.APITimeoutError` |
+| `rate_limit` | `RateLimitError`, `openai.RateLimitError`, `anthropic.RateLimitError` |
+| `validation_error` | `ValueError`, `TypeError`, `ValidationError`, `pydantic.ValidationError` |
+| `provider_error` | `openai.APIError`, `openai.APIConnectionError`, `anthropic.APIError`, `botocore.exceptions.ClientError` |
+| `internal_error` | `RuntimeError`, `Exception` |
+| `unknown` | Any unrecognised exception type |
+
+Normalisation uses exact match first, then substring heuristics (e.g., any exception with "timeout" in the name maps to `timeout`).
+
 ### Histogram Buckets
 
 Histograms track the **distribution** of values, not just averages. Rastir ships two histograms with LLM-optimised default buckets:

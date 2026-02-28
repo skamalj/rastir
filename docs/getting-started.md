@@ -122,7 +122,9 @@ scrape_configs:
 | `rastir_tokens_output_total` | Counter | Output tokens by model, provider, agent |
 | `rastir_tool_calls_total` | Counter | Tool invocations by tool_name, agent |
 | `rastir_retrieval_calls_total` | Counter | Retrieval operations by agent |
-| `rastir_errors_total` | Counter | Error spans by type and error category |
+| `rastir_errors_total` | Counter | Error spans by type and normalised error category |
+| `rastir_guardrail_requests_total` | Counter | Guardrail-enabled LLM calls |
+| `rastir_guardrail_violations_total` | Counter | Guardrail interventions |
 | `rastir_duration_seconds` | Histogram | Span duration by service, env, type |
 | `rastir_tokens_per_call` | Histogram | Tokens per LLM call by model, provider |
 
@@ -135,6 +137,31 @@ Each decorated function creates a span with:
 - Span type (trace, agent, llm, tool, retrieval)
 - Attributes (model, provider, tokens, agent name, etc.)
 - Error events with exception details
+
+### Two-Phase Enrichment
+
+Rastir captures model/provider metadata in two phases:
+
+1. **Request phase** — before the API call, function kwargs are scanned for `model`, `model_id`, or `modelId` hints
+2. **Response phase** — the adapter pipeline extracts metadata from the return value
+
+If the API call raises an exception (rate limit, timeout, etc.), the request-phase metadata survives:
+
+```python
+@llm
+def risky_call(query: str):
+    return openai.chat.completions.create(
+        model="gpt-4o",          # ← captured in request phase
+        messages=[...],
+    )
+    # If RateLimitError is raised:
+    #   span still has model="gpt-4o", provider="openai"
+    #   error_type="rate_limit"
+```
+
+### Error Normalisation
+
+Raw exception types are normalised into six categories for consistent metrics: `timeout`, `rate_limit`, `validation_error`, `provider_error`, `internal_error`, `unknown`. See the [Server documentation](server.md#error-type-normalisation) for the full mapping.
 
 ---
 

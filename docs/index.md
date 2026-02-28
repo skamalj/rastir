@@ -16,9 +16,13 @@ Rastir provides decorator-based instrumentation for LLM applications and AI agen
 ## Key Features
 
 - **Six semantic decorators** — `@trace`, `@agent`, `@llm`, `@tool`, `@retrieval`, `@metric`
-- **Adapter-based metadata extraction** — automatic model, token, and provider detection for OpenAI, Anthropic, Bedrock, and LangChain
-- **Prometheus metrics** — duration histograms, token counters, error rates, cardinality-guarded labels
-- **OpenTelemetry traces** — full parent-child span hierarchy with OTLP export
+- **15 adapters** — automatic model, token, and provider detection for OpenAI, Azure OpenAI, Anthropic, AWS Bedrock, Google Gemini, Cohere, Mistral, Groq, LangChain, LangGraph, LlamaIndex, and CrewAI
+- **Two-phase enrichment** — model/provider extracted from function kwargs *before* the call, refined from the response *after*. Metadata survives even when API calls fail.
+- **Generic object wrapper** — `rastir.wrap(obj)` instruments any object (Redis, databases, caches) without decorator access
+- **Prometheus metrics** — duration histograms, token counters, error rates with normalised categories, cardinality-guarded labels
+- **Guardrail observability** — automatic tracking of AWS Bedrock guardrail requests and violations with bounded enum validation
+- **Error normalisation** — raw exceptions mapped to six fixed categories (timeout, rate_limit, validation_error, provider_error, internal_error, unknown)
+- **OpenTelemetry traces** — full parent-child span hierarchy with OTLP export and exemplar support
 - **Built-in collector server** — FastAPI-based server with in-memory trace store, sampling, backpressure, rate limiting, and exemplar support
 - **Zero external dependencies for tracing** — no database, no Redis, no Kafka
 
@@ -87,7 +91,7 @@ That's it. Rastir automatically:
 
 - [Getting Started](getting-started.md) — Installation, configuration, first steps
 - [Decorators](decorators.md) — Full decorator reference (`@trace`, `@agent`, `@llm`, `@tool`, `@retrieval`, `@metric`)
-- [Adapters](adapters.md) — How adapter-based metadata extraction works
-- [Server](server.md) — Collector server configuration, endpoints, metrics
+- [Adapters](adapters.md) — 15 adapters with two-phase enrichment
+- [Server](server.md) — Collector, metrics, guardrails, error normalisation, sampling
 - [Configuration](configuration.md) — Client and server configuration reference
 - [Contributing Adapters](contributing-adapters.md) — How to write and register custom adapters

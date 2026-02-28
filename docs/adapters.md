@@ -6,7 +6,40 @@ nav_order: 4
 
 # Adapter System
 
-Rastir uses an **adapter pipeline** to extract metadata from LLM responses without monkey-patching provider libraries. When `@llm` decorates a function, the return value is passed through a 3-phase adapter resolution pipeline.
+Rastir uses an **adapter pipeline** to extract metadata from LLM responses without monkey-patching provider libraries. When `@llm` decorates a function, metadata extraction happens in two phases: first from the function's *arguments* (request phase), then from the *return value* (response phase).
+
+---
+
+## Two-Phase Enrichment
+
+```
+Phase 1 — Request (before the call):
+  Scan function kwargs for model/provider hints
+  e.g., model="gpt-4o" in kwargs → pre-populate span metadata
+  Bedrock: parse modelId → model + provider
+
+Phase 2 — Response (after the call):
+  Adapter pipeline extracts from return value
+  Concrete response values override request-phase guesses
+  If call raises an exception, request-phase metadata survives
+```
+
+This ensures that even when an API call fails (rate limit, timeout, network error), the span still records:
+- Which **model** was being called
+- Which **provider** was being used
+- The **error type** (normalised to a fixed category)
+
+### Generic Kwarg Scanner
+
+For any provider, the registry scans common keyword argument patterns:
+
+| Kwarg pattern | Extracts |
+|---------------|----------|
+| `model` | Model name |
+| `model_id`, `modelId` | Model name |
+| `model_name` | Model name |
+
+The Bedrock adapter additionally parses compound `modelId` values like `anthropic.claude-3-sonnet` into `model="claude-3-sonnet"` and `provider="anthropic"`.
 
 ---
 
@@ -54,9 +87,16 @@ If no provider adapter matches, the fallback adapter returns an `AdapterResult` 
 |---------|------|----------|---------|
 | **LangGraph** | framework | 260 | State dicts from `graph.invoke()`, `StateSnapshot` → unwraps last `AIMessage` |
 | **LangChain** | framework | 250 | `AIMessage`, `LLMResult` → unwraps to provider response |
+| **CrewAI** | framework | 245 | `CrewOutput`, `TaskOutput` → unwraps token usage and task metadata |
+| **LlamaIndex** | framework | 240 | `Response`, `ChatResponse` → unwraps to provider response |
+| **Azure OpenAI** | provider | 155 | Azure-hosted `ChatCompletion` (detects `azure` in module/base_url) |
+| **Groq** | provider | 152 | Groq-hosted `ChatCompletion` (detects `groq` in module) |
 | **OpenAI** | provider | 150 | `ChatCompletion`, `Completion`, `ChatCompletionChunk` |
 | **Anthropic** | provider | 150 | `Message`, `ContentBlockDelta` |
-| **Bedrock** | provider | 140 | Bedrock `invoke_model` response dicts |
+| **Gemini** | provider | 150 | `GenerateContentResponse` from Google Generative AI |
+| **Cohere** | provider | 150 | `ChatResponse`, `Generation` from Cohere API |
+| **Mistral** | provider | 150 | `ChatCompletionResponse` from Mistral API |
+| **Bedrock** | provider | 140 | Bedrock `converse()` response dicts + `modelId` parsing |
 | **Retrieval** | provider | 50 | Retrieval-specific response objects |
 | **Tool** | provider | 10 | Tool execution results |
 | **Fallback** | fallback | 0 | Anything — returns `provider="unknown"` |
