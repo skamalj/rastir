@@ -558,6 +558,47 @@ class TestMetricsRegistry:
         # Counters still registered but no samples
         assert 'guardrail_id=' not in output
 
+    def test_guardrail_category_cardinality_guard(self):
+        """Unknown guardrail_category is replaced with overflow sentinel."""
+        reg = MetricsRegistry()
+        reg.record_span(
+            _span(
+                span_type="llm",
+                model="claude-3",
+                provider="bedrock",
+                guardrail_id="gr-test",
+                guardrail_action="GUARDRAIL_INTERVENED",
+                guardrail_category="TOTALLY_MADE_UP_CATEGORY",
+            ),
+            service="svc",
+            env="prod",
+        )
+        output = reg.generate()[0].decode()
+        assert "rastir_guardrail_violations_total" in output
+        assert "TOTALLY_MADE_UP_CATEGORY" not in output
+        assert '__cardinality_overflow__' in output
+
+    def test_guardrail_action_cardinality_guard(self):
+        """Unknown guardrail_action is replaced with overflow sentinel."""
+        reg = MetricsRegistry()
+        reg.record_span(
+            _span(
+                span_type="llm",
+                model="claude-3",
+                provider="bedrock",
+                guardrail_id="gr-test",
+                guardrail_action="INJECTED_ACTION_VALUE",
+                guardrail_category="CONTENT_POLICY",
+            ),
+            service="svc",
+            env="prod",
+        )
+        output = reg.generate()[0].decode()
+        assert "rastir_guardrail_violations_total" in output
+        assert "INJECTED_ACTION_VALUE" not in output
+        assert 'guardrail_action="__cardinality_overflow__"' in output
+        assert 'guardrail_category="CONTENT_POLICY"' in output
+
 
 # ========================================================================
 # IngestionWorker tests

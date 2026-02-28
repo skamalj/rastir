@@ -49,6 +49,21 @@ _MAX_BUCKET_COUNT = 20
 # Canonical span types — anything else is mapped to "system"
 _VALID_SPAN_TYPES = frozenset({"agent", "llm", "tool", "retrieval", "system", "infra"})
 
+# Bounded enums for guardrail labels (defence-in-depth; adapter also validates)
+_VALID_GUARDRAIL_CATEGORIES = frozenset({
+    "CONTENT_POLICY",
+    "SENSITIVE_INFORMATION_POLICY",
+    "WORD_POLICY",
+    "TOPIC_POLICY",
+    "CONTEXTUAL_GROUNDING_POLICY",
+    "DENIED_TOPIC",
+})
+
+_VALID_GUARDRAIL_ACTIONS = frozenset({
+    "GUARDRAIL_INTERVENED",
+    "NONE",
+})
+
 # --------------------------------------------------------------------------
 # Error-type normalisation: raw exception → fixed category
 # --------------------------------------------------------------------------
@@ -427,13 +442,21 @@ class MetricsRegistry:
                 guardrail_category = attrs.get(
                     "guardrail_category", "unknown"
                 )
+                # Defence-in-depth: server-side bounded enum validation
+                if guardrail_category not in _VALID_GUARDRAIL_CATEGORIES:
+                    guardrail_category = _OVERFLOW_SENTINEL
+                safe_action = (
+                    guardrail_action
+                    if guardrail_action in _VALID_GUARDRAIL_ACTIONS
+                    else _OVERFLOW_SENTINEL
+                )
                 self.guardrail_violations.labels(
                     service=self._clip(service),
                     env=self._clip(env),
                     provider=provider,
                     model=model,
                     guardrail_id=safe_gr_id,
-                    guardrail_action=guardrail_action,
+                    guardrail_action=safe_action,
                     guardrail_category=guardrail_category,
                 ).inc()
 
