@@ -599,6 +599,149 @@ class TestMetricsRegistry:
         assert 'guardrail_action="__cardinality_overflow__"' in output
         assert 'guardrail_category="CONTENT_POLICY"' in output
 
+    # ---- Aggregate metric correctness tests ----
+
+    @staticmethod
+    def _parse_metric(output: str, metric_name: str, labels: dict[str, str]) -> float | None:
+        """Parse a single counter/gauge value from Prometheus text output.
+
+        Returns the float value for the metric line matching all labels,
+        or None if not found.
+        """
+        for line in output.splitlines():
+            if line.startswith("#") or not line.startswith(metric_name):
+                continue
+            # Check all required labels are present in this line
+            if all(f'{k}="{v}"' in line for k, v in labels.items()):
+                # Value is the last token on the line
+                return float(line.rsplit(" ", 1)[-1])
+        return None
+
+    def test_aggregate_llm_calls_by_model(self):
+        """Send 4 gpt-4 spans + 6 claude-3 spans, verify per-model counts."""
+        reg = MetricsRegistry()
+        for _ in range(4):
+            reg.record_span(
+                _span(span_type="llm", model="gpt-4", provider="openai",
+                      tokens_input=100, tokens_output=50),
+                service="svc", env="prod",
+            )
+        for _ in range(6):
+            reg.record_span(
+                _span(span_type="llm", model="claude-3", provider="anthropic",
+                      tokens_input=200, tokens_output=80),
+                service="svc", env="prod",
+            )
+        output = reg.generate()[0].decode()
+
+        # LLM call counts
+        assert self._parse_metric(output, "rastir_llm_calls_total",
+                                  {"model": "gpt-4", "provider": "openai"}) == 4.0
+        assert self._parse_metric(output, "rastir_llm_calls_total",
+                                  {"model": "claude-3", "provider": "anthropic"}) == 6.0
+
+        # Token aggregates: 4 × 100 = 400 input for gpt-4
+        assert self._parse_metric(output, "rastir_tokens_input_total",
+                                  {"model": "gpt-4"}) == 400.0
+        # 4 × 50 = 200 output for gpt-4
+        assert self._parse_metric(output, "rastir_tokens_output_total",
+                                  {"model": "gpt-4"}) == 200.0
+        # 6 × 200 = 1200 input for claude-3
+        assert self._parse_metric(output, "rastir_tokens_input_total",
+                                  {"model": "claude-3"}) == 1200.0
+        # 6 × 80 = 480 output for claude-3
+        assert self._parse_metric(output, "rastir_tokens_output_total",
+                                  {"model": "claude-3"}) == 480.0
+
+    def test_aggregate_spans_ingested_by_type(self):
+        """Mixed span types aggregate correctly in ingested counter."""
+        reg = MetricsRegistry()
+        for _ in range(3):
+            reg.record_span(_span(span_type="llm", model="gpt-4", provider="openai"),
+                            service="svc", env="prod")
+        for _ in range(2):
+            reg.record_span(_span(span_type="tool", name="search"),
+                            service="svc", env="prod")
+        reg.record_span(_span(span_type="retrieval"), service="svc", env="prod")
+
+        output = reg.generate()[0].decode()
+
+        assert self._parse_metric(output, "rastir_spans_ingested_total",
+                                  {"span_type": "llm", "status": "OK"}) == 3.0
+        assert self._parse_metric(output, "rastir_spans_ingested_total",
+                                  {"span_type": "tool", "status": "OK"}) == 2.0
+        assert self._parse_metric(output, "rastir_spans_ingested_total",
+                                  {"span_type": "retrieval", "status": "OK"}) == 1.0
+
+    def test_aggregate_errors_by_type(self):
+        """Error spans with different exception types aggregate separately."""
+        reg = MetricsRegistry()
+        for _ in range(3):
+            reg.record_span(
+                _span(span_type="llm", status="ERROR", events=[
+                    {"name": "exception", "attributes": {"exception.type": "RateLimitError"}}
+                ]),
+                service="svc", env="prod",
+            )
+        for _ in range(2):
+            reg.record_span(
+                _span(span_type="llm", status="ERROR", events=[
+                    {"name": "exception", "attributes": {"exception.type": "TimeoutError"}}
+                ]),
+                service="svc", env="prod",
+            )
+        output = reg.generate()[0].decode()
+
+        assert self._parse_metric(output, "rastir_errors_total",
+                                  {"error_type": "rate_limit"}) == 3.0
+        assert self._parse_metric(output, "rastir_errors_total",
+                                  {"error_type": "timeout"}) == 2.0
+
+    def test_aggregate_tool_calls_by_name(self):
+        """Tool calls from different tools aggregate independently."""
+        reg = MetricsRegistry()
+        for _ in range(5):
+            reg.record_span(_span(span_type="tool", name="web_search"),
+                            service="svc", env="prod")
+        for _ in range(3):
+            reg.record_span(_span(span_type="tool", name="calculator"),
+                            service="svc", env="prod")
+        output = reg.generate()[0].decode()
+
+        assert self._parse_metric(output, "rastir_tool_calls_total",
+                                  {"tool_name": "web_search"}) == 5.0
+        assert self._parse_metric(output, "rastir_tool_calls_total",
+                                  {"tool_name": "calculator"}) == 3.0
+
+    def test_aggregate_mixed_success_and_errors(self):
+        """OK and ERROR spans for same model aggregate correctly."""
+        reg = MetricsRegistry()
+        for _ in range(7):
+            reg.record_span(
+                _span(span_type="llm", model="gpt-4", provider="openai",
+                      tokens_input=100, tokens_output=50),
+                service="svc", env="prod",
+            )
+        for _ in range(3):
+            reg.record_span(
+                _span(span_type="llm", model="gpt-4", provider="openai",
+                      status="ERROR"),
+                service="svc", env="prod",
+            )
+        output = reg.generate()[0].decode()
+
+        # Total LLM calls = 10 (both OK and ERROR increment the counter)
+        assert self._parse_metric(output, "rastir_llm_calls_total",
+                                  {"model": "gpt-4"}) == 10.0
+        # Ingested: 7 OK + 3 ERROR
+        assert self._parse_metric(output, "rastir_spans_ingested_total",
+                                  {"span_type": "llm", "status": "OK"}) == 7.0
+        assert self._parse_metric(output, "rastir_spans_ingested_total",
+                                  {"span_type": "llm", "status": "ERROR"}) == 3.0
+        # Tokens only from the 7 successful spans: 7 × 100 = 700
+        assert self._parse_metric(output, "rastir_tokens_input_total",
+                                  {"model": "gpt-4"}) == 700.0
+
 
 # ========================================================================
 # IngestionWorker tests
