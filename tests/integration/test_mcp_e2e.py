@@ -1,28 +1,23 @@
-"""End-to-end MCP integration test with real infrastructure verification.
+"""End-to-end integration tests verifying ALL Rastir annotations in Tempo.
 
-Tests two server configurations:
-  - Server A (port 19876): tools WITH @mcp_endpoint  → server spans created
-  - Server B (port 19877): tools WITHOUT @mcp_endpoint → plain server, rastir_*
-    fields silently dropped by Pydantic validation
+Tests exercise the FULL pipeline:
+  Client decorator → Rastir collector (localhost:8080) → OTLP → Tempo (localhost:3200)
+  Client decorator → Rastir collector → Prometheus (localhost:9090)
 
-Verifies the full pipeline:
-  Client → Rastir collector (localhost:8080) → OTLP → Tempo (localhost:3200)
+Every annotation set by every decorator is verified to appear in Tempo with
+correct values.  Parent-child span relationships are validated.
 
-Assertions:
-  1. Spans appear in Tempo with correct trace_id, parent-child relationships
-  2. Prometheus metrics (rastir_spans_ingested_total etc.) increment
-  3. Server A creates both client + server spans (trace propagation)
-  4. Server B creates only client spans (no server-side instrumentation)
+See INTEGRATION_TESTS.md for the full annotation specification.
 
-Requirements:
-    - Rastir collector running on localhost:8080
-    - Tempo running on localhost:3200
-    - Prometheus running on localhost:9090
-    - GOOGLE_API_KEY env var (for LangGraph test only)
-    - mcp, langgraph, langchain-google-genai packages
+Infrastructure required:
+    - Rastir collector on localhost:8080 (with RASTIR_SERVER_CONFIG)
+    - Tempo on localhost:3200
+    - Prometheus on localhost:9090
+    - GOOGLE_API_KEY env var (for test_langgraph_full_stack only)
 
 Run:
-    GOOGLE_API_KEY=... PYTHONPATH=src python -m pytest tests/integration/test_mcp_e2e.py -v -s
+    GOOGLE_API_KEY=... PYTHONPATH=src \\
+        python -m pytest tests/integration/test_mcp_e2e.py -v -s
 """
 
 from __future__ import annotations
@@ -30,7 +25,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
-from unittest.mock import patch
+from typing import Any
 
 import httpx
 import pytest
@@ -92,10 +87,25 @@ pytestmark = [
 ]
 
 # ---------------------------------------------------------------------------
-# Rastir setup
+# Rastir imports
 # ---------------------------------------------------------------------------
 import rastir
-from rastir import configure, agent_span, trace_remote_tools, mcp_endpoint
+from rastir import (
+    configure,
+    agent_span,
+    llm_span,
+    metric_span,
+    retrieval_span,
+    tool_span,
+    trace_span,
+    trace_remote_tools,
+    mcp_endpoint,
+)
+from rastir.context import (
+    get_current_span,
+    set_current_model,
+    set_current_provider,
+)
 from rastir.spans import SpanType
 
 
@@ -152,11 +162,7 @@ def _create_server_with_endpoint():
 # ---------------------------------------------------------------------------
 
 def _create_server_without_endpoint():
-    """MCP server with plain tools — no @mcp_endpoint.
-
-    The rastir_trace_id / rastir_span_id fields injected by the client
-    are silently dropped by FastMCP's Pydantic validation.
-    """
+    """MCP server with plain tools — no @mcp_endpoint."""
     srv = FastMCP(
         "ServerWithoutEndpoint",
         host="127.0.0.1",
@@ -198,38 +204,11 @@ def _create_server_without_endpoint():
 
 
 # ---------------------------------------------------------------------------
-# In-process span capture (for immediate assertions before Tempo flush)
+# Helpers — Prometheus
 # ---------------------------------------------------------------------------
-collected_spans: list = []
-
-
-def _capture_span(span):
-    """Capture spans in-process AND let them flow to the real exporter."""
-    collected_spans.append(span)
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _get_prometheus_metric(metric_name: str) -> float | None:
-    """Scrape the collector's /metrics and return the value of a metric."""
-    try:
-        with httpx.Client(timeout=5) as c:
-            resp = c.get(f"{COLLECTOR_URL}/metrics")
-            for line in resp.text.splitlines():
-                if line.startswith(metric_name) and not line.startswith(f"{metric_name}_"):
-                    # e.g. rastir_spans_ingested_total{span_type="tool"} 42
-                    parts = line.split()
-                    if len(parts) >= 2:
-                        return float(parts[-1])
-    except Exception:
-        pass
-    return None
-
 
 def _get_prometheus_metric_sum(metric_prefix: str) -> float:
-    """Sum all lines matching a metric prefix from /metrics."""
+    """Sum all lines matching a metric prefix from the collector /metrics."""
     total = 0.0
     try:
         with httpx.Client(timeout=5) as c:
@@ -263,16 +242,16 @@ def _wait_for_metric_increment(
     return _get_prometheus_metric_sum(metric_prefix)
 
 
-def _query_tempo_trace(trace_id: str, retries: int = 15, delay: float = 2.0) -> dict | None:
-    """Query Tempo for a trace by ID, retrying until it appears.
+# ---------------------------------------------------------------------------
+# Helpers — Tempo
+# ---------------------------------------------------------------------------
 
-    Tempo ingests asynchronously, so we retry with backoff.
-    """
-    # Ensure trace_id is 32-char hex (no dashes)
+def _query_tempo_trace(trace_id: str, retries: int = 15, delay: float = 2.0) -> dict | None:
+    """Query Tempo for a trace by ID, retrying until it appears."""
     tid = trace_id.replace("-", "").ljust(32, "0")[:32]
     url = f"{TEMPO_URL}/api/traces/{tid}"
     with httpx.Client(timeout=10) as c:
-        for attempt in range(retries):
+        for _ in range(retries):
             try:
                 resp = c.get(url)
                 if resp.status_code == 200:
@@ -284,11 +263,7 @@ def _query_tempo_trace(trace_id: str, retries: int = 15, delay: float = 2.0) -> 
 
 
 def _extract_spans_from_tempo(trace_data: dict) -> list[dict]:
-    """Extract flat list of spans from Tempo trace response.
-
-    Tempo returns data in the OTLP/JSON format:
-    { "batches": [ { "resource": {...}, "scopeSpans": [ { "spans": [...] } ] } ] }
-    """
+    """Extract flat list of spans from Tempo trace response (OTLP/JSON)."""
     spans = []
     for batch in trace_data.get("batches", []):
         for scope in batch.get("scopeSpans", batch.get("instrumentationLibrarySpans", [])):
@@ -297,21 +272,39 @@ def _extract_spans_from_tempo(trace_data: dict) -> list[dict]:
     return spans
 
 
-def _get_tempo_span_attrs(span: dict) -> dict[str, str]:
-    """Extract attributes dict from a Tempo span.
+def _get_tempo_span_attrs(span: dict) -> dict[str, Any]:
+    """Extract attributes from a Tempo span, stripping 'rastir.' prefix.
 
-    Tempo prefixes Rastir attributes with 'rastir.' — this helper
-    strips the prefix for consistency with the SpanRecord attribute names.
+    Handles all OTLP value types: string, int, bool, double.
     """
-    attrs = {}
+    attrs: dict[str, Any] = {}
     for a in span.get("attributes", []):
         key = a.get("key", "")
-        val = a.get("value", {}).get("stringValue", "")
-        # Strip 'rastir.' prefix if present
+        val_dict = a.get("value", {})
+        if "stringValue" in val_dict:
+            val = val_dict["stringValue"]
+        elif "intValue" in val_dict:
+            val = int(val_dict["intValue"])
+        elif "boolValue" in val_dict:
+            val = val_dict["boolValue"]
+        elif "doubleValue" in val_dict:
+            val = float(val_dict["doubleValue"])
+        else:
+            val = ""
         if key.startswith("rastir."):
             key = key[len("rastir."):]
         attrs[key] = val
     return attrs
+
+
+def _find_tempo_spans_by_type(
+    tempo_spans: list[dict], span_type: str,
+) -> list[dict]:
+    """Filter Tempo spans by rastir.span_type attribute value."""
+    return [
+        s for s in tempo_spans
+        if _get_tempo_span_attrs(s).get("span_type") == span_type
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -328,12 +321,10 @@ def setup_rastir():
         service="mcp-e2e-test",
         env="integration",
         push_url=COLLECTOR_URL,
-        flush_interval=1,   # flush quickly for tests
+        flush_interval=1,
         batch_size=10,
     )
-    collected_spans.clear()
     yield
-    # Give the background exporter time to flush
     time.sleep(2)
 
 
@@ -342,7 +333,9 @@ async def server_with_endpoint():
     """Start MCP server A (WITH @mcp_endpoint)."""
     srv = _create_server_with_endpoint()
     app = srv.streamable_http_app()
-    config = uvicorn.Config(app, host="127.0.0.1", port=PORT_WITH_ENDPOINT, log_level="warning")
+    config = uvicorn.Config(
+        app, host="127.0.0.1", port=PORT_WITH_ENDPOINT, log_level="warning",
+    )
     uv_server = uvicorn.Server(config)
     task = asyncio.create_task(uv_server.serve())
     for _ in range(20):
@@ -359,7 +352,9 @@ async def server_without_endpoint():
     """Start MCP server B (WITHOUT @mcp_endpoint)."""
     srv = _create_server_without_endpoint()
     app = srv.streamable_http_app()
-    config = uvicorn.Config(app, host="127.0.0.1", port=PORT_WITHOUT_ENDPOINT, log_level="warning")
+    config = uvicorn.Config(
+        app, host="127.0.0.1", port=PORT_WITHOUT_ENDPOINT, log_level="warning",
+    )
     uv_server = uvicorn.Server(config)
     task = asyncio.create_task(uv_server.serve())
     for _ in range(20):
@@ -372,29 +367,279 @@ async def server_without_endpoint():
 
 
 # ============================================================================
-# TEST 1: Server WITH @mcp_endpoint — full trace propagation
+# TEST 1: @agent > @llm > @tool + @retrieval — all annotations
 # ============================================================================
 
 @pytest.mark.asyncio
-async def test_server_with_endpoint_e2e(server_with_endpoint):
-    """Server A (@mcp_endpoint): client + server spans, verified in Tempo.
+async def test_agent_llm_tool_retrieval_annotations():
+    """Verify all decorator annotations appear in Tempo with correct values.
 
-    Expects:
-      - agent span (parent)
-      - client tool span (remote=true, child of agent)
-      - server tool span (remote=false, child of client, same trace_id)
-      - All appear in Tempo with correct parent-child links
-      - Prometheus tool counter increments
+    Hierarchy:  @agent > @llm > @tool + @retrieval
+
+    Verified annotations (see INTEGRATION_TESTS.md):
+      agent:     span_type=agent, agent_name
+      llm:       span_type=llm, model, provider, agent
+      tool:      span_type=tool, tool_name, agent, model, provider
+      retrieval: span_type=retrieval, agent, model, provider, retrieved_documents_count
+    Also verifies parent-child hierarchy across all four span types.
     """
-    # Record metrics baseline
-    baseline_tool_count = _get_prometheus_metric_sum("rastir_tool_calls_total")
-    baseline_span_count = _get_prometheus_metric_sum("rastir_spans_ingested_total")
+    baseline = _get_prometheus_metric_sum("rastir_spans_ingested_total")
 
-    trace_id_captured = None
+    # -- Define decorated functions --
 
-    @agent_span(agent_name="e2e_agent_with_endpoint")
+    @tool_span(tool_name="db_search")
+    async def do_tool(query: str) -> list:
+        return [{"id": 1, "text": "result"}]
+
+    @retrieval_span(name="vector_lookup")
+    async def do_retrieval(query: str) -> list:
+        return ["doc_a", "doc_b", "doc_c"]
+
+    @llm_span(model="e2e-test-model", provider="e2e-test-provider")
+    async def do_llm(prompt: str) -> str:
+        await do_tool("search query")
+        await do_retrieval("embedding query")
+        return "LLM response text"
+
+    trace_id = None
+
+    @agent_span(agent_name="hierarchy_test_agent")
     async def run_agent():
-        nonlocal trace_id_captured
+        nonlocal trace_id
+        span = get_current_span()
+        if span:
+            trace_id = span.trace_id
+        await do_llm("What is the answer?")
+
+    await run_agent()
+
+    # -- Wait for spans to arrive at collector --
+    new_count = _wait_for_metric_increment(
+        "rastir_spans_ingested_total", baseline, min_delta=4.0,
+    )
+    assert new_count > baseline, (
+        f"Spans not ingested: {baseline} → {new_count}"
+    )
+
+    # -- Query Tempo --
+    assert trace_id, "Failed to capture trace_id"
+    trace_data = _query_tempo_trace(trace_id)
+    assert trace_data, f"Trace {trace_id} not found in Tempo"
+    tempo_spans = _extract_spans_from_tempo(trace_data)
+
+    print(f"\n  Tempo trace {trace_id}: {len(tempo_spans)} spans")
+    for s in tempo_spans:
+        a = _get_tempo_span_attrs(s)
+        print(f"    {s.get('name', '?'):25s} span_type={a.get('span_type', '?'):10s} attrs={a}")
+
+    # -- Verify agent span --
+    agent_spans = _find_tempo_spans_by_type(tempo_spans, "agent")
+    assert len(agent_spans) >= 1, "No agent span in Tempo"
+    agent_attrs = _get_tempo_span_attrs(agent_spans[0])
+    assert agent_attrs.get("agent_name") == "hierarchy_test_agent", (
+        f"agent_name mismatch: {agent_attrs.get('agent_name')}"
+    )
+    print("  ✓ agent:     span_type=agent, agent_name=hierarchy_test_agent")
+
+    # -- Verify LLM span --
+    llm_spans = _find_tempo_spans_by_type(tempo_spans, "llm")
+    assert len(llm_spans) >= 1, "No LLM span in Tempo"
+    llm_attrs = _get_tempo_span_attrs(llm_spans[0])
+    assert llm_attrs.get("model") == "e2e-test-model", (
+        f"model mismatch: {llm_attrs.get('model')}"
+    )
+    assert llm_attrs.get("provider") == "e2e-test-provider", (
+        f"provider mismatch: {llm_attrs.get('provider')}"
+    )
+    assert llm_attrs.get("agent") == "hierarchy_test_agent", (
+        f"llm agent mismatch: {llm_attrs.get('agent')}"
+    )
+    print("  ✓ llm:       model=e2e-test-model, provider=e2e-test-provider, agent=hierarchy_test_agent")
+
+    # -- Verify tool span --
+    tool_spans = _find_tempo_spans_by_type(tempo_spans, "tool")
+    assert len(tool_spans) >= 1, "No tool span in Tempo"
+    local_tools = [
+        s for s in tool_spans
+        if _get_tempo_span_attrs(s).get("tool_name") == "db_search"
+    ]
+    assert len(local_tools) >= 1, "No db_search tool span in Tempo"
+    tool_attrs = _get_tempo_span_attrs(local_tools[0])
+    assert tool_attrs.get("tool_name") == "db_search"
+    assert tool_attrs.get("agent") == "hierarchy_test_agent", (
+        f"tool agent mismatch: {tool_attrs.get('agent')}"
+    )
+    assert tool_attrs.get("model") == "e2e-test-model", (
+        f"tool model mismatch: {tool_attrs.get('model')}"
+    )
+    assert tool_attrs.get("provider") == "e2e-test-provider", (
+        f"tool provider mismatch: {tool_attrs.get('provider')}"
+    )
+    print("  ✓ tool:      tool_name=db_search, agent, model, provider inherited")
+
+    # -- Verify retrieval span --
+    retrieval_spans = _find_tempo_spans_by_type(tempo_spans, "retrieval")
+    assert len(retrieval_spans) >= 1, "No retrieval span in Tempo"
+    ret_attrs = _get_tempo_span_attrs(retrieval_spans[0])
+    assert ret_attrs.get("agent") == "hierarchy_test_agent", (
+        f"retrieval agent mismatch: {ret_attrs.get('agent')}"
+    )
+    assert ret_attrs.get("model") == "e2e-test-model", (
+        f"retrieval model mismatch: {ret_attrs.get('model')}"
+    )
+    assert ret_attrs.get("provider") == "e2e-test-provider", (
+        f"retrieval provider mismatch: {ret_attrs.get('provider')}"
+    )
+    assert ret_attrs.get("retrieved_documents_count") == 3, (
+        f"retrieved_documents_count mismatch: {ret_attrs.get('retrieved_documents_count')}"
+    )
+    print("  ✓ retrieval: agent, model, provider inherited, retrieved_documents_count=3")
+
+    # -- Verify parent-child hierarchy --
+    id_to_type = {}
+    for s in tempo_spans:
+        sid = s.get("spanId", "")
+        stype = _get_tempo_span_attrs(s).get("span_type", "")
+        id_to_type[sid] = stype
+
+    llm_parent = llm_spans[0].get("parentSpanId", "")
+    assert id_to_type.get(llm_parent) == "agent", (
+        f"LLM parent is not agent: parent={llm_parent}, type={id_to_type.get(llm_parent)}"
+    )
+
+    tool_parent = local_tools[0].get("parentSpanId", "")
+    assert id_to_type.get(tool_parent) == "llm", (
+        f"Tool parent is not LLM: parent={tool_parent}, type={id_to_type.get(tool_parent)}"
+    )
+
+    ret_parent = retrieval_spans[0].get("parentSpanId", "")
+    assert id_to_type.get(ret_parent) == "llm", (
+        f"Retrieval parent is not LLM: parent={ret_parent}, type={id_to_type.get(ret_parent)}"
+    )
+
+    print("  ✓ hierarchy: agent → llm → tool, agent → llm → retrieval")
+    print("  ✓ TEST 1 PASSED")
+
+
+# ============================================================================
+# TEST 2: @trace + @metric annotations
+# ============================================================================
+
+@pytest.mark.asyncio
+async def test_trace_and_metric_annotations():
+    """Verify @trace and @metric annotations appear in Tempo.
+
+    Verified annotations:
+      trace:  span_type=trace, emit_metric=True
+      metric: span_type=metric, metric_name
+    """
+    baseline = _get_prometheus_metric_sum("rastir_spans_ingested_total")
+
+    @metric_span(name="test_operations_counter")
+    async def do_metric_work():
+        return 42
+
+    @trace_span(emit_metric=True)
+    async def do_traced_work():
+        await do_metric_work()
+        return "done"
+
+    trace_id = None
+
+    @agent_span(agent_name="trace_metric_agent")
+    async def run():
+        nonlocal trace_id
+        span = get_current_span()
+        if span:
+            trace_id = span.trace_id
+        await do_traced_work()
+
+    await run()
+
+    # -- Wait for flush --
+    _wait_for_metric_increment(
+        "rastir_spans_ingested_total", baseline, min_delta=3.0,
+    )
+
+    # -- Query Tempo --
+    assert trace_id, "Failed to capture trace_id"
+    trace_data = _query_tempo_trace(trace_id)
+    assert trace_data, f"Trace {trace_id} not found in Tempo"
+    tempo_spans = _extract_spans_from_tempo(trace_data)
+
+    print(f"\n  Tempo trace {trace_id}: {len(tempo_spans)} spans")
+    for s in tempo_spans:
+        a = _get_tempo_span_attrs(s)
+        print(f"    {s.get('name', '?'):30s} span_type={a.get('span_type', '?'):10s}")
+
+    # -- Verify trace span --
+    trace_spans = _find_tempo_spans_by_type(tempo_spans, "trace")
+    assert len(trace_spans) >= 1, "No trace span in Tempo"
+    trace_attrs = _get_tempo_span_attrs(trace_spans[0])
+    assert "emit_metric" in trace_attrs, (
+        f"emit_metric attribute missing from trace span: {trace_attrs}"
+    )
+    assert trace_attrs["emit_metric"] in (True, 1), (
+        f"emit_metric value unexpected: {trace_attrs['emit_metric']}"
+    )
+    print("  ✓ trace:  span_type=trace, emit_metric=True")
+
+    # -- Verify metric span --
+    metric_spans = _find_tempo_spans_by_type(tempo_spans, "metric")
+    assert len(metric_spans) >= 1, "No metric span in Tempo"
+    metric_attrs = _get_tempo_span_attrs(metric_spans[0])
+    assert metric_attrs.get("metric_name") == "test_operations_counter", (
+        f"metric_name mismatch: {metric_attrs.get('metric_name')}"
+    )
+    print("  ✓ metric: span_type=metric, metric_name=test_operations_counter")
+
+    # -- Verify parent-child --
+    id_to_type = {
+        s.get("spanId", ""): _get_tempo_span_attrs(s).get("span_type", "")
+        for s in tempo_spans
+    }
+    trace_parent = trace_spans[0].get("parentSpanId", "")
+    assert id_to_type.get(trace_parent) == "agent", (
+        f"Trace parent is not agent: {id_to_type.get(trace_parent)}"
+    )
+    metric_parent = metric_spans[0].get("parentSpanId", "")
+    assert id_to_type.get(metric_parent) == "trace", (
+        f"Metric parent is not trace: {id_to_type.get(metric_parent)}"
+    )
+    print("  ✓ hierarchy: agent → trace → metric")
+    print("  ✓ TEST 2 PASSED")
+
+
+# ============================================================================
+# TEST 3: MCP with @mcp_endpoint — all remote tool annotations
+# ============================================================================
+
+@pytest.mark.asyncio
+async def test_mcp_endpoint_annotations(server_with_endpoint):
+    """Verify all MCP remote tool annotations in Tempo.
+
+    Uses @agent with model/provider context, calls tool on server WITH
+    @mcp_endpoint.
+
+    Verified annotations:
+      Client span: remote=true, tool_name, agent, model, provider
+      Server span: remote=false, tool_name
+      Both share the same trace_id, server is child of client.
+    """
+    baseline = _get_prometheus_metric_sum("rastir_spans_ingested_total")
+    trace_id = None
+
+    @agent_span(agent_name="mcp_annotation_agent")
+    async def run():
+        nonlocal trace_id
+        span = get_current_span()
+        if span:
+            trace_id = span.trace_id
+
+        # Simulate being inside @llm context
+        set_current_model("mcp-test-model")
+        set_current_provider("mcp-test-provider")
+
         async with streamable_http_client(URL_WITH_ENDPOINT) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
@@ -405,83 +650,110 @@ async def test_server_with_endpoint_e2e(server_with_endpoint):
 
                 wrapped = wrap()
                 result = await wrapped.call_tool("get_weather", {"city": "Tokyo"})
-
-                # Capture trace_id from the span context
-                from rastir.context import get_current_span
-                span = get_current_span()
-                if span:
-                    trace_id_captured = span.trace_id
                 return result
 
-    result = await run_agent()
+    result = await run()
     assert result is not None
-    print(f"\n  Tool result: {result}")
 
-    # --- Wait for spans to flush to collector ---
-    new_span_count = _wait_for_metric_increment(
-        "rastir_spans_ingested_total", baseline_span_count, min_delta=3.0
+    # -- Wait for flush --
+    _wait_for_metric_increment(
+        "rastir_spans_ingested_total", baseline, min_delta=3.0,
     )
-    assert new_span_count > baseline_span_count, (
-        f"Prometheus span counter didn't increment: {baseline_span_count} → {new_span_count}"
+
+    # -- Query Tempo --
+    assert trace_id, "Failed to capture trace_id"
+    trace_data = _query_tempo_trace(trace_id)
+    assert trace_data, f"Trace {trace_id} not found in Tempo"
+    tempo_spans = _extract_spans_from_tempo(trace_data)
+
+    print(f"\n  Tempo trace {trace_id}: {len(tempo_spans)} spans")
+    for s in tempo_spans:
+        a = _get_tempo_span_attrs(s)
+        print(f"    {s.get('name', '?'):25s} remote={a.get('remote', '-'):6s} attrs={a}")
+
+    # -- Find tool spans --
+    tool_spans = _find_tempo_spans_by_type(tempo_spans, "tool")
+    client_tools = [
+        s for s in tool_spans
+        if _get_tempo_span_attrs(s).get("remote") == "true"
+    ]
+    server_tools = [
+        s for s in tool_spans
+        if _get_tempo_span_attrs(s).get("remote") == "false"
+    ]
+
+    # -- Verify client span --
+    assert len(client_tools) >= 1, "No client tool span (remote=true) in Tempo"
+    client_attrs = _get_tempo_span_attrs(client_tools[0])
+    assert client_attrs.get("tool_name") == "get_weather", (
+        f"client tool_name: {client_attrs.get('tool_name')}"
     )
-    print(f"  ✓ Prometheus spans_ingested: {baseline_span_count} → {new_span_count}")
+    assert client_attrs.get("agent") == "mcp_annotation_agent", (
+        f"client agent: {client_attrs.get('agent')}"
+    )
+    assert client_attrs.get("model") == "mcp-test-model", (
+        f"client model: {client_attrs.get('model')}"
+    )
+    assert client_attrs.get("provider") == "mcp-test-provider", (
+        f"client provider: {client_attrs.get('provider')}"
+    )
+    print("  ✓ client:  remote=true, tool_name=get_weather, agent, model, provider")
 
-    # --- Verify spans in Tempo ---
-    if trace_id_captured:
-        trace_data = _query_tempo_trace(trace_id_captured)
-        if trace_data:
-            tempo_spans = _extract_spans_from_tempo(trace_data)
-            span_names = [s.get("name", "") for s in tempo_spans]
-            print(f"  ✓ Tempo trace found: {len(tempo_spans)} spans — {span_names}")
+    # -- Verify server span --
+    assert len(server_tools) >= 1, "No server tool span (remote=false) in Tempo"
+    server_attrs = _get_tempo_span_attrs(server_tools[0])
+    assert server_attrs.get("tool_name") == "get_weather", (
+        f"server tool_name: {server_attrs.get('tool_name')}"
+    )
+    assert server_attrs.get("remote") == "false"
+    print("  ✓ server:  remote=false, tool_name=get_weather")
 
-            # Should have at least agent + client tool + server tool = 3 spans
-            assert len(tempo_spans) >= 3, (
-                f"Expected ≥3 spans in Tempo, got {len(tempo_spans)}: {span_names}"
-            )
+    # -- Verify parent-child: server is child of client --
+    id_to_type = {}
+    id_to_remote = {}
+    for s in tempo_spans:
+        sid = s.get("spanId", "")
+        attrs = _get_tempo_span_attrs(s)
+        id_to_type[sid] = attrs.get("span_type", "")
+        id_to_remote[sid] = attrs.get("remote", "")
 
-            # Check for tool spans with remote attribute
-            tool_attrs = []
-            for s in tempo_spans:
-                attrs = _get_tempo_span_attrs(s)
-                if attrs.get("span_type") == "tool" or attrs.get("tool_name"):
-                    tool_attrs.append(attrs)
+    server_parent = server_tools[0].get("parentSpanId", "")
+    assert id_to_remote.get(server_parent) == "true", (
+        f"Server span parent is not client (remote=true): {id_to_remote.get(server_parent)}"
+    )
 
-            remote_true = [a for a in tool_attrs if a.get("remote") == "true"]
-            remote_false = [a for a in tool_attrs if a.get("remote") == "false"]
+    client_parent = client_tools[0].get("parentSpanId", "")
+    assert id_to_type.get(client_parent) == "agent", (
+        f"Client span parent is not agent: {id_to_type.get(client_parent)}"
+    )
 
-            print(f"  ✓ Tool spans: {len(remote_true)} client (remote=true), {len(remote_false)} server (remote=false)")
-            assert len(remote_true) >= 1, "No client span (remote=true) in Tempo"
-            assert len(remote_false) >= 1, "No server span (remote=false) in Tempo"
-        else:
-            print(f"  ⚠ Trace {trace_id_captured} not yet in Tempo (may need more time)")
-    else:
-        print("  ⚠ Could not capture trace_id from context")
-
-    print("  ✓ Server WITH @mcp_endpoint e2e PASSED")
+    print("  ✓ hierarchy: agent → client(remote=true) → server(remote=false)")
+    print("  ✓ TEST 3 PASSED")
 
 
 # ============================================================================
-# TEST 2: Server WITHOUT @mcp_endpoint — client spans only
+# TEST 4: MCP without @mcp_endpoint — client spans only
 # ============================================================================
 
 @pytest.mark.asyncio
-async def test_server_without_endpoint_e2e(server_without_endpoint):
-    """Server B (no @mcp_endpoint): only client spans, still works.
+async def test_mcp_without_endpoint(server_without_endpoint):
+    """Server without @mcp_endpoint: only client spans, no server spans.
 
-    Expects:
-      - agent span (parent)
-      - client tool span (remote=true, child of agent)
-      - NO server tool span (the server doesn't use @mcp_endpoint)
-      - rastir_* fields silently dropped by FastMCP Pydantic validation
+    Verified:
+      - Client span exists with remote=true, tool_name
+      - NO server span (remote=false) in Tempo
       - Tool still returns correct result
-      - Client spans appear in Tempo
     """
-    baseline_span_count = _get_prometheus_metric_sum("rastir_spans_ingested_total")
-    trace_id_captured = None
+    baseline = _get_prometheus_metric_sum("rastir_spans_ingested_total")
+    trace_id = None
 
-    @agent_span(agent_name="e2e_agent_without_endpoint")
-    async def run_agent():
-        nonlocal trace_id_captured
+    @agent_span(agent_name="no_endpoint_agent")
+    async def run():
+        nonlocal trace_id
+        span = get_current_span()
+        if span:
+            trace_id = span.trace_id
+
         async with streamable_http_client(URL_WITHOUT_ENDPOINT) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
@@ -491,272 +763,47 @@ async def test_server_without_endpoint_e2e(server_without_endpoint):
                     return session
 
                 wrapped = wrap()
-                # This call injects rastir_trace_id/rastir_span_id into args,
-                # but the plain server silently drops them via Pydantic validation
                 result = await wrapped.call_tool("get_weather", {"city": "London"})
-
-                from rastir.context import get_current_span
-                span = get_current_span()
-                if span:
-                    trace_id_captured = span.trace_id
                 return result
 
-    result = await run_agent()
+    result = await run()
     assert result is not None
-    print(f"\n  Tool result: {result}")
 
-    # --- Wait for spans to flush to collector (client spans only, no server spans) ---
-    new_span_count = _wait_for_metric_increment(
-        "rastir_spans_ingested_total", baseline_span_count, min_delta=2.0
+    # -- Wait for flush (only agent + client = 2 spans) --
+    _wait_for_metric_increment(
+        "rastir_spans_ingested_total", baseline, min_delta=2.0,
     )
-    assert new_span_count > baseline_span_count, (
-        f"Prometheus span counter didn't increment: {baseline_span_count} → {new_span_count}"
+
+    # -- Query Tempo --
+    assert trace_id, "Failed to capture trace_id"
+    trace_data = _query_tempo_trace(trace_id)
+    assert trace_data, f"Trace {trace_id} not found in Tempo"
+    tempo_spans = _extract_spans_from_tempo(trace_data)
+
+    print(f"\n  Tempo trace {trace_id}: {len(tempo_spans)} spans")
+
+    # -- Should have agent + client tool but NO server span --
+    assert len(tempo_spans) >= 2, (
+        f"Expected ≥2 spans, got {len(tempo_spans)}"
     )
-    print(f"  ✓ Prometheus spans_ingested: {baseline_span_count} → {new_span_count}")
 
-    # --- Verify in Tempo: should have agent + client tool but NO server tool ---
-    if trace_id_captured:
-        trace_data = _query_tempo_trace(trace_id_captured)
-        if trace_data:
-            tempo_spans = _extract_spans_from_tempo(trace_data)
-            span_names = [s.get("name", "") for s in tempo_spans]
-            print(f"  ✓ Tempo trace found: {len(tempo_spans)} spans — {span_names}")
+    tool_spans = _find_tempo_spans_by_type(tempo_spans, "tool")
+    server_tools = [
+        s for s in tool_spans
+        if _get_tempo_span_attrs(s).get("remote") == "false"
+    ]
+    client_tools = [
+        s for s in tool_spans
+        if _get_tempo_span_attrs(s).get("remote") == "true"
+    ]
 
-            # Should have at least agent + client tool = 2 spans
-            assert len(tempo_spans) >= 2, (
-                f"Expected ≥2 spans in Tempo, got {len(tempo_spans)}: {span_names}"
-            )
+    assert len(client_tools) >= 1, "No client tool span found"
+    assert len(server_tools) == 0, (
+        f"Unexpected server spans (remote=false): {len(server_tools)}"
+    )
 
-            # Check: NO server-side tool spans (remote=false)
-            tool_attrs = []
-            for s in tempo_spans:
-                attrs = _get_tempo_span_attrs(s)
-                if attrs.get("remote") == "false":
-                    tool_attrs.append(attrs)
-
-            assert len(tool_attrs) == 0, (
-                f"Expected NO server spans (remote=false) but found {len(tool_attrs)}: {tool_attrs}"
-            )
-            print(f"  ✓ Confirmed: 0 server spans (remote=false) — plain server works correctly")
-        else:
-            print(f"  ⚠ Trace {trace_id_captured} not yet in Tempo")
-    else:
-        print("  ⚠ Could not capture trace_id from context")
-
-    print("  ✓ Server WITHOUT @mcp_endpoint e2e PASSED")
-
-
-# ============================================================================
-# TEST 3: Both servers side by side — same agent, different behavior
-# ============================================================================
-
-@pytest.mark.asyncio
-async def test_both_servers_comparison(server_with_endpoint, server_without_endpoint):
-    """Compare behavior: same agent calls tools on both servers.
-
-    Server A (@mcp_endpoint): creates client + server spans
-    Server B (plain):         creates client spans only
-
-    Both should work correctly — the difference is in span generation.
-    """
-    trace_id_a = None
-    trace_id_b = None
-
-    # --- Call server A (WITH @mcp_endpoint) ---
-    @agent_span(agent_name="comparison_agent_A")
-    async def call_server_a():
-        nonlocal trace_id_a
-        async with streamable_http_client(URL_WITH_ENDPOINT) as (read, write, _):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-
-                @trace_remote_tools
-                def wrap():
-                    return session
-                wrapped = wrap()
-                result = await wrapped.call_tool("calculate", {"expression": "42 * 10"})
-                from rastir.context import get_current_span
-                span = get_current_span()
-                if span:
-                    trace_id_a = span.trace_id
-                return result
-
-    result_a = await call_server_a()
-    assert "420" in str(result_a), f"Unexpected result from server A: {result_a}"
-    print(f"\n  Server A result: {result_a}")
-
-    # --- Call server B (WITHOUT @mcp_endpoint) ---
-    @agent_span(agent_name="comparison_agent_B")
-    async def call_server_b():
-        nonlocal trace_id_b
-        async with streamable_http_client(URL_WITHOUT_ENDPOINT) as (read, write, _):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-
-                @trace_remote_tools
-                def wrap():
-                    return session
-                wrapped = wrap()
-                result = await wrapped.call_tool("calculate", {"expression": "42 * 10"})
-                from rastir.context import get_current_span
-                span = get_current_span()
-                if span:
-                    trace_id_b = span.trace_id
-                return result
-
-    result_b = await call_server_b()
-    assert "420" in str(result_b), f"Unexpected result from server B: {result_b}"
-    print(f"  Server B result: {result_b}")
-
-    # --- Results should be identical ---
-    print(f"  ✓ Both servers return correct results")
-
-    # --- Wait for flush (retry-based) ---
-    time.sleep(8)
-
-    # --- Compare in Tempo ---
-    if trace_id_a:
-        trace_a = _query_tempo_trace(trace_id_a)
-        if trace_a:
-            spans_a = _extract_spans_from_tempo(trace_a)
-            server_spans_a = []
-            for s in spans_a:
-                attrs = _get_tempo_span_attrs(s)
-                if attrs.get("remote") == "false":
-                    server_spans_a.append(s)
-            print(f"  Trace A (@mcp_endpoint): {len(spans_a)} total spans, {len(server_spans_a)} server-side")
-            assert len(server_spans_a) >= 1, "Server A should have server-side spans"
-        else:
-            print(f"  ⚠ Trace A ({trace_id_a}) not found in Tempo yet")
-
-    if trace_id_b:
-        trace_b = _query_tempo_trace(trace_id_b)
-        if trace_b:
-            spans_b = _extract_spans_from_tempo(trace_b)
-            server_spans_b = []
-            for s in spans_b:
-                attrs = _get_tempo_span_attrs(s)
-                if attrs.get("remote") == "false":
-                    server_spans_b.append(s)
-            print(f"  Trace B (plain):         {len(spans_b)} total spans, {len(server_spans_b)} server-side")
-            assert len(server_spans_b) == 0, "Server B should NOT have server-side spans"
-        else:
-            print(f"  ⚠ Trace B ({trace_id_b}) not found in Tempo yet")
-
-    print("  ✓ Both-servers comparison PASSED")
-
-
-# ============================================================================
-# TEST 4: LangGraph agent with both servers (full AI stack)
-# ============================================================================
-
-@pytest.mark.skipif(not HAS_LANGGRAPH, reason="langgraph/langchain-google-genai not installed")
-@pytest.mark.skipif(not GOOGLE_API_KEY, reason="GOOGLE_API_KEY not set")
-@pytest.mark.asyncio
-async def test_langgraph_with_both_servers(server_with_endpoint, server_without_endpoint):
-    """Full AI agent calls tools on both server types, verifies Tempo traces.
-
-    - Gemini agent calls tools on Server A (@mcp_endpoint)
-    - Then on Server B (plain)
-    - Verifies both produce correct results
-    - Verifies Server A trace has server spans, Server B doesn't
-    """
-    from langchain_core.messages import HumanMessage
-    from rastir import mcp_to_langchain_tools
-
-    # --- Agent calling Server A (WITH @mcp_endpoint) ---
-    trace_id_a = None
-
-    async with streamable_http_client(URL_WITH_ENDPOINT) as (read, write, _):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            lc_tools_a = await mcp_to_langchain_tools(session)
-
-            llm = ChatGoogleGenerativeAI(
-                model="gemini-2.5-flash",
-                google_api_key=GOOGLE_API_KEY,
-                temperature=0,
-            )
-            agent_a = create_react_agent(llm, lc_tools_a)
-
-            @agent_span(agent_name="langgraph_e2e_server_a")
-            async def run_a():
-                nonlocal trace_id_a
-                resp = await agent_a.ainvoke(
-                    {"messages": [HumanMessage(content="What is the weather in Tokyo?")]}
-                )
-                from rastir.context import get_current_span
-                span = get_current_span()
-                if span:
-                    trace_id_a = span.trace_id
-                return resp
-
-            response_a = await run_a()
-            last_msg_a = response_a["messages"][-1].content
-            print(f"\n  Server A agent response: {last_msg_a[:120]}...")
-
-    # --- Agent calling Server B (WITHOUT @mcp_endpoint) ---
-    trace_id_b = None
-
-    async with streamable_http_client(URL_WITHOUT_ENDPOINT) as (read, write, _):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            lc_tools_b = await mcp_to_langchain_tools(session)
-
-            llm2 = ChatGoogleGenerativeAI(
-                model="gemini-2.5-flash",
-                google_api_key=GOOGLE_API_KEY,
-                temperature=0,
-            )
-            agent_b = create_react_agent(llm2, lc_tools_b)
-
-            @agent_span(agent_name="langgraph_e2e_server_b")
-            async def run_b():
-                nonlocal trace_id_b
-                resp = await agent_b.ainvoke(
-                    {"messages": [HumanMessage(content="What is the weather in London?")]}
-                )
-                from rastir.context import get_current_span
-                span = get_current_span()
-                if span:
-                    trace_id_b = span.trace_id
-                return resp
-
-            response_b = await run_b()
-            last_msg_b = response_b["messages"][-1].content
-            print(f"  Server B agent response: {last_msg_b[:120]}...")
-
-    # --- Wait for flush to Tempo ---
-    time.sleep(6)
-
-    # --- Verify Tempo traces ---
-    if trace_id_a:
-        trace_a = _query_tempo_trace(trace_id_a)
-        if trace_a:
-            spans_a = _extract_spans_from_tempo(trace_a)
-            server_spans = [
-                s for s in spans_a
-                if _get_tempo_span_attrs(s).get("remote") == "false"
-            ]
-            print(f"  ✓ Server A Tempo: {len(spans_a)} spans, {len(server_spans)} server-side")
-            assert len(server_spans) >= 1, "Server A should have server-side spans in Tempo"
-        else:
-            print(f"  ⚠ Trace A not found in Tempo")
-
-    if trace_id_b:
-        trace_b = _query_tempo_trace(trace_id_b)
-        if trace_b:
-            spans_b = _extract_spans_from_tempo(trace_b)
-            server_spans = [
-                s for s in spans_b
-                if _get_tempo_span_attrs(s).get("remote") == "false"
-            ]
-            print(f"  ✓ Server B Tempo: {len(spans_b)} spans, {len(server_spans)} server-side")
-            assert len(server_spans) == 0, "Server B should NOT have server-side spans"
-        else:
-            print(f"  ⚠ Trace B not found in Tempo")
-
-    print("  ✓ LangGraph + both servers e2e PASSED")
+    print(f"  ✓ {len(client_tools)} client span(s), 0 server spans — correct")
+    print("  ✓ TEST 4 PASSED")
 
 
 # ============================================================================
@@ -765,12 +812,11 @@ async def test_langgraph_with_both_servers(server_with_endpoint, server_without_
 
 @pytest.mark.asyncio
 async def test_prometheus_metrics(server_with_endpoint):
-    """Verify Prometheus metrics increment for tool calls."""
-    # Get baseline
-    baseline_tool = _get_prometheus_metric_sum("rastir_tool_calls_total")
+    """Verify Prometheus counters increment for span ingestion and tool calls."""
     baseline_spans = _get_prometheus_metric_sum("rastir_spans_ingested_total")
+    baseline_tools = _get_prometheus_metric_sum("rastir_tool_calls_total")
 
-    @agent_span(agent_name="prometheus_test_agent")
+    @agent_span(agent_name="prometheus_agent")
     async def run():
         async with streamable_http_client(URL_WITH_ENDPOINT) as (read, write, _):
             async with ClientSession(read, write) as session:
@@ -779,34 +825,149 @@ async def test_prometheus_metrics(server_with_endpoint):
                 @trace_remote_tools
                 def wrap():
                     return session
+
                 wrapped = wrap()
                 await wrapped.call_tool("get_weather", {"city": "Tokyo"})
                 await wrapped.call_tool("calculate", {"expression": "1 + 1"})
 
     await run()
 
-    # Wait for flush (retry-based)
+    # -- Wait for counters --
     new_spans = _wait_for_metric_increment(
-        "rastir_spans_ingested_total", baseline_spans, min_delta=5.0
+        "rastir_spans_ingested_total", baseline_spans, min_delta=5.0,
     )
-    new_tool = _get_prometheus_metric_sum("rastir_tool_calls_total")
+    new_tools = _get_prometheus_metric_sum("rastir_tool_calls_total")
 
-    print(f"\n  Tool calls: {baseline_tool} → {new_tool}")
-    print(f"  Spans ingested: {baseline_spans} → {new_spans}")
+    span_delta = new_spans - baseline_spans
+    tool_delta = new_tools - baseline_tools
 
-    # We should see increment of at least:
-    # - 4 tool spans (2 client + 2 server via @mcp_endpoint) + 1 agent span = 5
-    assert new_spans > baseline_spans, (
-        f"Span counter didn't increment: {baseline_spans} → {new_spans}"
-    )
+    print(f"\n  Spans ingested: {baseline_spans} → {new_spans} (+{span_delta})")
+    print(f"  Tool calls:     {baseline_tools} → {new_tools} (+{tool_delta})")
 
-    # Tool counter should increment by at least 4 (2 client + 2 server)
-    tool_delta = new_tool - baseline_tool
-    assert tool_delta >= 2, (
-        f"Tool counter only incremented by {tool_delta}, expected ≥2"
-    )
+    # 2 client tools + 2 server tools + 1 agent = at least 5 spans
+    assert span_delta >= 5, f"Span delta only {span_delta}, expected ≥5"
+    # At least 2 tool calls recorded
+    assert tool_delta >= 2, f"Tool delta only {tool_delta}, expected ≥2"
+
+    print(f"  ✓ Span ingestion delta: +{span_delta}")
     print(f"  ✓ Tool call delta: +{tool_delta}")
-    print("  ✓ Prometheus metrics verification PASSED")
+    print("  ✓ TEST 5 PASSED")
+
+
+# ============================================================================
+# TEST 6: LangGraph full stack (optional, needs GOOGLE_API_KEY)
+# ============================================================================
+
+@pytest.mark.skipif(not HAS_LANGGRAPH, reason="langgraph/langchain-google-genai not installed")
+@pytest.mark.skipif(not GOOGLE_API_KEY, reason="GOOGLE_API_KEY not set")
+@pytest.mark.asyncio
+async def test_langgraph_full_stack(server_with_endpoint, server_without_endpoint):
+    """Full AI agent with real LLM calling tools on both server types.
+
+    Verifies:
+      - Gemini agent calls tools on Server A (@mcp_endpoint) and Server B
+      - Server A traces have client + server spans in Tempo
+      - Server B traces have client spans only
+    """
+    from langchain_core.messages import HumanMessage
+    from rastir import mcp_to_langchain_tools
+
+    baseline = _get_prometheus_metric_sum("rastir_spans_ingested_total")
+
+    # -- Agent calling Server A --
+    trace_id_a = None
+
+    async with streamable_http_client(URL_WITH_ENDPOINT) as (read, write, _):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            lc_tools_a = await mcp_to_langchain_tools(session)
+
+            llm_a = ChatGoogleGenerativeAI(
+                model="gemini-2.5-flash",
+                google_api_key=GOOGLE_API_KEY,
+                temperature=0,
+            )
+            agent_a = create_react_agent(llm_a, lc_tools_a)
+
+            @agent_span(agent_name="langgraph_server_a")
+            async def run_a():
+                nonlocal trace_id_a
+                span = get_current_span()
+                if span:
+                    trace_id_a = span.trace_id
+                return await agent_a.ainvoke(
+                    {"messages": [HumanMessage(content="What is the weather in Tokyo?")]}
+                )
+
+            response_a = await run_a()
+            print(f"\n  Server A: {response_a['messages'][-1].content[:100]}...")
+
+    # -- Agent calling Server B --
+    trace_id_b = None
+
+    async with streamable_http_client(URL_WITHOUT_ENDPOINT) as (read, write, _):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            lc_tools_b = await mcp_to_langchain_tools(session)
+
+            llm_b = ChatGoogleGenerativeAI(
+                model="gemini-2.5-flash",
+                google_api_key=GOOGLE_API_KEY,
+                temperature=0,
+            )
+            agent_b = create_react_agent(llm_b, lc_tools_b)
+
+            @agent_span(agent_name="langgraph_server_b")
+            async def run_b():
+                nonlocal trace_id_b
+                span = get_current_span()
+                if span:
+                    trace_id_b = span.trace_id
+                return await agent_b.ainvoke(
+                    {"messages": [HumanMessage(content="What is the weather in London?")]}
+                )
+
+            response_b = await run_b()
+            print(f"  Server B: {response_b['messages'][-1].content[:100]}...")
+
+    # -- Wait for flush --
+    _wait_for_metric_increment(
+        "rastir_spans_ingested_total", baseline, min_delta=4.0,
+    )
+
+    # -- Verify Server A in Tempo (should have server spans) --
+    if trace_id_a:
+        trace_a = _query_tempo_trace(trace_id_a)
+        if trace_a:
+            spans_a = _extract_spans_from_tempo(trace_a)
+            server_spans = [
+                s for s in spans_a
+                if _get_tempo_span_attrs(s).get("remote") == "false"
+            ]
+            print(f"  ✓ Server A: {len(spans_a)} spans, {len(server_spans)} server-side")
+            assert len(server_spans) >= 1, (
+                "Server A should have server-side spans"
+            )
+        else:
+            print(f"  ⚠ Trace A not found in Tempo")
+
+    # -- Verify Server B in Tempo (should NOT have server spans) --
+    if trace_id_b:
+        trace_b = _query_tempo_trace(trace_id_b)
+        if trace_b:
+            spans_b = _extract_spans_from_tempo(trace_b)
+            server_spans = [
+                s for s in spans_b
+                if _get_tempo_span_attrs(s).get("remote") == "false"
+            ]
+            print(f"  ✓ Server B: {len(spans_b)} spans, {len(server_spans)} server-side")
+            assert len(server_spans) == 0, (
+                "Server B should NOT have server-side spans"
+            )
+        else:
+            print(f"  ⚠ Trace B not found in Tempo")
+
+    print("  ✓ TEST 6 PASSED")
 
 
 if __name__ == "__main__":
