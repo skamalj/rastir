@@ -61,6 +61,7 @@ pytestmark = [
 # ---------------------------------------------------------------------------
 import rastir
 from rastir import configure, agent_span, trace_remote_tools, mcp_endpoint
+from rastir.context import set_current_model, set_current_provider
 from rastir.spans import SpanType
 
 # Port for the test MCP server
@@ -313,6 +314,56 @@ async def test_error_propagation(mcp_server_fixture):
     print(f"\n✓ Error handling verified: {len(tool_spans)} span(s) captured")
 
 
+@pytest.mark.asyncio
+async def test_model_provider_attributes(mcp_server_fixture):
+    """Test that model and provider context propagates to tool spans.
+
+    When tool calls happen inside an @llm context (simulated here via
+    set_current_model / set_current_provider), the client-side tool
+    spans should carry model and provider attributes.
+    """
+    with patch("rastir.queue.enqueue_span", side_effect=_capture_span):
+        with patch("rastir.decorators.enqueue_span", side_effect=_capture_span):
+
+            @agent_span(agent_name="model_provider_agent")
+            async def run_agent():
+                # Simulate being inside an @llm call
+                set_current_model("gemini-2.5-flash")
+                set_current_provider("google")
+
+                async with streamable_http_client(MCP_URL) as (read, write, _):
+                    async with ClientSession(read, write) as session:
+                        await session.initialize()
+
+                        @trace_remote_tools
+                        def wrap():
+                            return session
+
+                        wrapped = wrap()
+                        result = await wrapped.call_tool("get_weather", {"city": "Paris"})
+                        return result
+
+            result = await run_agent()
+
+    # Find client tool spans
+    tool_spans = [s for s in collected_spans if s.span_type == SpanType.TOOL]
+    client_spans = [s for s in tool_spans if s.attributes.get("remote") == "true"]
+    assert len(client_spans) >= 1, "No client span found"
+
+    client_span = client_spans[0]
+
+    # Verify model and provider attributes
+    assert client_span.attributes.get("model") == "gemini-2.5-flash", (
+        f"Expected model='gemini-2.5-flash', got {client_span.attributes.get('model')}"
+    )
+    assert client_span.attributes.get("provider") == "google", (
+        f"Expected provider='google', got {client_span.attributes.get('provider')}"
+    )
+
+    print(f"\n✓ model/provider attributes verified on client tool span")
+    print(f"  model={client_span.attributes['model']}, provider={client_span.attributes['provider']}")
+
+
 @pytest.mark.skipif(not HAS_LANGGRAPH, reason="langgraph/langchain-google-genai not installed")
 @pytest.mark.asyncio
 async def test_langgraph_agent_with_mcp_tools(mcp_server_fixture):
@@ -364,7 +415,7 @@ async def test_langgraph_agent_with_mcp_tools(mcp_server_fixture):
     print(f"Tool spans: {len(tool_spans)} (client={len(client_spans)}, server={len(server_spans)})")
 
     for s in collected_spans:
-        attrs = {k: v for k, v in s.attributes.items() if k in ("tool_name", "remote", "agent")}
+        attrs = {k: v for k, v in s.attributes.items() if k in ("tool_name", "remote", "agent", "model", "provider")}
         print(f"  [{s.span_type.value}] {s.name} — {s.status.value} — {attrs}")
 
     # Agent should have called at least one tool
