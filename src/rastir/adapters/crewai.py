@@ -58,15 +58,27 @@ class CrewAIAdapter(BaseAdapter):
 
         return AdapterResult(extra_attributes=extra)
 
+    @staticmethod
+    def _to_dict(obj: Any) -> dict | None:
+        """Convert a dict or Pydantic model to a plain dict."""
+        if isinstance(obj, dict):
+            return obj
+        if hasattr(obj, "model_dump"):
+            return obj.model_dump()
+        if hasattr(obj, "dict"):
+            return obj.dict()
+        return None
+
     def _transform_crew_output(
         self, result: Any, extra: dict[str, Any]
     ) -> AdapterResult:
         """Extract metadata from CrewOutput."""
         # Token usage — CrewAI aggregates across tasks
-        token_usage = getattr(result, "token_usage", None)
+        token_usage_raw = getattr(result, "token_usage", None)
+        token_usage = self._to_dict(token_usage_raw) if token_usage_raw is not None else None
         tokens_input = None
         tokens_output = None
-        if isinstance(token_usage, dict):
+        if token_usage is not None:
             tokens_input = token_usage.get("prompt_tokens") or token_usage.get(
                 "total_tokens"
             )
@@ -129,10 +141,11 @@ class CrewAIAdapter(BaseAdapter):
             extra["crewai_raw_length"] = len(raw)
 
         # Token usage on individual task
-        token_usage = getattr(result, "token_usage", None)
+        token_usage_raw = getattr(result, "token_usage", None)
+        token_usage = self._to_dict(token_usage_raw) if token_usage_raw is not None else None
         tokens_input = None
         tokens_output = None
-        if isinstance(token_usage, dict):
+        if token_usage is not None:
             tokens_input = token_usage.get("prompt_tokens")
             tokens_output = token_usage.get("completion_tokens")
 

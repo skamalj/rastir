@@ -204,6 +204,116 @@ The adapter's `extract_stream_delta()` extracts model name, provider, and token 
 
 ---
 
+## CrewAI Adapter
+
+The CrewAI adapter handles response objects from CrewAI multi-agent workflows. CrewAI's `crew.kickoff()` returns a `CrewOutput` object containing aggregated token usage and task metadata across all agents and tasks in the crew.
+
+### What It Detects
+
+1. **`CrewOutput`** — returned by `crew.kickoff()`, contains aggregated results from all tasks, token usage, and task outputs
+2. **`TaskOutput`** — individual task result with per-task description, agent, and token usage
+
+### Resolution Chain
+
+```
+crew.kickoff() returns CrewOutput
+         │
+         ▼
+┌─────────────────────────────┐
+│ CrewAI (priority 245)       │  Detects CrewOutput
+│ Extracts token_usage,       │  task_count, task metadata
+│ raw output length           │
+└─────────────────────────────┘
+```
+
+### CrewAI Metadata Extracted
+
+| Attribute | Source | Description |
+|-----------|--------|-------------|
+| `tokens_input` | `token_usage.prompt_tokens` | Prompt tokens aggregated across all tasks |
+| `tokens_output` | `token_usage.completion_tokens` | Completion tokens aggregated across all tasks |
+| `crewai_total_tokens` | `token_usage.total_tokens` | Total tokens across the entire crew run |
+| `crewai_successful_requests` | `token_usage.successful_requests` | Number of successful LLM API calls |
+| `crewai_task_count` | `tasks_output` | Number of tasks executed by the crew |
+| `crewai_raw_length` | `raw` | Character length of the raw text output |
+| `crewai_has_json_output` | `json_dict` | `true` if the crew produced JSON output |
+| `crewai_has_pydantic_output` | `pydantic` | `true` if the crew produced a Pydantic model |
+
+For individual `TaskOutput` objects:
+
+| Attribute | Source | Description |
+|-----------|--------|-------------|
+| `crewai_task_description` | `description` | Task description text |
+| `crewai_agent` | `agent` / `name` | Agent role that executed the task |
+| `crewai_raw_length` | `raw` | Character length of the task's raw output |
+
+### Example Usage
+
+```python
+from rastir import configure, agent, llm
+from crewai import Agent, Task, Crew, LLM
+
+configure(service="my-crewai-app", push_url="http://localhost:8080")
+
+crewai_llm = LLM(model="gemini/gemini-2.5-flash", api_key="...")
+
+researcher = Agent(
+    role="Geography Expert",
+    goal="Answer geography questions using tools",
+    backstory="You are a world geography expert.",
+    llm=crewai_llm,
+    tools=[...],
+)
+
+task = Task(
+    description="What is the capital of France?",
+    expected_output="The capital city name",
+    agent=researcher,
+)
+
+crew = Crew(agents=[researcher], tasks=[task])
+
+@agent(agent_name="crewai_agent")
+def run_agent():
+    @llm(model="gemini-2.5-flash", provider="gemini")
+    def invoke_crew():
+        return crew.kickoff()  # Returns CrewOutput
+    return invoke_crew()
+```
+
+Rastir captures:
+- **Agent span** for `run_agent` with full crew duration
+- **LLM span** for `invoke_crew` with CrewAI adapter metadata:
+  - `crewai_task_count` — number of tasks executed
+  - `crewai_total_tokens` — aggregated token count
+  - `crewai_successful_requests` — number of LLM calls made
+  - `tokens_input` / `tokens_output` — prompt and completion token counts
+
+### Multi-Agent Crews
+
+For crews with multiple agents and tasks, the adapter aggregates token usage across all tasks:
+
+```python
+geo_agent = Agent(role="Geography Researcher", ...)
+demo_agent = Agent(role="Demographics Researcher", ...)
+
+task1 = Task(description="Find capital of Japan", agent=geo_agent)
+task2 = Task(description="Find population of Japan", agent=demo_agent)
+
+crew = Crew(agents=[geo_agent, demo_agent], tasks=[task1, task2])
+
+@agent(agent_name="multi_agent_crew")
+def run():
+    @llm(model="gemini-2.5-flash", provider="gemini")
+    def invoke():
+        return crew.kickoff()
+    return invoke()
+```
+
+The resulting LLM span will show `crewai_task_count=2` and aggregated token counts across both tasks.
+
+---
+
 ## AdapterResult
 
 Every adapter produces an `AdapterResult`:

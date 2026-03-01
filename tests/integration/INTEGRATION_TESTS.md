@@ -176,16 +176,32 @@ For MCP remote tracing:
 | 5 | `test_prometheus_metrics`                    | @agent, @trace_remote_tools, @mcp_endpoint  | Counter increments for spans and tool calls         |
 | 6 | `test_langgraph_full_stack`                  | Full AI agent + MCP                         | Real LLM agent with both server types (optional)   |
 
+### CrewAI Tests (`test_crewai_e2e.py`)
+
+| # | Test Name                              | Decorators Tested         | Verifies                                            |
+|---|----------------------------------------|---------------------------|-----------------------------------------------------|
+| 1 | `test_crewai_single_agent_annotations` | @agent, @llm + CrewAI     | CrewAI adapter metadata in Tempo (task_count, tokens, hierarchy) |
+| 2 | `test_crewai_multi_agent_annotations`  | @agent, @llm + CrewAI     | Multi-task crew: crewai_task_count >= 2, aggregated tokens |
+| 3 | `test_crewai_prometheus_metrics`       | @agent, @llm + CrewAI     | Prometheus span counters increment for CrewAI runs  |
+
 ---
 
 ## Running
 
 ```bash
-# Full suite (needs GOOGLE_API_KEY for test 6)
+# MCP + decorator e2e tests (needs GOOGLE_API_KEY for test 6)
 GOOGLE_API_KEY=... PYTHONPATH=src \
     python -m pytest tests/integration/test_mcp_e2e.py -v -s
 
 # Skip LangGraph test
 PYTHONPATH=src \
     python -m pytest tests/integration/test_mcp_e2e.py -v -s -k "not langgraph"
+
+# CrewAI e2e tests (needs GOOGLE_API_KEY)
+GOOGLE_API_KEY=... PYTHONPATH=src \
+    python -m pytest tests/integration/test_crewai_e2e.py -v -s
+
+# All integration tests
+GOOGLE_API_KEY=... PYTHONPATH=src \
+    python -m pytest tests/integration/ -v -s
 ```

@@ -265,6 +265,26 @@ def run(query: str):
     # Extracts: model, tokens, tool calls, message counts — zero config
 ```
 
+## Works with CrewAI
+
+```python
+from crewai import Agent, Task, Crew, LLM
+
+crewai_llm = LLM(model="gemini/gemini-2.5-flash", api_key="...")
+researcher = Agent(role="Researcher", goal="Research topics", llm=crewai_llm, tools=[...])
+task = Task(description="Research AI trends", expected_output="Summary", agent=researcher)
+crew = Crew(agents=[researcher], tasks=[task])
+
+@agent(agent_name="crewai_agent")
+def run():
+    @llm(model="gemini-2.5-flash", provider="gemini")
+    def invoke():
+        return crew.kickoff()
+        # Rastir detects CrewOutput → extracts crewai_task_count,
+        # crewai_total_tokens, crewai_successful_requests, tokens_input/output
+    return invoke()
+```
+
 ## Generic Object Wrapper
 
 Instrument any object without decorator access using `rastir.wrap()`:
