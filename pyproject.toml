@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "rastir"
-version = "0.1.0rc2"
+version = "0.1.0rc3"
 description = "LLM & Agent Observability — structured tracing, Prometheus metrics, and OpenTelemetry export via Python decorators"
 readme = "README.md"
 license = "MIT"

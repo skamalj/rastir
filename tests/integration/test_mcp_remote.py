@@ -142,7 +142,14 @@ def _capture_span(span):
 
 @pytest.fixture(autouse=True)
 def setup_rastir():
-    """Configure Rastir and capture spans."""
+    """Configure Rastir and capture spans.
+
+    NOTE: In these tests the MCP server runs in the same process as the
+    client, so a single ``configure()`` call covers both client-side and
+    server-side (@mcp_endpoint) spans.  In production the MCP server is
+    a separate process and **must** call ``configure(push_url=...)``
+    independently to export its server-side spans to the collector.
+    """
     # Reset config state so configure() can be called again per test
     import rastir.config as _cfg
     _cfg._initialized = False

@@ -66,6 +66,65 @@ Your Python App                          Rastir Collector
 
 **Request-phase enrichment:** For provider adapters, model/provider metadata is extracted from function kwargs (e.g., `model="gpt-4o"`) *before* the API call. If the call fails, the span still contains the model and provider.
 
+## MCP Distributed Tracing
+
+Rastir supports distributed tracing across MCP (Model Context Protocol) tool boundaries. Trace context flows automatically from client to server via tool arguments — no `_meta`, no HTTP headers.
+
+**Server side** — the MCP server must call `configure()` independently to push its server-side spans to the collector:
+
+```python
+# ── MCP Server (separate process) ─────────────────
+from rastir import configure, mcp_endpoint
+
+configure(service="tool-server", push_url="http://localhost:8080")
+
+@mcp.tool()
+@mcp_endpoint
+async def search(query: str) -> str:
+    return db.search(query)       # server span created with remote="false"
+```
+
+**Client side** — wrap the MCP session or use the LangChain bridge:
+
+```python
+# ── Client (your agent process) ───────────────────
+from rastir import configure, agent_span, trace_remote_tools, mcp_to_langchain_tools
+
+configure(service="my-agent", push_url="http://localhost:8080")
+
+# Option 1: Direct MCP session
+@agent_span(agent_name="my_agent")
+async def run():
+    async with streamable_http_client(url) as (read, write, _):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+
+            @trace_remote_tools
+            def wrap():
+                return session
+
+            wrapped = wrap()
+            result = await wrapped.call_tool("search", {"query": "hello"})
+            # client span created with remote="true", trace context injected
+
+# Option 2: LangGraph agent (one-line bridge)
+async with ClientSession(read, write) as session:
+    await session.initialize()
+    tools = await mcp_to_langchain_tools(session)   # automatic trace injection
+    agent = create_react_agent(llm, tools)           # ready to use
+```
+
+> **Both processes must call `configure(push_url=...)`** — the client pushes client spans, the server pushes server spans. Both arrive at the same collector and are linked by `trace_id`.
+
+Trace topology:
+```
+Agent Span
+└── Tool Client Span  (remote="true",  model/provider inherited)
+      └── Tool Server Span (remote="false", same trace_id)
+```
+
+Full MCP documentation → [MCP Distributed Tracing](https://skamalj.github.io/rastir/mcp-tracing)
+
 ## Installation
 
 ```bash
@@ -344,6 +403,8 @@ src/rastir/
 ├── config.py            # GlobalConfig, configure()
 ├── context.py           # Span & agent context (ContextVar-based)
 ├── decorators.py        # All decorator implementations + two-phase enrichment
+├── remote.py            # MCP distributed tracing: trace_remote_tools, mcp_endpoint,
+│                        #   mcp_to_langchain_tools — argument-based trace propagation
 ├── wrapper.py           # rastir.wrap() generic object wrapper
 ├── spans.py             # SpanRecord data model
 ├── queue.py             # Bounded in-memory span queue
@@ -389,6 +450,7 @@ Full documentation at **[skamalj.github.io/rastir](https://skamalj.github.io/ras
 
 - [Getting Started](https://skamalj.github.io/rastir/getting-started) — Installation, quick start, nested spans
 - [Decorators](https://skamalj.github.io/rastir/decorators) — `@trace`, `@agent`, `@llm`, `@tool`, `@retrieval`, `@metric`
+- [MCP Distributed Tracing](https://skamalj.github.io/rastir/mcp-tracing) — `@trace_remote_tools`, `@mcp_endpoint`, `mcp_to_langchain_tools()`
 - [Adapters](https://skamalj.github.io/rastir/adapters) — 15 adapters with two-phase enrichment
 - [Server](https://skamalj.github.io/rastir/server) — Collector, metrics, histograms, exemplars, OTLP, sampling
 - [Configuration](https://skamalj.github.io/rastir/configuration) — Client & server config reference

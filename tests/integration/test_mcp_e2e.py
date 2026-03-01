@@ -313,7 +313,14 @@ def _find_tempo_spans_by_type(
 
 @pytest.fixture(autouse=True)
 def setup_rastir():
-    """Configure Rastir to push spans to the real collector."""
+    """Configure Rastir to push spans to the real collector.
+
+    NOTE: In these tests the MCP server runs in the same process as the
+    client, so a single ``configure()`` call covers both client-side and
+    server-side (@mcp_endpoint) spans.  In production the MCP server is
+    a separate process and **must** call ``configure(push_url=...)``
+    independently to export its server-side spans to the collector.
+    """
     import rastir.config as _cfg
     _cfg._initialized = False
     _cfg._global_config = None

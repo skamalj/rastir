@@ -63,4 +63,4 @@ __all__ = [
     "get_export_stats",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.1.0rc3"
