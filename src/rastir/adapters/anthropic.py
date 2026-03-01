@@ -22,6 +22,9 @@ class AnthropicAdapter(BaseAdapter):
 
     supports_tokens = True
     supports_streaming = True
+    supports_request_metadata = True
+
+    _CLIENT_CLASSES = frozenset({"Anthropic", "AsyncAnthropic"})
 
     def can_handle(self, result: Any) -> bool:
         """Detect Anthropic Message objects by class name."""
@@ -88,3 +91,31 @@ class AnthropicAdapter(BaseAdapter):
             tokens_input=tokens_input,
             tokens_output=tokens_output,
         )
+
+    def can_handle_request(self, args: tuple, kwargs: dict) -> bool:
+        """Detect Anthropic client objects or model kwarg in request args."""
+        for arg in args:
+            cls_name = type(arg).__name__
+            module = type(arg).__module__ or ""
+            if cls_name in self._CLIENT_CLASSES and "anthropic" in module:
+                return True
+        for val in kwargs.values():
+            cls_name = type(val).__name__
+            module = type(val).__module__ or ""
+            if cls_name in self._CLIENT_CLASSES and "anthropic" in module:
+                return True
+        model = kwargs.get("model", "")
+        if isinstance(model, str) and model.startswith(("claude-",)):
+            return True
+        return False
+
+    def extract_request_metadata(
+        self, args: tuple, kwargs: dict
+    ) -> "RequestMetadata":
+        """Extract model and provider from Anthropic request arguments."""
+        from rastir.adapters.types import RequestMetadata
+        span_attrs: dict = {"provider": "anthropic"}
+        model = kwargs.get("model")
+        if model and isinstance(model, str):
+            span_attrs["model"] = model
+        return RequestMetadata(span_attributes=span_attrs)

@@ -37,7 +37,7 @@ class LangChainAdapter(BaseAdapter):
     priority = 250
 
     supports_tokens = True
-    supports_streaming = True
+    supports_streaming = False  # LangChain wraps provider streaming; provider adapters handle chunks
     supports_request_metadata = True
 
     # LangChain message / result class names we look for

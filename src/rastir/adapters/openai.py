@@ -22,6 +22,10 @@ class OpenAIAdapter(BaseAdapter):
 
     supports_tokens = True
     supports_streaming = True
+    supports_request_metadata = True
+
+    # SDK client class names used for request-phase detection
+    _CLIENT_CLASSES = frozenset({"OpenAI", "AsyncOpenAI"})
 
     def can_handle(self, result: Any) -> bool:
         """Detect OpenAI response objects by class name to avoid hard import."""
@@ -61,6 +65,36 @@ class OpenAIAdapter(BaseAdapter):
         cls_name = type(chunk).__name__
         module = type(chunk).__module__ or ""
         return cls_name == "ChatCompletionChunk" and "openai" in module
+
+    def can_handle_request(self, args: tuple, kwargs: dict) -> bool:
+        """Detect OpenAI client objects or model kwarg in request args."""
+        # Check for OpenAI client object in args
+        for arg in args:
+            cls_name = type(arg).__name__
+            module = type(arg).__module__ or ""
+            if cls_name in self._CLIENT_CLASSES and "openai" in module:
+                return True
+        for val in kwargs.values():
+            cls_name = type(val).__name__
+            module = type(val).__module__ or ""
+            if cls_name in self._CLIENT_CLASSES and "openai" in module:
+                return True
+        # Check for model kwarg with openai-style model names
+        model = kwargs.get("model", "")
+        if isinstance(model, str) and model.startswith(("gpt-", "o1-", "o3-", "chatgpt-")):
+            return True
+        return False
+
+    def extract_request_metadata(
+        self, args: tuple, kwargs: dict
+    ) -> "RequestMetadata":
+        """Extract model and provider from OpenAI request arguments."""
+        from rastir.adapters.types import RequestMetadata
+        span_attrs: dict = {"provider": "openai"}
+        model = kwargs.get("model")
+        if model and isinstance(model, str):
+            span_attrs["model"] = model
+        return RequestMetadata(span_attributes=span_attrs)
 
     def extract_stream_delta(self, chunk: Any) -> TokenDelta:
         """Extract token delta from a ChatCompletionChunk.

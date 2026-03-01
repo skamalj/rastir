@@ -37,6 +37,8 @@ def _eval_span_dict(
     task: EvaluationTask,
     result: EvaluationResult,
     duration_ms: float,
+    evaluator_model: str = "",
+    evaluator_provider: str = "",
 ) -> dict:
     """Build a span dict for an evaluation result.
 
@@ -55,6 +57,8 @@ def _eval_span_dict(
         "provider": task.provider,
         "service": task.service,
         "env": task.env,
+        "evaluator_model": evaluator_model,
+        "evaluator_provider": evaluator_provider,
     }
     if task.agent:
         attrs["agent"] = task.agent
@@ -201,16 +205,18 @@ class EvaluationWorkerPool:
         timeout_s = task.timeout_ms / 1000.0
 
         # Submit all evaluation types to the pool concurrently
-        futures: list[tuple[str, Future, float]] = []
+        futures: list[tuple[str, Future, float, str, str]] = []
         for et, evaluator in to_run:
             t0 = time.monotonic()
             future = self._pool.submit(evaluator.evaluate, task)
-            futures.append((et, future, t0))
+            ev_model = getattr(evaluator, "evaluator_model", "")
+            ev_provider = getattr(evaluator, "evaluator_provider", "")
+            futures.append((et, future, t0, ev_model, ev_provider))
 
         # Collect results with overall timeout
         spans_to_emit: list[dict] = []
 
-        for et, future, t0 in futures:
+        for et, future, t0, ev_model, ev_provider in futures:
             try:
                 result: EvaluationResult = await asyncio.wait_for(
                     loop.run_in_executor(None, future.result, timeout_s),
@@ -219,10 +225,10 @@ class EvaluationWorkerPool:
                 duration_ms = (time.monotonic() - t0) * 1000.0
 
                 # Record metrics
-                self._record_eval_metrics(task, result, duration_ms)
+                self._record_eval_metrics(task, result, duration_ms, ev_model, ev_provider)
 
                 # Build evaluation span
-                span = _eval_span_dict(task, result, duration_ms)
+                span = _eval_span_dict(task, result, duration_ms, ev_model, ev_provider)
                 spans_to_emit.append(span)
 
             except (asyncio.TimeoutError, FuturesTimeout):
@@ -238,8 +244,8 @@ class EvaluationWorkerPool:
                     passed=False,
                     error=f"Evaluation timed out after {timeout_s:.1f}s",
                 )
-                self._record_eval_metrics(task, timeout_result, duration_ms)
-                span = _eval_span_dict(task, timeout_result, duration_ms)
+                self._record_eval_metrics(task, timeout_result, duration_ms, ev_model, ev_provider)
+                span = _eval_span_dict(task, timeout_result, duration_ms, ev_model, ev_provider)
                 spans_to_emit.append(span)
                 # Cancel the future if still running
                 future.cancel()
@@ -253,8 +259,8 @@ class EvaluationWorkerPool:
                     passed=False,
                     error=str(exc),
                 )
-                self._record_eval_metrics(task, error_result, duration_ms)
-                span = _eval_span_dict(task, error_result, duration_ms)
+                self._record_eval_metrics(task, error_result, duration_ms, ev_model, ev_provider)
+                span = _eval_span_dict(task, error_result, duration_ms, ev_model, ev_provider)
                 spans_to_emit.append(span)
 
         # Emit all evaluation spans via the ingestion pipeline
@@ -276,6 +282,8 @@ class EvaluationWorkerPool:
         task: EvaluationTask,
         result: EvaluationResult,
         duration_ms: float,
+        evaluator_model: str = "",
+        evaluator_provider: str = "",
     ) -> None:
         """Update Prometheus metrics for an evaluation result."""
         labels = {
@@ -284,6 +292,8 @@ class EvaluationWorkerPool:
             "model": task.model,
             "provider": task.provider,
             "evaluation_type": result.evaluation_type,
+            "evaluator_model": evaluator_model,
+            "evaluator_provider": evaluator_provider,
         }
 
         try:

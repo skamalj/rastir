@@ -31,6 +31,7 @@ class CohereAdapter(BaseAdapter):
 
     supports_tokens = True
     supports_streaming = True
+    supports_request_metadata = True
 
     _KNOWN_CLASSES = frozenset({
         "ChatResponse",
@@ -111,3 +112,26 @@ class CohereAdapter(BaseAdapter):
             tokens_input=tokens_input,
             tokens_output=tokens_output,
         )
+
+    def can_handle_request(self, args: tuple, kwargs: dict) -> bool:
+        """Detect Cohere client objects in request args."""
+        for arg in (*args, *kwargs.values()):
+            cls_name = type(arg).__name__
+            module = type(arg).__module__ or ""
+            if cls_name in ("Client", "AsyncClient", "ClientV2") and "cohere" in module:
+                return True
+        model = kwargs.get("model", "")
+        if isinstance(model, str) and model.startswith(("command",)):
+            return True
+        return False
+
+    def extract_request_metadata(
+        self, args: tuple, kwargs: dict
+    ) -> "RequestMetadata":
+        """Extract model and provider from Cohere request arguments."""
+        from rastir.adapters.types import RequestMetadata
+        span_attrs: dict = {"provider": "cohere"}
+        model = kwargs.get("model")
+        if model and isinstance(model, str):
+            span_attrs["model"] = model
+        return RequestMetadata(span_attributes=span_attrs)

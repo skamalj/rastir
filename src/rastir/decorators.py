@@ -408,6 +408,9 @@ def llm(
                 bound_kw = _bind_with_defaults(_fn_sig, args, kwargs)
                 _extract_request_metadata(span, args, bound_kw)
                 _capture_prompt_text(span, args, bound_kw)
+                # Propagate model/provider to context early so child
+                # @tool / @retrieval spans can inherit them.
+                _propagate_model_provider_to_context(span)
                 try:
                     result = await fn(*args, **kwargs)
                     _extract_llm_metadata(span, result)
@@ -435,6 +438,9 @@ def llm(
                 bound_kw = _bind_with_defaults(_fn_sig, args, kwargs)
                 _extract_request_metadata(span, args, bound_kw)
                 _capture_prompt_text(span, args, bound_kw)
+                # Propagate model/provider to context early so child
+                # @tool / @retrieval spans can inherit them.
+                _propagate_model_provider_to_context(span)
                 try:
                     result = fn(*args, **kwargs)
                     _extract_llm_metadata(span, result)
@@ -586,6 +592,21 @@ def _accumulate_stream_chunk(span: SpanRecord, chunk: Any) -> None:
         pass
     except Exception:
         logger.debug("Stream chunk extraction failed", exc_info=True)
+
+
+def _propagate_model_provider_to_context(span: SpanRecord) -> None:
+    """Push model/provider from span attributes to context vars early.
+
+    Called after request-phase extraction (before the LLM function runs)
+    so that child @tool and @retrieval spans can inherit these values
+    even though _finalize_llm_span hasn't run yet.
+    """
+    m = span.attributes.get("model")
+    if m:
+        set_current_model(m)
+    p = span.attributes.get("provider")
+    if p:
+        set_current_provider(p)
 
 
 def _finalize_llm_span(span: SpanRecord) -> None:
@@ -862,6 +883,12 @@ def retrieval(
                 agent_name = get_current_agent()
                 if agent_name:
                     span.set_attribute("agent", agent_name)
+                ctx_model = get_current_model()
+                if ctx_model:
+                    span.set_attribute("model", ctx_model)
+                ctx_provider = get_current_provider()
+                if ctx_provider:
+                    span.set_attribute("provider", ctx_provider)
                 try:
                     result = await fn(*args, **kwargs)
                     _extract_doc_count(span, result, doc_count_extractor)
@@ -885,6 +912,12 @@ def retrieval(
                 agent_name = get_current_agent()
                 if agent_name:
                     span.set_attribute("agent", agent_name)
+                ctx_model = get_current_model()
+                if ctx_model:
+                    span.set_attribute("model", ctx_model)
+                ctx_provider = get_current_provider()
+                if ctx_provider:
+                    span.set_attribute("provider", ctx_provider)
                 try:
                     result = fn(*args, **kwargs)
                     _extract_doc_count(span, result, doc_count_extractor)

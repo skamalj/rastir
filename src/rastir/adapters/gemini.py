@@ -32,6 +32,7 @@ class GeminiAdapter(BaseAdapter):
 
     supports_tokens = True
     supports_streaming = True
+    supports_request_metadata = True
 
     _KNOWN_CLASSES = frozenset({
         "GenerateContentResponse",
@@ -111,3 +112,35 @@ class GeminiAdapter(BaseAdapter):
             tokens_input=tokens_input,
             tokens_output=tokens_output,
         )
+
+    def can_handle_request(self, args: tuple, kwargs: dict) -> bool:
+        """Detect Gemini model objects or model kwarg in request args."""
+        for arg in (*args, *kwargs.values()):
+            cls_name = type(arg).__name__
+            module = type(arg).__module__ or ""
+            if cls_name == "GenerativeModel" and any(
+                m in module for m in self._KNOWN_MODULES
+            ):
+                return True
+        model = kwargs.get("model", "")
+        if isinstance(model, str) and model.startswith(("gemini-", "models/gemini")):
+            return True
+        return False
+
+    def extract_request_metadata(
+        self, args: tuple, kwargs: dict
+    ) -> "RequestMetadata":
+        """Extract model and provider from Gemini request arguments."""
+        from rastir.adapters.types import RequestMetadata
+        span_attrs: dict = {"provider": "gemini"}
+        model = kwargs.get("model")
+        if model and isinstance(model, str):
+            span_attrs["model"] = model
+        else:
+            # Try to read model_name from GenerativeModel object
+            for arg in (*args, *kwargs.values()):
+                name = getattr(arg, "model_name", None)
+                if name and isinstance(name, str):
+                    span_attrs["model"] = name
+                    break
+        return RequestMetadata(span_attributes=span_attrs)

@@ -182,7 +182,7 @@ class MetricsRegistry:
         self.retrieval_calls = Counter(
             "rastir_retrieval_calls_total",
             "Total retrieval operations",
-            ["service", "env", "agent"],
+            ["service", "env", "agent", "model", "provider"],
             registry=self._registry,
         )
 
@@ -324,7 +324,8 @@ class MetricsRegistry:
         )
 
         # ---- Evaluation metrics ----
-        _eval_labels = ["service", "env", "model", "provider", "evaluation_type"]
+        _eval_labels = ["service", "env", "model", "provider", "evaluation_type",
+                        "evaluator_model", "evaluator_provider"]
 
         self.evaluation_runs = Counter(
             "rastir_evaluation_runs_total",
@@ -420,12 +421,12 @@ class MetricsRegistry:
             status=status,
         ).inc()
 
-        # Extract model/provider early so duration & errors can use them
-        model_label = ""
-        provider_label = ""
-        if span_type == "llm":
-            model_label = self._guard_cardinality(attrs.get("model", "unknown"), self._seen_models, "model")
-            provider_label = self._guard_cardinality(attrs.get("provider", "unknown"), self._seen_providers, "provider")
+        # Extract model/provider early so duration & errors can use them.
+        # All span types may carry inherited model/provider from context.
+        raw_model = attrs.get("model", "")
+        raw_provider = attrs.get("provider", "")
+        model_label = self._guard_cardinality(raw_model, self._seen_models, "model") if raw_model else ""
+        provider_label = self._guard_cardinality(raw_provider, self._seen_providers, "provider") if raw_provider else ""
 
         duration = span.get("duration_ms")
         if duration is not None:
@@ -568,10 +569,18 @@ class MetricsRegistry:
         # -- retrieval-specific
         elif span_type == "retrieval":
             agent = self._guard_cardinality(attrs.get("agent", ""), self._seen_agents, "agent")
+            ret_model = self._guard_cardinality(
+                attrs.get("model", ""), self._seen_models, "model"
+            )
+            ret_provider = self._guard_cardinality(
+                attrs.get("provider", ""), self._seen_providers, "provider"
+            )
             self.retrieval_calls.labels(
                 service=self._clip(service),
                 env=self._clip(env),
                 agent=agent,
+                model=ret_model,
+                provider=ret_provider,
             ).inc()
 
     def generate(self) -> tuple[bytes, str]:

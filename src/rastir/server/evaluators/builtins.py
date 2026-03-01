@@ -137,6 +137,14 @@ class ToxicityEvaluator:
     def name(self) -> str:
         return "toxicity"
 
+    @property
+    def evaluator_model(self) -> str:
+        return self._config.model
+
+    @property
+    def evaluator_provider(self) -> str:
+        return self._config.provider
+
     def evaluate(self, task: EvaluationTask) -> EvaluationResult:
         """Score the completion text for toxicity."""
         if not task.completion_text:
@@ -190,6 +198,14 @@ class HallucinationEvaluator:
     @property
     def name(self) -> str:
         return "hallucination"
+
+    @property
+    def evaluator_model(self) -> str:
+        return self._config.model
+
+    @property
+    def evaluator_provider(self) -> str:
+        return self._config.provider
 
     def evaluate(self, task: EvaluationTask) -> EvaluationResult:
         """Score the completion for hallucination relative to the prompt."""

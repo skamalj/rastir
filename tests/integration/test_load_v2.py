@@ -3,9 +3,9 @@ Load-test v2 — fresh agent names, Rastir @tool instrumented tools,
 mix of short and complex multi-step prompts.
 
 Uses three LangGraph ReAct agents:
-  - travel_planner       (OpenAI gpt-4o-mini)
-  - portfolio_manager    (Anthropic claude-3-haiku)
-  - ops_engineer         (Bedrock claude-3-haiku + Guardrails)
+  - travel_concierge     (OpenAI gpt-4o-mini)
+  - fund_strategist      (Anthropic claude-3-haiku)
+  - site_reliability     (Bedrock claude-3-haiku + Guardrails)
 
 All LangChain tools are wrapped with Rastir @tool so they appear
 as tool spans in traces.
@@ -346,21 +346,21 @@ def build_ops_agent():
 # 5. Decorated agent runners
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-@agent(agent_name="travel_planner")
+@agent(agent_name="trip_oracle")
 def run_travel_agent(prompt: str):
     """OpenAI-backed travel planner."""
     app = build_travel_agent()
     return invoke_llm(app, prompt)
 
 
-@agent(agent_name="portfolio_manager")
+@agent(agent_name="wealth_scout")
 def run_portfolio_agent(prompt: str):
     """Anthropic-backed portfolio manager."""
     app = build_portfolio_agent()
     return invoke_llm(app, prompt)
 
 
-@agent(agent_name="ops_engineer")
+@agent(agent_name="platform_sentinel")
 def run_ops_agent(prompt: str):
     """Bedrock-backed ops engineer with guardrails."""
     app = build_ops_agent()
@@ -491,28 +491,28 @@ def main():
     print(f"  Rastir Load Test v2")
     print(f"  Started: {datetime.now().isoformat()}")
     print(f"  Server:  http://localhost:8080")
-    print(f"  Agents:  travel_planner / portfolio_manager / ops_engineer")
+    print(f"  Agents:  trip_oracle / wealth_scout / platform_sentinel")
     print("=" * 70)
 
     total_start = time.time()
 
     # ── OpenAI: Travel Planner ───────────────────────────────────────
     print(f"\n{'═'*70}")
-    print("  AGENT 1: Travel Planner (OpenAI gpt-4o-mini)")
+    print("  AGENT 1: Trip Oracle (OpenAI gpt-4o-mini)")
     print(f"{'═'*70}")
     for prompt in OPENAI_PROMPTS:
         run_scenario(run_travel_agent, prompt, "OpenAI")
 
     # ── Anthropic: Portfolio Manager ─────────────────────────────────
     print(f"\n{'═'*70}")
-    print("  AGENT 2: Portfolio Manager (Anthropic claude-3-haiku)")
+    print("  AGENT 2: Wealth Scout (Anthropic claude-3-haiku)")
     print(f"{'═'*70}")
     for prompt in ANTHROPIC_PROMPTS:
         run_scenario(run_portfolio_agent, prompt, "Anthropic")
 
     # ── Bedrock: Ops Engineer ────────────────────────────────────────
     print(f"\n{'═'*70}")
-    print("  AGENT 3: Ops Engineer (Bedrock claude-3-haiku + Guardrails)")
+    print("  AGENT 3: Platform Sentinel (Bedrock claude-3-haiku + Guardrails)")
     print(f"{'═'*70}")
     for prompt in BEDROCK_PROMPTS:
         run_scenario(run_ops_agent, prompt, "Bedrock")

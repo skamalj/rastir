@@ -21,5 +21,10 @@ exporter:
   flush_interval: 5
 
 logging:
+  # Console output (stdout) is the default — ideal for Docker/Kubernetes.
+  # Override with environment variables:
+  #   RASTIR_SERVER_LOGGING_LEVEL       (DEBUG, INFO, WARNING, ERROR)
+  #   RASTIR_SERVER_LOGGING_STRUCTURED  (true/false — JSON vs plain text)
+  #   RASTIR_SERVER_LOGGING_LOG_FILE    (optional file path for debug log)
   level: "INFO"
-  log_file: "/tmp/rastir_debug.log"
+  structured: true

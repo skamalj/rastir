@@ -18,6 +18,9 @@ Environment variable mapping (prefix ``RASTIR_SERVER_``):
     RASTIR_SERVER_OTLP_FLUSH_INTERVAL
     RASTIR_SERVER_MULTI_TENANT_ENABLED
     RASTIR_SERVER_TENANT_HEADER
+    RASTIR_SERVER_LOGGING_LEVEL        (DEBUG, INFO, WARNING, ERROR)
+    RASTIR_SERVER_LOGGING_STRUCTURED   (true/false — JSON vs plain text)
+    RASTIR_SERVER_LOGGING_LOG_FILE     (optional file path for debug log)
 """
 
 from __future__ import annotations
