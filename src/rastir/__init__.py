@@ -25,6 +25,7 @@ Usage:
 from rastir.config import configure
 from rastir.context import get_current_span
 from rastir.decorators import agent, llm, metric, retrieval, tool, trace
+from rastir.pricing import PricingRegistry
 from rastir.remote import mcp_endpoint, mcp_to_langchain_tools, trace_remote_tools
 from rastir.transport import get_export_stats, stop_exporter
 from rastir.wrapper import wrap
@@ -48,6 +49,7 @@ __all__ = [
     "tool",
     "retrieval",
     "wrap",
+    "PricingRegistry",
     # _span aliases
     "trace_span",
     "agent_span",

@@ -19,6 +19,7 @@ logger = logging.getLogger("rastir")
 _config_lock = threading.Lock()
 _global_config: Optional[GlobalConfig] = None
 _initialized = False
+_pricing_registry: Optional[object] = None  # Lazy: PricingRegistry instance
 
 
 @dataclass(frozen=True)
@@ -54,6 +55,20 @@ class EvaluationConfig:
 
 
 @dataclass(frozen=True)
+class CostConfig:
+    """Client-side cost calculation settings.
+
+    When enabled, the ``@llm`` decorator calculates ``cost_usd`` at span
+    finalization time using the ``PricingRegistry``.
+    """
+
+    enabled: bool = False
+    pricing_profile: str = "default"
+    pricing_source: Optional[str] = None  # file path, or None for inline/env
+    max_cost_per_call_alert: Optional[float] = None
+
+
+@dataclass(frozen=True)
 class GlobalConfig:
     """Immutable global configuration for Rastir.
 
@@ -66,6 +81,8 @@ class GlobalConfig:
     version: Optional[str] = None
     exporter: ExporterConfig = field(default_factory=ExporterConfig)
     evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
+    cost: CostConfig = field(default_factory=CostConfig)
+    enable_ttft: bool = True
 
     @property
     def global_labels(self) -> dict[str, str]:
@@ -94,6 +111,11 @@ def configure(
     evaluation_enabled: bool | None = None,
     capture_prompt: bool | None = None,
     capture_completion: bool | None = None,
+    enable_cost_calculation: bool | None = None,
+    pricing_profile: str | None = None,
+    pricing_source: str | None = None,
+    max_cost_per_call_alert: float | None = None,
+    enable_ttft: bool | None = None,
 ) -> GlobalConfig:
     """Initialize Rastir configuration.
 
@@ -117,6 +139,11 @@ def configure(
         evaluation_enabled: Enable evaluation metadata capture on @llm spans.
         capture_prompt: Capture prompt_text in LLM spans (default True).
         capture_completion: Capture completion_text in LLM spans (default True).
+        enable_cost_calculation: Enable client-side cost calculation on @llm spans.
+        pricing_profile: Label identifying the pricing configuration (default "default").
+        pricing_source: File path for pricing data (JSON). Also loadable via env/inline.
+        max_cost_per_call_alert: Optional per-call cost threshold for alerting.
+        enable_ttft: Enable Time-To-First-Token measurement on streaming LLM spans (default True).
 
     Returns:
         The frozen GlobalConfig instance.
@@ -147,6 +174,11 @@ def configure(
         resolved_eval_enabled = _resolve_bool(evaluation_enabled, "RASTIR_EVALUATION_ENABLED", False)
         resolved_capture_prompt = _resolve_bool(capture_prompt, "RASTIR_CAPTURE_PROMPT", True)
         resolved_capture_completion = _resolve_bool(capture_completion, "RASTIR_CAPTURE_COMPLETION", True)
+        resolved_cost_enabled = _resolve_bool(enable_cost_calculation, "RASTIR_ENABLE_COST_CALCULATION", False)
+        resolved_pricing_profile = _resolve(pricing_profile, "RASTIR_PRICING_PROFILE", "default")
+        resolved_pricing_source = _resolve(pricing_source, "RASTIR_PRICING_SOURCE", None)
+        resolved_max_cost_alert = _resolve_float(max_cost_per_call_alert, "RASTIR_MAX_COST_PER_CALL_ALERT", 0.0) if max_cost_per_call_alert is not None or os.environ.get("RASTIR_MAX_COST_PER_CALL_ALERT") else None
+        resolved_enable_ttft = _resolve_bool(enable_ttft, "RASTIR_ENABLE_TTFT", True)
 
         exporter = ExporterConfig(
             push_url=resolved_push_url,
@@ -165,15 +197,35 @@ def configure(
             capture_completion=resolved_capture_completion,
         )
 
+        cost_cfg = CostConfig(
+            enabled=resolved_cost_enabled,
+            pricing_profile=resolved_pricing_profile or "default",
+            pricing_source=resolved_pricing_source,
+            max_cost_per_call_alert=resolved_max_cost_alert,
+        )
+
         _global_config = GlobalConfig(
             service=resolved_service,
             env=resolved_env,
             version=resolved_version,
             exporter=exporter,
             evaluation=evaluation_cfg,
+            cost=cost_cfg,
+            enable_ttft=resolved_enable_ttft,
         )
 
         _initialized = True
+
+        # Initialize pricing registry when cost calculation is enabled
+        if cost_cfg.enabled:
+            from rastir.pricing import PricingRegistry
+            global _pricing_registry
+            _pricing_registry = PricingRegistry(pricing_file=cost_cfg.pricing_source)
+            logger.info(
+                "Cost calculation enabled: pricing_profile=%s, models_loaded=%d",
+                cost_cfg.pricing_profile,
+                _pricing_registry.model_count,
+            )
 
         if exporter.enabled:
             logger.info(
@@ -233,9 +285,14 @@ def get_config() -> GlobalConfig:
         return _global_config
 
 
+def get_pricing_registry():
+    """Return the global PricingRegistry, or None if cost calculation is disabled."""
+    return _pricing_registry
+
+
 def reset_config() -> None:
     """Reset configuration. Intended for testing only."""
-    global _global_config, _initialized
+    global _global_config, _initialized, _pricing_registry
 
     with _config_lock:
         # Stop background exporter if running
@@ -247,6 +304,7 @@ def reset_config() -> None:
 
         _global_config = None
         _initialized = False
+        _pricing_registry = None
 
 
 # ---------------------------------------------------------------------------

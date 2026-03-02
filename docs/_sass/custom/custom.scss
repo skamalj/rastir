@@ -1,6 +1,23 @@
-// Widen the main content area
+// Widen the main content area and increase base font size
 .main-content-wrap {
-  max-width: 1100px;
+  max-width: 95%;
+}
+
+// Increase base font size globally
+body {
+  font-size: 17px !important;
+}
+
+// Slightly larger headings
+h1 { font-size: 2.2rem !important; }
+h2 { font-size: 1.75rem !important; }
+h3 { font-size: 1.4rem !important; }
+h4 { font-size: 1.15rem !important; }
+
+// Larger paragraph and list text
+p, li, td, th, dd, dt, .main-content {
+  font-size: 1.05rem !important;
+  line-height: 1.7;
 }
 
 // Wider content on large screens
@@ -12,7 +29,7 @@
     margin-left: 264px;
   }
   .main-content-wrap {
-    max-width: 1100px;
+    max-width: 95%;
     padding-left: 2rem;
     padding-right: 2rem;
   }

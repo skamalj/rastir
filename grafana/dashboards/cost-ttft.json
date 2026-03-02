@@ -1,0 +1,355 @@
+{
+  "uid": "rastir-cost-ttft",
+  "id": 6,
+  "title": "Rastir Cost & TTFT",
+  "description": "LLM cost observability, pricing analysis, and streaming Time-To-First-Token",
+  "tags": ["rastir", "llm-observability", "cost", "ttft"],
+  "schemaVersion": 39,
+  "version": 1,
+  "timezone": "browser",
+  "editable": true,
+  "graphTooltip": 1,
+  "time": { "from": "now-1h", "to": "now" },
+  "refresh": "30s",
+  "fiscalYearStartMonth": 0,
+  "liveNow": false,
+  "style": "dark",
+  "templating": {
+    "list": [
+      {
+        "allValue": ".*",
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "definition": "label_values(rastir_cost_total, service)",
+        "hide": 0,
+        "includeAll": true,
+        "multi": true,
+        "name": "service",
+        "options": [],
+        "query": "label_values(rastir_cost_total, service)",
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "definition": "label_values(rastir_cost_total, env)",
+        "hide": 0,
+        "includeAll": true,
+        "multi": true,
+        "name": "env",
+        "options": [],
+        "query": "label_values(rastir_cost_total, env)",
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "definition": "label_values(rastir_cost_total, model)",
+        "hide": 0,
+        "includeAll": true,
+        "multi": true,
+        "name": "model",
+        "options": [],
+        "query": "label_values(rastir_cost_total, model)",
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "definition": "label_values(rastir_cost_total, pricing_profile)",
+        "hide": 0,
+        "includeAll": true,
+        "multi": true,
+        "name": "pricing_profile",
+        "options": [],
+        "query": "label_values(rastir_cost_total, pricing_profile)",
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Cost Overview",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+    },
+    {
+      "id": 2,
+      "title": "Total Cost (USD)",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 1 },
+      "targets": [
+        {
+          "expr": "sum(rastir_cost_total{service=~\"$service\",env=~\"$env\",model=~\"$model\",pricing_profile=~\"$pricing_profile\"})",
+          "legendFormat": "Total Cost",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 10 },
+              { "color": "red", "value": 100 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background"
+      }
+    },
+    {
+      "id": 3,
+      "title": "Cost per Model (USD)",
+      "type": "piechart",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 9, "x": 6, "y": 1 },
+      "targets": [
+        {
+          "expr": "sum by (model) (rastir_cost_total{service=~\"$service\",env=~\"$env\",model=~\"$model\",pricing_profile=~\"$pricing_profile\"})",
+          "legendFormat": "{{model}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "currencyUSD" }
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right" },
+        "pieType": "donut"
+      }
+    },
+    {
+      "id": 4,
+      "title": "Cost per Agent (USD)",
+      "type": "piechart",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 6, "w": 9, "x": 15, "y": 1 },
+      "targets": [
+        {
+          "expr": "sum by (agent) (rastir_cost_total{service=~\"$service\",env=~\"$env\",model=~\"$model\",pricing_profile=~\"$pricing_profile\",agent!=\"\"})",
+          "legendFormat": "{{agent}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "currencyUSD" }
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right" },
+        "pieType": "donut"
+      }
+    },
+    {
+      "id": 5,
+      "title": "Cost Burn Rate (USD/min)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 7 },
+      "targets": [
+        {
+          "expr": "sum(rate(rastir_cost_total{service=~\"$service\",env=~\"$env\",model=~\"$model\",pricing_profile=~\"$pricing_profile\"}[5m])) * 60",
+          "legendFormat": "Total",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (model) (rate(rastir_cost_total{service=~\"$service\",env=~\"$env\",model=~\"$model\",pricing_profile=~\"$pricing_profile\"}[5m])) * 60",
+          "legendFormat": "{{model}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "spanNulls": true }
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Cost P95 per Call (USD)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 7 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, model) (rate(rastir_cost_per_call_usd_bucket{service=~\"$service\",env=~\"$env\",model=~\"$model\"}[5m])))",
+          "legendFormat": "P95 {{model}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum by (le, model) (rate(rastir_cost_per_call_usd_bucket{service=~\"$service\",env=~\"$env\",model=~\"$model\"}[5m])))",
+          "legendFormat": "P50 {{model}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "custom": { "drawStyle": "line", "fillOpacity": 5, "spanNulls": true }
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Cost by Pricing Profile (USD)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 15 },
+      "targets": [
+        {
+          "expr": "sum by (pricing_profile) (rastir_cost_total{service=~\"$service\",env=~\"$env\",model=~\"$model\",pricing_profile=~\"$pricing_profile\"})",
+          "legendFormat": "{{pricing_profile}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "custom": { "drawStyle": "bars", "fillOpacity": 80 }
+        }
+      }
+    },
+    {
+      "id": 8,
+      "title": "Pricing Missing Rate",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 15 },
+      "targets": [
+        {
+          "expr": "sum(rate(rastir_pricing_missing_total{service=~\"$service\",env=~\"$env\"}[5m]))",
+          "legendFormat": "Missing/sec",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rastir_pricing_missing_total{service=~\"$service\",env=~\"$env\"})",
+          "legendFormat": "Total Missing",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 10 }
+        }
+      }
+    },
+    {
+      "id": 9,
+      "title": "Streaming TTFT",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 23 }
+    },
+    {
+      "id": 10,
+      "title": "TTFT P95 per Model (seconds)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, model) (rate(rastir_ttft_seconds_bucket{service=~\"$service\",env=~\"$env\",model=~\"$model\"}[5m])))",
+          "legendFormat": "P95 {{model}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum by (le, model) (rate(rastir_ttft_seconds_bucket{service=~\"$service\",env=~\"$env\",model=~\"$model\"}[5m])))",
+          "legendFormat": "P50 {{model}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "spanNulls": true }
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] }
+      }
+    },
+    {
+      "id": 11,
+      "title": "TTFT Trend Over Time",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, provider) (rate(rastir_ttft_seconds_bucket{service=~\"$service\",env=~\"$env\"}[5m])))",
+          "legendFormat": "P95 {{provider}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.75, sum by (le, provider) (rate(rastir_ttft_seconds_bucket{service=~\"$service\",env=~\"$env\"}[5m])))",
+          "legendFormat": "P75 {{provider}}",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum by (le, provider) (rate(rastir_ttft_seconds_bucket{service=~\"$service\",env=~\"$env\"}[5m])))",
+          "legendFormat": "P50 {{provider}}",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "drawStyle": "line", "fillOpacity": 5, "spanNulls": true }
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max", "last"] }
+      }
+    },
+    {
+      "id": 12,
+      "title": "TTFT Heatmap",
+      "type": "heatmap",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 32 },
+      "targets": [
+        {
+          "expr": "sum(increase(rastir_ttft_seconds_bucket{service=~\"$service\",env=~\"$env\",model=~\"$model\"}[5m])) by (le)",
+          "legendFormat": "{{le}}",
+          "refId": "A",
+          "format": "heatmap"
+        }
+      ],
+      "options": {
+        "calculate": false,
+        "yAxis": { "unit": "s" },
+        "color": { "scheme": "Oranges" }
+      }
+    }
+  ]
+}

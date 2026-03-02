@@ -345,9 +345,14 @@ def llm(
                 bound_kw = _bind_with_defaults(_fn_sig, args, kwargs)
                 _extract_request_metadata(span, args, bound_kw)
                 _capture_prompt_text(span, args, bound_kw)
+                span.set_attribute("streaming", True)
                 collected_text: list[str] = []
+                first_chunk_seen = False
                 try:
                     async for chunk in fn(*args, **kwargs):
+                        if not first_chunk_seen:
+                            first_chunk_seen = True
+                            _record_ttft(span)
                         yield chunk
                         _accumulate_stream_chunk(span, chunk)
                         # Accumulate streaming text for evaluation
@@ -377,9 +382,14 @@ def llm(
                 bound_kw = _bind_with_defaults(_fn_sig, args, kwargs)
                 _extract_request_metadata(span, args, bound_kw)
                 _capture_prompt_text(span, args, bound_kw)
+                span.set_attribute("streaming", True)
                 collected_text: list[str] = []
+                first_chunk_seen = False
                 try:
                     for chunk in fn(*args, **kwargs):
+                        if not first_chunk_seen:
+                            first_chunk_seen = True
+                            _record_ttft(span)
                         yield chunk
                         _accumulate_stream_chunk(span, chunk)
                         if span.attributes.get("evaluation_enabled"):
@@ -594,6 +604,24 @@ def _accumulate_stream_chunk(span: SpanRecord, chunk: Any) -> None:
         logger.debug("Stream chunk extraction failed", exc_info=True)
 
 
+def _record_ttft(span: SpanRecord) -> None:
+    """Record Time-To-First-Token on first streaming chunk.
+
+    TTFT = now - span.start_time, measured in milliseconds.
+    Only records if ``enable_ttft`` is enabled in config.
+    """
+    try:
+        from rastir.config import get_config
+        cfg = get_config()
+        if not cfg.enable_ttft:
+            return
+    except Exception:
+        return
+
+    ttft_ms = (time.time() - span.start_time) * 1000.0
+    span.set_attribute("ttft_ms", round(ttft_ms, 2))
+
+
 def _propagate_model_provider_to_context(span: SpanRecord) -> None:
     """Push model/provider from span attributes to context vars early.
 
@@ -613,7 +641,7 @@ def _finalize_llm_span(span: SpanRecord) -> None:
     """Ensure model/provider are set before the span is enqueued.
 
     Also propagates model/provider into context so child @tool spans
-    can inherit them.
+    can inherit them, and calculates cost if enabled.
     """
     if "model" not in span.attributes:
         span.set_attribute("model", "unknown")
@@ -622,6 +650,58 @@ def _finalize_llm_span(span: SpanRecord) -> None:
     # Propagate to context for @tool inheritance
     set_current_model(span.attributes["model"])
     set_current_provider(span.attributes["provider"])
+    # Cost calculation (client-side)
+    _calculate_and_set_cost(span)
+
+
+def _calculate_and_set_cost(span: SpanRecord) -> None:
+    """Calculate cost_usd from PricingRegistry and attach to span.
+
+    Only runs when cost calculation is enabled in the config.
+    Sets ``cost_usd``, ``pricing_profile``, and ``pricing_missing``
+    attributes on the span.
+    """
+    try:
+        from rastir.config import get_config, get_pricing_registry
+
+        cfg = get_config()
+        if not cfg.cost.enabled:
+            return
+
+        registry = get_pricing_registry()
+        if registry is None:
+            span.set_attribute("cost_usd", 0.0)
+            span.set_attribute("pricing_missing", True)
+            span.set_attribute("pricing_profile", cfg.cost.pricing_profile)
+            return
+
+        provider = span.attributes.get("provider", "unknown")
+        model = span.attributes.get("model", "unknown")
+        tokens_in = span.attributes.get("tokens_input", 0) or 0
+        tokens_out = span.attributes.get("tokens_output", 0) or 0
+
+        cost_usd, pricing_missing = registry.calculate_cost(
+            provider, model, tokens_in, tokens_out,
+        )
+
+        span.set_attribute("cost_usd", cost_usd)
+        span.set_attribute("pricing_missing", pricing_missing)
+        span.set_attribute("pricing_profile", cfg.cost.pricing_profile)
+
+        # Budget alert check
+        if (
+            cfg.cost.max_cost_per_call_alert
+            and cost_usd > cfg.cost.max_cost_per_call_alert
+        ):
+            logger.warning(
+                "Cost alert: %s/%s cost $%.6f exceeds threshold $%.6f",
+                provider,
+                model,
+                cost_usd,
+                cfg.cost.max_cost_per_call_alert,
+            )
+    except Exception:
+        logger.debug("Cost calculation failed", exc_info=True)
 
 
 def _set_evaluation_attrs(

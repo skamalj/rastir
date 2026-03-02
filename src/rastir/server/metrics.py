@@ -39,11 +39,17 @@ _DEFAULT_CARDINALITY_CAPS: dict[str, int] = {
     "agent": 200,
     "error_type": 50,
     "guardrail_id": 100,
+    "pricing_profile": 20,
 }
 
 # Default histogram buckets optimised for LLM workloads
 _DEFAULT_DURATION_BUCKETS = (0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0)
 _DEFAULT_TOKENS_BUCKETS = (10, 50, 100, 250, 500, 1000, 2000, 4000, 8000, 16000, 32000)
+_DEFAULT_COST_BUCKETS = (
+    0.0001, 0.0005, 0.001, 0.002, 0.005, 0.01, 0.02, 0.05,
+    0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100,
+)
+_DEFAULT_TTFT_BUCKETS = (0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10)
 _MAX_BUCKET_COUNT = 20
 
 # Canonical span types — anything else is mapped to "system"
@@ -207,6 +213,38 @@ class MetricsRegistry:
             "Total tokens (input+output) per LLM call",
             ["service", "env", "model", "provider"],
             buckets=self._tokens_buckets,
+            registry=self._registry,
+        )
+
+        # ---- Cost metrics (V6) ----
+        self.cost_total = Counter(
+            "rastir_cost_total",
+            "Total accumulated USD cost by model/provider/pricing_profile",
+            ["service", "env", "model", "provider", "agent", "pricing_profile"],
+            registry=self._registry,
+        )
+
+        self.cost_per_call = Histogram(
+            "rastir_cost_per_call_usd",
+            "Cost per LLM call in USD",
+            ["service", "env", "model"],
+            buckets=_DEFAULT_COST_BUCKETS,
+            registry=self._registry,
+        )
+
+        self.pricing_missing = Counter(
+            "rastir_pricing_missing_total",
+            "Total LLM calls where pricing entry was not found",
+            ["service", "env", "model", "provider"],
+            registry=self._registry,
+        )
+
+        # ---- TTFT metric (V6) ----
+        self.ttft = Histogram(
+            "rastir_ttft_seconds",
+            "Time-To-First-Token for streaming LLM calls",
+            ["service", "env", "model", "provider"],
+            buckets=_DEFAULT_TTFT_BUCKETS,
             registry=self._registry,
         )
 
@@ -388,6 +426,7 @@ class MetricsRegistry:
         self._seen_tools: set[str] = set()
         self._seen_agents: set[str] = set()
         self._seen_error_types: set[str] = set()
+        self._seen_pricing_profiles: set[str] = set()
 
     # ----- public API ------------------------------------------------------
 
@@ -495,6 +534,47 @@ class MetricsRegistry:
                     model=model_label,
                     provider=provider_label,
                 ).observe(total_tokens)
+
+            # -- cost metrics (V6)
+            cost_usd = attrs.get("cost_usd")
+            if cost_usd is not None and cost_usd > 0:
+                pricing_profile = self._guard_cardinality(
+                    attrs.get("pricing_profile", "default"),
+                    self._seen_pricing_profiles,
+                    "pricing_profile",
+                )
+                self.cost_total.labels(
+                    service=self._clip(service),
+                    env=self._clip(env),
+                    model=model_label,
+                    provider=provider_label,
+                    agent=agent,
+                    pricing_profile=pricing_profile,
+                ).inc(cost_usd)
+
+                self.cost_per_call.labels(
+                    service=self._clip(service),
+                    env=self._clip(env),
+                    model=model_label,
+                ).observe(cost_usd)
+
+            if attrs.get("pricing_missing"):
+                self.pricing_missing.labels(
+                    service=self._clip(service),
+                    env=self._clip(env),
+                    model=model_label,
+                    provider=provider_label,
+                ).inc()
+
+            # -- TTFT metric (V6)
+            ttft_ms = attrs.get("ttft_ms")
+            if ttft_ms is not None:
+                self.ttft.labels(
+                    service=self._clip(service),
+                    env=self._clip(env),
+                    model=model_label,
+                    provider=provider_label,
+                ).observe(ttft_ms / 1000.0)  # convert ms → seconds
 
             # -- guardrail metrics (LLM spans with guardrail attrs)
             guardrail_id = attrs.get("guardrail_id")

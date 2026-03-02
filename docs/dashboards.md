@@ -6,7 +6,7 @@ nav_order: 7
 
 # Grafana Dashboards
 
-Rastir ships five pre-built Grafana dashboards that provide full observability across your LLM application stack. All dashboards are JSON files ready to import into Grafana.
+Rastir ships six pre-built Grafana dashboards that provide full observability across your LLM application stack. All dashboards are JSON files ready to import into Grafana.
 
 Dashboard JSON files are located in `grafana/dashboards/` in the repository.
 
@@ -53,6 +53,7 @@ Repeat for each dashboard file.
 | Evaluation | `evaluation.json` | `rastir-evaluation` | Eval runs, scores, latency, queue health |
 | Guardrail | `guardrail.json` | `rastir-guardrail` | Guardrail requests, violations by category/model |
 | System Health | `system-health.json` | `rastir-system-health` | Ingestion rate, queue, memory, backpressure |
+| Cost & TTFT | `cost-ttft.json` | `rastir-cost-ttft` | Cost per model/agent, burn rate, TTFT P95 |
 
 All dashboards share common template variables for filtering:
 
@@ -304,3 +305,44 @@ scrape_configs:
 ### Dashboard Data Source
 
 All dashboards reference a Prometheus data source with `uid: "prometheus"`. If your Grafana installation uses a different UID, update the `datasource` fields in the JSON files before import.
+
+---
+
+## Cost & TTFT Dashboard
+
+**File:** `grafana/dashboards/cost-ttft.json`
+
+Provides financial observability and streaming latency insight for LLM calls.
+
+### Template Variables
+
+| Variable | Source | Description |
+|----------|--------|-------------|
+| `service` | `rastir_cost_total` | Filter by service |
+| `env` | `rastir_cost_total` | Filter by environment |
+| `model` | `rastir_cost_total` | Filter by model |
+| `pricing_profile` | `rastir_cost_total` | Filter by pricing profile label |
+
+### Panels
+
+| Panel | Type | Description |
+|-------|------|-------------|
+| **Total Cost (USD)** | Stat (KPI) | Accumulated cost in selected time range |
+| **Cost per Model** | Pie chart | Cost breakdown by model |
+| **Cost per Agent** | Pie chart | Cost breakdown by agent |
+| **Cost Burn Rate** | Time series | USD/minute rate, total and per-model |
+| **Cost P95 per Call** | Time series | P95 and P50 cost per LLM call by model |
+| **Cost by Pricing Profile** | Time series | Cost split by pricing_profile label |
+| **Pricing Missing Rate** | Time series | Rate of LLM calls missing pricing data |
+| **TTFT P95 per Model** | Time series | P95 and P50 Time-To-First-Token by model |
+| **TTFT Trend Over Time** | Time series | P95/P75/P50 TTFT by provider |
+| **TTFT Heatmap** | Heatmap | Distribution of TTFT values over time |
+
+### Metrics Used
+
+| Metric | Type | Purpose |
+|--------|------|---------|
+| `rastir_cost_total` | Counter | Accumulated USD cost by model/provider/agent/pricing_profile |
+| `rastir_cost_per_call_usd` | Histogram | Cost distribution per LLM call (no pricing_profile label) |
+| `rastir_pricing_missing_total` | Counter | Calls where pricing entry was not found |
+| `rastir_ttft_seconds` | Histogram | Time-To-First-Token for streaming LLM calls |

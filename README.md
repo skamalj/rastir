@@ -196,6 +196,58 @@ rastir_errors_total{span_type="llm",error_type="rate_limit"} 7
 rastir_errors_total{span_type="llm",error_type="timeout"} 3
 ```
 
+### Cost Observability & TTFT (V6)
+
+Enable client-side cost calculation and streaming TTFT measurement:
+
+```python
+from rastir import configure, PricingRegistry
+from rastir.config import get_pricing_registry
+
+configure(
+    service="my-app",
+    push_url="http://localhost:8080/v1/telemetry",
+    enable_cost_calculation=True,
+    pricing_profile="production_2025_q1",
+    enable_ttft=True,
+)
+
+# Register model pricing (USD per 1M tokens)
+registry = get_pricing_registry()
+registry.register("openai", "gpt-4o", input_price=2.50, output_price=10.00)
+registry.register("anthropic", "claude-sonnet-4-20250514", input_price=3.00, output_price=15.00)
+```
+
+Or load pricing from a JSON file:
+```python
+configure(
+    enable_cost_calculation=True,
+    pricing_source="/path/to/pricing.json",
+)
+```
+
+```json
+{
+  "openai": {
+    "gpt-4o": {"input_price": 2.50, "output_price": 10.00},
+    "gpt-4o-mini": {"input_price": 0.15, "output_price": 0.60}
+  }
+}
+```
+
+**What you get:**
+```
+# Cost tracking
+rastir_cost_total{model="gpt-4o",provider="openai",pricing_profile="production_2025_q1"} 1.25
+rastir_cost_per_call_usd_bucket{model="gpt-4o",le="0.01"} 45
+
+# Streaming TTFT
+rastir_ttft_seconds_bucket{model="gpt-4o",provider="openai",le="0.5"} 38
+
+# Pricing gaps
+rastir_pricing_missing_total{model="custom-model",provider="openai"} 3
+```
+
 ## Two-Phase Enrichment
 
 Rastir captures metadata in two phases to ensure observability even when API calls fail:
@@ -361,6 +413,10 @@ Raw exception types are normalised into six fixed categories to prevent label ex
 | `rastir_errors_total` | Counter | Failures by span type and normalised error type |
 | `rastir_guardrail_requests_total` | Counter | LLM calls with guardrail config |
 | `rastir_guardrail_violations_total` | Counter | Guardrail interventions by action/category |
+| `rastir_cost_total` | Counter | Accumulated USD cost by model/provider/pricing_profile |
+| `rastir_cost_per_call_usd` | Histogram | Cost distribution per LLM call |
+| `rastir_pricing_missing_total` | Counter | LLM calls where pricing entry was not found |
+| `rastir_ttft_seconds` | Histogram | Time-To-First-Token for streaming LLM calls |
 | `rastir_spans_sampled_total` | Counter | Spans retained after sampling |
 | `rastir_spans_dropped_by_sampling_total` | Counter | Spans dropped by sampling |
 | `rastir_backpressure_warnings_total` | Counter | Queue soft-limit warnings |
@@ -450,7 +506,7 @@ ruff check src/ tests/            # linting
 
 ## Grafana Dashboards
 
-Rastir ships five pre-built Grafana dashboards in `grafana/dashboards/`:
+Rastir ships six pre-built Grafana dashboards in `grafana/dashboards/`:
 
 | Dashboard | Description |
 |-----------|-------------|
@@ -459,6 +515,7 @@ Rastir ships five pre-built Grafana dashboards in `grafana/dashboards/`:
 | **Evaluation** | Eval runs/success/failures, scores by type and model, queue health |
 | **Guardrail** | Guardrail violations by category and model, request volumes |
 | **System Health** | Ingestion rate, queue pressure, memory, backpressure, OTLP export health |
+| **Cost & TTFT** | Cost per model/agent, burn rate, P95 cost, TTFT percentiles, pricing gaps |
 
 All dashboards include template variables for filtering by service, environment, model, provider, and agent. Import via Grafana UI or API.
 
@@ -474,7 +531,7 @@ Full documentation at **[skamalj.github.io/rastir](https://skamalj.github.io/ras
 - [Adapters](https://skamalj.github.io/rastir/adapters) — 15 adapters with two-phase enrichment
 - [Server](https://skamalj.github.io/rastir/server) — Collector, metrics, histograms, exemplars, OTLP, sampling
 - [Configuration](https://skamalj.github.io/rastir/configuration) — Client & server config reference
-- [Dashboards](https://skamalj.github.io/rastir/dashboards) — Five pre-built Grafana dashboards
+- [Dashboards](https://skamalj.github.io/rastir/dashboards) — Six pre-built Grafana dashboards
 - [Environment Variables](https://skamalj.github.io/rastir/environment-variables) — Complete env var reference
 - [Contributing Adapters](https://skamalj.github.io/rastir/contributing-adapters) — Write your own adapter
 

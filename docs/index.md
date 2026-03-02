@@ -21,6 +21,8 @@ Rastir provides decorator-based instrumentation for LLM applications and AI agen
 - **Two-phase enrichment** — model/provider extracted from function kwargs *before* the call, refined from the response *after*. Metadata survives even when API calls fail.
 - **Generic object wrapper** — `rastir.wrap(obj)` instruments any object (Redis, databases, caches) without decorator access
 - **Prometheus metrics** — duration histograms, token counters, error rates with normalised categories, cardinality-guarded labels
+- **Cost observability** — client-side cost calculation with `PricingRegistry`, cost counters and histograms, pricing profile labeling
+- **Streaming TTFT** — Time-To-First-Token measurement on streaming LLM calls with Prometheus histograms
 - **Guardrail observability** — automatic tracking of AWS Bedrock guardrail requests and violations with bounded enum validation
 - **Error normalisation** — raw exceptions mapped to six fixed categories (timeout, rate_limit, validation_error, provider_error, internal_error, unknown)
 - **OpenTelemetry traces** — full parent-child span hierarchy with OTLP export and exemplar support
@@ -96,6 +98,6 @@ That's it. Rastir automatically:
 - [Adapters](adapters.md) — 15 adapters with two-phase enrichment
 - [Server](server.md) — Collector, metrics, guardrails, error normalisation, sampling
 - [Configuration](configuration.md) — Client and server configuration reference
-- [Dashboards](dashboards.md) — Five pre-built Grafana dashboards for LLM observability
+- [Dashboards](dashboards.md) — Six pre-built Grafana dashboards for LLM observability
 - [Environment Variables](environment-variables.md) — Complete reference of all environment variables
 - [Contributing Adapters](contributing-adapters.md) — How to write and register custom adapters

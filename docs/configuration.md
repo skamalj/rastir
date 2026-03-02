@@ -45,6 +45,11 @@ configure(
 | `max_retries` | `int` | `3` | Retries on transient failures (5xx, 429, connection errors) |
 | `retry_backoff` | `float` | `0.5` | Initial backoff in seconds (doubles each retry) |
 | `shutdown_timeout` | `float` | `5.0` | Max seconds to wait for exporter thread on shutdown |
+| `enable_cost_calculation` | `bool` | `False` | Enable client-side cost calculation on `@llm` spans |
+| `pricing_profile` | `str` | `"default"` | Label identifying the pricing configuration used |
+| `pricing_source` | `str` | `None` | Path to pricing JSON file |
+| `max_cost_per_call_alert` | `float` | `None` | Per-call cost threshold for warning logs |
+| `enable_ttft` | `bool` | `True` | Enable Time-To-First-Token measurement on streaming spans |
 
 ### Environment Variables
 
@@ -61,6 +66,12 @@ All settings can be set via environment variables with the `RASTIR_` prefix:
 | `RASTIR_FLUSH_INTERVAL` | `flush_interval` |
 | `RASTIR_TIMEOUT` | `timeout` |
 | `RASTIR_MAX_RETRIES` | `max_retries` |
+| `RASTIR_ENABLE_COST_CALCULATION` | `enable_cost_calculation` |
+| `RASTIR_PRICING_PROFILE` | `pricing_profile` |
+| `RASTIR_PRICING_SOURCE` | `pricing_source` |
+| `RASTIR_PRICING_DATA` | Inline pricing JSON (loaded by PricingRegistry) |
+| `RASTIR_MAX_COST_PER_CALL_ALERT` | `max_cost_per_call_alert` |
+| `RASTIR_ENABLE_TTFT` | `enable_ttft` |
 
 **Precedence:** `configure()` arguments > environment variables > defaults.
 

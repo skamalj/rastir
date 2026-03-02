@@ -35,6 +35,12 @@ These variables configure the Rastir client library used in your application. Th
 | `RASTIR_EVALUATION_ENABLED` | `false` | Enable evaluation metadata capture on `@llm` spans |
 | `RASTIR_CAPTURE_PROMPT` | `true` | Capture `prompt_text` attribute in LLM spans |
 | `RASTIR_CAPTURE_COMPLETION` | `true` | Capture `completion_text` attribute in LLM spans |
+| `RASTIR_ENABLE_COST_CALCULATION` | `false` | Enable client-side cost calculation on `@llm` spans |
+| `RASTIR_PRICING_PROFILE` | `"default"` | Label identifying the pricing configuration used |
+| `RASTIR_PRICING_SOURCE` | — | Path to pricing JSON file |
+| `RASTIR_PRICING_DATA` | — | Inline pricing JSON string (alternative to file) |
+| `RASTIR_MAX_COST_PER_CALL_ALERT` | — | Per-call cost threshold in USD for warning logs |
+| `RASTIR_ENABLE_TTFT` | `true` | Enable Time-To-First-Token measurement on streaming spans |
 
 ### Example
 
@@ -47,6 +53,10 @@ export RASTIR_BATCH_SIZE=200
 export RASTIR_FLUSH_INTERVAL=10
 export RASTIR_EVALUATION_ENABLED=true
 export RASTIR_CAPTURE_PROMPT=false    # disable prompt capture in production
+export RASTIR_ENABLE_COST_CALCULATION=true
+export RASTIR_PRICING_PROFILE=production_2025_q1
+export RASTIR_PRICING_SOURCE=/etc/rastir/pricing.json
+export RASTIR_ENABLE_TTFT=true
 ```
 
 ---

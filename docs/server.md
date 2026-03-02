@@ -119,6 +119,26 @@ If unhealthy:
 | `rastir_duration_seconds` | Histogram | service, env, span_type |
 | `rastir_tokens_per_call` | Histogram | service, env, model, provider |
 
+### Cost & TTFT Metrics
+
+| Metric | Type | Labels |
+|--------|------|--------|
+| `rastir_cost_total` | Counter | service, env, model, provider, agent, pricing_profile |
+| `rastir_cost_per_call_usd` | Histogram | service, env, model |
+| `rastir_pricing_missing_total` | Counter | service, env, model, provider |
+| `rastir_ttft_seconds` | Histogram | service, env, model, provider |
+
+Cost metrics are only recorded when the client sends `cost_usd` as a span attribute (requires `enable_cost_calculation=True` on the client). TTFT metrics are only recorded for streaming LLM spans that include `ttft_ms`.
+
+The `pricing_profile` label on `rastir_cost_total` is **cardinality-guarded** with a cap of 20 distinct values. The `rastir_cost_per_call_usd` histogram intentionally excludes `pricing_profile` to prevent cardinality explosion.
+
+**Default buckets:**
+
+| Histogram | Buckets |
+|-----------|---------|
+| `rastir_cost_per_call_usd` | 0.0001, 0.0005, 0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100 |
+| `rastir_ttft_seconds` | 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10 |
+
 ### Guardrail Metrics
 
 | Metric | Type | Labels |
