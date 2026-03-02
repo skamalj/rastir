@@ -182,6 +182,33 @@ class EvaluationSection:
 
 
 @dataclass(frozen=True)
+class SREAgentConfig:
+    """SLO / budget targets for a single agent.
+
+    When ``slo_error_rate`` is not set for an agent, the global default
+    from ``SRESection.default_slo_error_rate`` is used.  Same for
+    ``cost_budget_usd``.
+    """
+    slo_error_rate: Optional[float] = None   # e.g. 0.01 = 1% error budget
+    cost_budget_usd: Optional[float] = None  # e.g. 500.0 per period
+
+
+@dataclass(frozen=True)
+class SRESection:
+    """SRE Engine — SLO / SLA / error & cost budget tracking.
+
+    The SRE engine runs server-side and exposes derived Prometheus
+    gauges for error budgets, cost budgets, burn rates, and SLA status.
+    """
+    enabled: bool = False
+    update_interval_seconds: int = 60  # gauge refresh interval
+    default_slo_error_rate: float = 0.01  # 1% default
+    default_cost_budget_usd: float = 0.0  # 0 = disabled
+    # Per-agent overrides: {"agent_role": SREAgentConfig(...)}
+    agents: dict[str, SREAgentConfig] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class ServerConfig:
     """Top-level server configuration."""
     server: ServerSection = field(default_factory=ServerSection)
@@ -198,6 +225,7 @@ class ServerConfig:
     logging: LoggingSection = field(default_factory=LoggingSection)
     redaction: RedactionSection = field(default_factory=RedactionSection)
     evaluation: EvaluationSection = field(default_factory=EvaluationSection)
+    sre: SRESection = field(default_factory=SRESection)
 
 
 # ---------------------------------------------------------------------------
@@ -424,6 +452,25 @@ def load_config(config_path: Optional[str] = None) -> ServerConfig:
         judge_base_url=_get("evaluation", "judge_base_url", None),
     )
 
+    # -- sre --
+    sre_agents_raw = yaml_data.get("sre", {}).get("agents", {}) if isinstance(yaml_data.get("sre"), dict) else {}
+    sre_agents: dict[str, SREAgentConfig] = {}
+    if isinstance(sre_agents_raw, dict):
+        for agent_key, agent_cfg in sre_agents_raw.items():
+            if isinstance(agent_cfg, dict):
+                sre_agents[str(agent_key)] = SREAgentConfig(
+                    slo_error_rate=agent_cfg.get("slo_error_rate"),
+                    cost_budget_usd=agent_cfg.get("cost_budget_usd"),
+                )
+
+    sre_section = SRESection(
+        enabled=_get("sre", "enabled", False, as_type=bool),
+        update_interval_seconds=_get("sre", "update_interval_seconds", 60, as_type=int),
+        default_slo_error_rate=_get_float("sre", "default_slo_error_rate", 0.01),
+        default_cost_budget_usd=_get_float("sre", "default_cost_budget_usd", 0.0),
+        agents=sre_agents,
+    )
+
     return ServerConfig(
         server=server,
         limits=limits,
@@ -439,6 +486,7 @@ def load_config(config_path: Optional[str] = None) -> ServerConfig:
         logging=logging_cfg,
         redaction=redaction,
         evaluation=eval_section,
+        sre=sre_section,
     )
 
 
@@ -632,6 +680,34 @@ def validate_config(cfg: ServerConfig) -> None:
             f"evaluation.max_evaluation_types must be positive "
             f"(got {cfg.evaluation.max_evaluation_types})"
         )
+
+    # SRE validation
+    if cfg.sre.update_interval_seconds <= 0:
+        errors.append(
+            f"sre.update_interval_seconds must be positive "
+            f"(got {cfg.sre.update_interval_seconds})"
+        )
+    if not (0.0 < cfg.sre.default_slo_error_rate <= 1.0):
+        errors.append(
+            f"sre.default_slo_error_rate must be in (0.0, 1.0] "
+            f"(got {cfg.sre.default_slo_error_rate})"
+        )
+    if cfg.sre.default_cost_budget_usd < 0:
+        errors.append(
+            f"sre.default_cost_budget_usd must be >= 0 "
+            f"(got {cfg.sre.default_cost_budget_usd})"
+        )
+    for agent_name, agent_cfg in cfg.sre.agents.items():
+        if agent_cfg.slo_error_rate is not None and not (0.0 < agent_cfg.slo_error_rate <= 1.0):
+            errors.append(
+                f"sre.agents.{agent_name}.slo_error_rate must be in (0.0, 1.0] "
+                f"(got {agent_cfg.slo_error_rate})"
+            )
+        if agent_cfg.cost_budget_usd is not None and agent_cfg.cost_budget_usd < 0:
+            errors.append(
+                f"sre.agents.{agent_name}.cost_budget_usd must be >= 0 "
+                f"(got {agent_cfg.cost_budget_usd})"
+            )
 
     if errors:
         detail = "; ".join(errors)

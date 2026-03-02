@@ -44,6 +44,7 @@ from rastir.server.ingestion import IngestionWorker
 from rastir.server.metrics import MetricsRegistry
 from rastir.server.rate_limiter import RateLimiter
 from rastir.server.redaction import NoOpRedactor, RegexRedactor
+from rastir.server.sre_engine import SREEngine
 from rastir.server.structured_logging import configure_logging
 from rastir.server.trace_store import TraceStore
 
@@ -184,6 +185,12 @@ def _build_components(cfg: ServerConfig) -> dict[str, Any]:
             registry=metrics.registry,
         )
 
+    # SRE engine (V7)
+    sre_engine: Optional[SREEngine] = None
+    if cfg.sre.enabled:
+        sre_engine = SREEngine(cfg=cfg.sre, registry=metrics.registry)
+        worker.set_sre_engine(sre_engine)
+
     return {
         "config": cfg,
         "metrics": metrics,
@@ -194,6 +201,7 @@ def _build_components(cfg: ServerConfig) -> dict[str, Any]:
         "eval_queue": eval_queue,
         "eval_registry": eval_registry,
         "eval_worker": eval_worker,
+        "sre_engine": sre_engine,
     }
 
 
@@ -213,6 +221,11 @@ async def lifespan(app: FastAPI):
     if eval_worker is not None:
         eval_worker.start()
 
+    # Start SRE engine (if enabled)
+    sre_engine: Optional[SREEngine] = app.state.sre_engine
+    if sre_engine is not None:
+        await sre_engine.start()
+
     cfg: ServerConfig = app.state.config
     logger.info(
         "Rastir server started on %s:%d",
@@ -223,6 +236,10 @@ async def lifespan(app: FastAPI):
     # Graceful shutdown
     grace = cfg.shutdown.grace_period_seconds
     logger.info("Shutting down (grace_period=%ds, drain_queue=%s)", grace, cfg.shutdown.drain_queue)
+
+    # Stop SRE engine
+    if sre_engine is not None:
+        await sre_engine.stop()
 
     # Stop evaluation workers first (they emit spans back to ingestion)
     if eval_worker is not None:

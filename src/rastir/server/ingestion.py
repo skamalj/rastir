@@ -68,6 +68,13 @@ class IngestionWorker:
         self._eval_queue = evaluation_queue
         self._eval_config = evaluation_config or EvaluationSection()
 
+        # SRE engine (set after construction via set_sre_engine)
+        self._sre_engine: Any = None
+
+    def set_sre_engine(self, engine: Any) -> None:
+        """Attach an SRE engine to receive per-span events."""
+        self._sre_engine = engine
+
     # ----- lifecycle -------------------------------------------------------
 
     def start(self) -> None:
@@ -236,6 +243,20 @@ class IngestionWorker:
                 logger.debug("[SPAN %d] step-1 metrics OK", idx + 1)
             except Exception:
                 logger.error("[SPAN %d] step-1 metrics FAILED", idx + 1, exc_info=True)
+
+            # 1b. SRE engine event (if enabled)
+            if self._sre_engine is not None:
+                try:
+                    attrs = span.get("attributes", {})
+                    agent = attrs.get("agent", "")
+                    is_error = span.get("status") == "ERROR"
+                    cost = attrs.get("cost_usd", 0.0) or 0.0
+                    self._sre_engine.record_event(
+                        service=service, env=env, agent=agent,
+                        is_error=is_error, cost=cost,
+                    )
+                except Exception:
+                    logger.error("[SPAN %d] step-1b SRE event FAILED", idx + 1, exc_info=True)
 
             # 2. Sampling decision (only affects storage + export)
             store = self._should_store(span)
