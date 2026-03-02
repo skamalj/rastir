@@ -111,6 +111,7 @@ class GeminiAdapter(BaseAdapter):
             provider="gemini",
             tokens_input=tokens_input,
             tokens_output=tokens_output,
+            usage_mode="cumulative",
         )
 
     def can_handle_request(self, args: tuple, kwargs: dict) -> bool:

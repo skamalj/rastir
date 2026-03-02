@@ -116,4 +116,5 @@ class OpenAIAdapter(BaseAdapter):
             provider="openai",
             tokens_input=tokens_input,
             tokens_output=tokens_output,
+            usage_mode="incremental",
         )

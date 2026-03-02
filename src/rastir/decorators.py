@@ -584,15 +584,30 @@ def _accumulate_stream_chunk(span: SpanRecord, chunk: Any) -> None:
 
     Tries adapter-based stream extraction. If no adapter handles
     the chunk, silently skips.
+
+    Respects ``TokenDelta.usage_mode``:
+
+    * ``"cumulative"`` — the chunk carries a running total; overwrite
+      the span attributes with the latest values (e.g., Gemini).
+    * ``"incremental"`` (default) — the chunk carries a delta; sum
+      into the running total.
     """
     try:
         from rastir.adapters.registry import resolve_stream_chunk
         delta = resolve_stream_chunk(chunk)
         if delta:
-            current_in = span.attributes.get("tokens_input", 0)
-            current_out = span.attributes.get("tokens_output", 0)
-            span.set_attribute("tokens_input", current_in + (delta.tokens_input or 0))
-            span.set_attribute("tokens_output", current_out + (delta.tokens_output or 0))
+            if delta.usage_mode == "cumulative":
+                # Cumulative: overwrite with latest values
+                if delta.tokens_input is not None:
+                    span.set_attribute("tokens_input", delta.tokens_input)
+                if delta.tokens_output is not None:
+                    span.set_attribute("tokens_output", delta.tokens_output)
+            else:
+                # Incremental (default): sum deltas
+                current_in = span.attributes.get("tokens_input", 0)
+                current_out = span.attributes.get("tokens_output", 0)
+                span.set_attribute("tokens_input", current_in + (delta.tokens_input or 0))
+                span.set_attribute("tokens_output", current_out + (delta.tokens_output or 0))
             # Capture model/provider from first chunk that has it
             if delta.model and "model" not in span.attributes:
                 span.set_attribute("model", delta.model)

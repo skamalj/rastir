@@ -172,6 +172,7 @@ class BedrockAdapter(BaseAdapter):
             return TokenDelta(
                 tokens_input=tokens_input,
                 tokens_output=tokens_output,
+                usage_mode="incremental",
             )
 
         return TokenDelta()

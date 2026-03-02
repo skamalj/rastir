@@ -164,8 +164,16 @@ class CohereAdapter(BaseAdapter):
             provider="cohere",
             tokens_input=tokens_input,
             tokens_output=tokens_output,
+            usage_mode="incremental",  # or "cumulative" for providers like Gemini
         )
 ```
+
+> **Important: `usage_mode`** — Every adapter MUST set `usage_mode` on `TokenDelta`:
+> - `"incremental"` — chunk carries a delta to sum (OpenAI, Anthropic, Bedrock, Cohere, etc.)
+> - `"cumulative"` — chunk carries a running total; only the latest value is kept (Gemini)
+>
+> The decorator accumulation logic uses this flag to correctly handle tokens.
+> If `usage_mode` is not set, the decorator defaults to incremental (summing).
 
 ### 4. Write Tests
 
@@ -277,7 +285,11 @@ class TokenDelta:
     tokens_output: Optional[int] = None
     model: Optional[str] = None
     provider: Optional[str] = None
+    usage_mode: Optional[str] = None  # "incremental" | "cumulative"
 ```
+
+Adapters **MUST** set `usage_mode` to declare how the provider emits token
+counts during streaming. See the streaming section above for details.
 
 ---
 
@@ -356,7 +368,8 @@ Before submitting a new adapter:
 - [ ] Class attributes set: `name`, `kind`, `priority`
 - [ ] `can_handle()` uses class name + module detection (no direct imports)
 - [ ] `transform()` returns `AdapterResult` with all available fields
-- [ ] Streaming support added (if provider supports it)
+- [ ] Streaming support added (if provider supports it) with `usage_mode` set
+- [ ] Streaming correctness tests included (cumulative/incremental)
 - [ ] Adapter registered in `src/rastir/adapters/__init__.py`
 - [ ] Tests written with mock objects (no provider SDK dependency)
 - [ ] All existing tests still pass (`pytest tests/ -v`)

@@ -90,6 +90,7 @@ class AnthropicAdapter(BaseAdapter):
             provider="anthropic",
             tokens_input=tokens_input,
             tokens_output=tokens_output,
+            usage_mode="incremental",
         )
 
     def can_handle_request(self, args: tuple, kwargs: dict) -> bool:

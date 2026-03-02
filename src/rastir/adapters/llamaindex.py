@@ -118,5 +118,6 @@ class LlamaIndexAdapter(BaseAdapter):
                 model=model,
                 tokens_input=tokens_input,
                 tokens_output=tokens_output,
+                usage_mode="incremental",
             )
         return TokenDelta()

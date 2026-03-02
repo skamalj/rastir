@@ -40,12 +40,23 @@ class RequestMetadata:
 
 @dataclass
 class TokenDelta:
-    """Token delta extracted from a single streaming chunk."""
+    """Token delta extracted from a single streaming chunk.
+
+    ``usage_mode`` declares how the provider emits token counts:
+
+    * ``"incremental"`` – each chunk carries a delta that must be summed.
+    * ``"cumulative"`` – each chunk carries a running total; only the
+      latest value should be kept (e.g., Gemini).
+
+    Adapters MUST set ``usage_mode`` so the decorator accumulation
+    logic handles the values correctly.
+    """
 
     tokens_input: Optional[int] = None
     tokens_output: Optional[int] = None
     model: Optional[str] = None
     provider: Optional[str] = None
+    usage_mode: Optional[str] = None  # "incremental" | "cumulative"
 
 
 # ── Provider detection from module name ──────────────────────────────

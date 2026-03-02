@@ -1772,3 +1772,249 @@ class TestTwoPhaseEnrichment:
         # Request-phase model survives (no overwrite)
         assert span.attributes["model"] == "some-model"
         assert span.attributes["provider"] == "some-provider"
+
+
+# ========================================================================
+# Streaming Token Usage Normalization (Patch1) tests
+# ========================================================================
+
+
+class TestStreamingTokenNormalization:
+    """Tests for cumulative vs incremental token accumulation logic."""
+
+    def test_cumulative_streaming_no_overcounting(self):
+        """Cumulative provider (Gemini) — final tokens equal last chunk values,
+        NOT the sum of all chunks."""
+        from rastir.spans import SpanRecord, SpanType
+        from rastir.decorators import _accumulate_stream_chunk
+        from unittest.mock import patch
+
+        span = SpanRecord(name="test", span_type=SpanType.LLM)
+
+        # Simulate 3 cumulative Gemini chunks
+        chunks = [
+            TokenDelta(tokens_input=100, tokens_output=10,
+                       model="gemini-2.5-flash", provider="gemini",
+                       usage_mode="cumulative"),
+            TokenDelta(tokens_input=100, tokens_output=25,
+                       model="gemini-2.5-flash", provider="gemini",
+                       usage_mode="cumulative"),
+            TokenDelta(tokens_input=100, tokens_output=40,
+                       model="gemini-2.5-flash", provider="gemini",
+                       usage_mode="cumulative"),
+        ]
+
+        for delta in chunks:
+            with patch("rastir.adapters.registry.resolve_stream_chunk",
+                       return_value=delta):
+                _accumulate_stream_chunk(span, "fake_chunk")
+
+        # Must equal last chunk values, NOT 300/75
+        assert span.attributes["tokens_input"] == 100
+        assert span.attributes["tokens_output"] == 40
+
+    def test_incremental_streaming_sums_deltas(self):
+        """Incremental provider (OpenAI) — final tokens equal sum of deltas."""
+        from rastir.spans import SpanRecord, SpanType
+        from rastir.decorators import _accumulate_stream_chunk
+        from unittest.mock import patch
+
+        span = SpanRecord(name="test", span_type=SpanType.LLM)
+
+        # Simulate 3 incremental chunks (only last has usage for OpenAI)
+        chunks = [
+            TokenDelta(tokens_input=None, tokens_output=None,
+                       model="gpt-4o", provider="openai",
+                       usage_mode="incremental"),
+            TokenDelta(tokens_input=None, tokens_output=None,
+                       model="gpt-4o", provider="openai",
+                       usage_mode="incremental"),
+            TokenDelta(tokens_input=10, tokens_output=20,
+                       model="gpt-4o", provider="openai",
+                       usage_mode="incremental"),
+        ]
+
+        for delta in chunks:
+            with patch("rastir.adapters.registry.resolve_stream_chunk",
+                       return_value=delta):
+                _accumulate_stream_chunk(span, "fake_chunk")
+
+        assert span.attributes["tokens_input"] == 10
+        assert span.attributes["tokens_output"] == 20
+
+    def test_incremental_streaming_multi_delta_sums(self):
+        """Incremental provider with multiple deltas — tokens are summed."""
+        from rastir.spans import SpanRecord, SpanType
+        from rastir.decorators import _accumulate_stream_chunk
+        from unittest.mock import patch
+
+        span = SpanRecord(name="test", span_type=SpanType.LLM)
+
+        # Anthropic splits input (start event) and output (delta event)
+        chunks = [
+            TokenDelta(tokens_input=15, tokens_output=None,
+                       model="claude-3-5-sonnet", provider="anthropic",
+                       usage_mode="incremental"),
+            TokenDelta(tokens_input=None, tokens_output=25,
+                       model=None, provider="anthropic",
+                       usage_mode="incremental"),
+        ]
+
+        for delta in chunks:
+            with patch("rastir.adapters.registry.resolve_stream_chunk",
+                       return_value=delta):
+                _accumulate_stream_chunk(span, "fake_chunk")
+
+        assert span.attributes["tokens_input"] == 15
+        assert span.attributes["tokens_output"] == 25
+
+    def test_final_only_usage_correct(self):
+        """Provider emitting usage only in the final chunk (e.g., Bedrock)."""
+        from rastir.spans import SpanRecord, SpanType
+        from rastir.decorators import _accumulate_stream_chunk
+        from unittest.mock import patch
+
+        span = SpanRecord(name="test", span_type=SpanType.LLM)
+
+        # 5 chunks, only the last has token data
+        for _ in range(4):
+            delta = TokenDelta(usage_mode="incremental")
+            with patch("rastir.adapters.registry.resolve_stream_chunk",
+                       return_value=delta):
+                _accumulate_stream_chunk(span, "fake_chunk")
+
+        final_delta = TokenDelta(tokens_input=50, tokens_output=30,
+                                 usage_mode="incremental")
+        with patch("rastir.adapters.registry.resolve_stream_chunk",
+                   return_value=final_delta):
+            _accumulate_stream_chunk(span, "fake_chunk")
+
+        assert span.attributes["tokens_input"] == 50
+        assert span.attributes["tokens_output"] == 30
+
+    def test_cost_integrity_no_inflation(self):
+        """Cumulative streaming should not inflate cost calculations.
+
+        Simulates a cumulative stream and verifies the token values
+        that feed into cost calculation are correct.
+        """
+        from rastir.spans import SpanRecord, SpanType
+        from rastir.decorators import _accumulate_stream_chunk
+        from unittest.mock import patch
+
+        span = SpanRecord(name="test", span_type=SpanType.LLM)
+
+        # 4 cumulative chunks — each has running totals
+        cumulative_chunks = [
+            TokenDelta(tokens_input=500, tokens_output=50,
+                       usage_mode="cumulative"),
+            TokenDelta(tokens_input=500, tokens_output=100,
+                       usage_mode="cumulative"),
+            TokenDelta(tokens_input=500, tokens_output=150,
+                       usage_mode="cumulative"),
+            TokenDelta(tokens_input=500, tokens_output=200,
+                       usage_mode="cumulative"),
+        ]
+
+        for delta in cumulative_chunks:
+            with patch("rastir.adapters.registry.resolve_stream_chunk",
+                       return_value=delta):
+                _accumulate_stream_chunk(span, "fake_chunk")
+
+        # Final token values must be the last cumulative values
+        final_in = span.attributes["tokens_input"]
+        final_out = span.attributes["tokens_output"]
+        assert final_in == 500, f"Expected 500, got {final_in} (inflated!)"
+        assert final_out == 200, f"Expected 200, got {final_out} (inflated!)"
+        # Verify NOT the summed values (would be 2000/500)
+        assert final_in != 2000
+        assert final_out != 500
+
+    def test_regression_guard_cumulative_not_summed(self):
+        """Regression guard — explicitly fail if cumulative chunks are summed.
+
+        This test catches the exact bug from the original implementation
+        where cumulative (Gemini) values were blindly summed.
+        """
+        from rastir.spans import SpanRecord, SpanType
+        from rastir.decorators import _accumulate_stream_chunk
+        from unittest.mock import patch
+
+        span = SpanRecord(name="test", span_type=SpanType.LLM)
+
+        # 3 cumulative chunks with growing output
+        chunks = [
+            TokenDelta(tokens_input=100, tokens_output=10,
+                       usage_mode="cumulative"),
+            TokenDelta(tokens_input=100, tokens_output=25,
+                       usage_mode="cumulative"),
+            TokenDelta(tokens_input=100, tokens_output=40,
+                       usage_mode="cumulative"),
+        ]
+
+        for delta in chunks:
+            with patch("rastir.adapters.registry.resolve_stream_chunk",
+                       return_value=delta):
+                _accumulate_stream_chunk(span, "fake_chunk")
+
+        # The old buggy behavior would give:
+        #   tokens_input  = 100 + 100 + 100 = 300
+        #   tokens_output = 10 + 25 + 40 = 75
+        # Correct behavior:
+        #   tokens_input  = 100 (last cumulative value)
+        #   tokens_output = 40  (last cumulative value)
+        assert span.attributes["tokens_input"] != 300, \
+            "REGRESSION: cumulative tokens_input was summed!"
+        assert span.attributes["tokens_output"] != 75, \
+            "REGRESSION: cumulative tokens_output was summed!"
+        assert span.attributes["tokens_input"] == 100
+        assert span.attributes["tokens_output"] == 40
+
+    def test_gemini_adapter_sets_cumulative_mode(self):
+        """Gemini adapter extract_stream_delta sets usage_mode='cumulative'."""
+        chunk = _make_gemini_chunk()
+        delta = resolve_stream_chunk(chunk)
+        assert delta is not None
+        assert delta.usage_mode == "cumulative"
+
+    def test_openai_adapter_sets_incremental_mode(self):
+        """OpenAI adapter extract_stream_delta sets usage_mode='incremental'."""
+        chunk = _make_openai_chunk(model="gpt-4o", prompt_tokens=10,
+                                    completion_tokens=20)
+        delta = resolve_stream_chunk(chunk)
+        assert delta is not None
+        assert delta.usage_mode == "incremental"
+
+    def test_anthropic_adapter_sets_incremental_mode(self):
+        """Anthropic adapter extract_stream_delta sets usage_mode='incremental'."""
+        chunk = _make_anthropic_raw_message_start(
+            model="claude-3-5-sonnet", input_tokens=15)
+        delta = resolve_stream_chunk(chunk)
+        assert delta is not None
+        assert delta.usage_mode == "incremental"
+
+    def test_bedrock_adapter_sets_incremental_mode(self):
+        """Bedrock adapter extract_stream_delta sets usage_mode='incremental'."""
+        from rastir.adapters.bedrock import BedrockAdapter
+        adapter = BedrockAdapter()
+        chunk = {
+            "metadata": {
+                "usage": {"inputTokens": 50, "outputTokens": 30},
+            }
+        }
+        delta = adapter.extract_stream_delta(chunk)
+        assert delta.usage_mode == "incremental"
+
+    def test_groq_adapter_sets_incremental_mode(self):
+        """Groq adapter extract_stream_delta sets usage_mode='incremental'."""
+        chunk = _make_groq_chunk()
+        delta = resolve_stream_chunk(chunk)
+        assert delta is not None
+        assert delta.usage_mode == "incremental"
+
+    def test_mistral_adapter_sets_incremental_mode(self):
+        """Mistral adapter extract_stream_delta sets usage_mode='incremental'."""
+        chunk = _make_mistral_chunk(prompt_tokens=10, completion_tokens=20)
+        delta = resolve_stream_chunk(chunk)
+        assert delta is not None
+        assert delta.usage_mode == "incremental"
