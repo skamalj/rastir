@@ -29,6 +29,7 @@ from rastir.pricing import PricingRegistry
 from rastir.remote import mcp_endpoint, wrap_mcp
 from rastir.transport import get_export_stats, stop_exporter
 from rastir.wrapper import wrap
+from rastir.crewai_support import crew_kickoff
 
 # _span aliases — preferred when using alongside LangChain/LangGraph
 # to avoid name collisions (e.g. langchain_core.tools.tool vs rastir.tool)
@@ -60,6 +61,8 @@ __all__ = [
     # remote tracing
     "wrap_mcp",
     "mcp_endpoint",
+    # CrewAI
+    "crew_kickoff",
     "stop_exporter",
     "get_export_stats",
 ]
