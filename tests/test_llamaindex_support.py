@@ -4,12 +4,10 @@ Tests cover:
   - _is_llamaindex_agent detection helpers
   - llamaindex_agent decorator: bare and parameterized usage
   - LLM and tool wrapping on agents
-  - MCP tool bridge (_build_llamaindex_tools_from_mcp)
   - Restore of originals after execution
   - Agent span emission (name, type, status)
   - Error handling (span records error, re-raises)
   - Async variant
-  - mcp= parameter (single session, list, dict by class name)
 
 Uses mock Agent classes that mimic LlamaIndex's class-name / module
 structure so we can test without requiring llama-index to be installed.
@@ -29,8 +27,6 @@ from rastir.llamaindex_support import (
     _set_agent_tools,
     _wrap_agent_internals,
     _restore_originals,
-    _resolve_mcp_tools,
-    _build_llamaindex_tools_from_mcp,
     llamaindex_agent,
 )
 from rastir.spans import SpanType, SpanStatus
@@ -187,7 +183,7 @@ class TestWrapAgentInternals:
         agent = _make_agent(llm=llm)
 
         originals: dict = {}
-        _wrap_agent_internals(agent, None, originals)
+        _wrap_agent_internals(agent, originals)
 
         llm_wrap_calls = [c for c in mock_wrap.call_args_list if c[0][0] is llm]
         assert len(llm_wrap_calls) == 1
@@ -208,7 +204,7 @@ class TestWrapAgentInternals:
         agent = _make_agent(tools=[tool])
 
         originals: dict = {}
-        _wrap_agent_internals(agent, None, originals)
+        _wrap_agent_internals(agent, originals)
 
         tool_wrap_calls = [c for c in mock_wrap.call_args_list if c[0][0] is tool]
         assert len(tool_wrap_calls) == 1
@@ -227,7 +223,7 @@ class TestWrapAgentInternals:
         agent = _make_agent(llm=llm, tools=[tool])
 
         originals: dict = {}
-        _wrap_agent_internals(agent, None, originals)
+        _wrap_agent_internals(agent, originals)
 
         agent_id = id(agent)
         assert agent_id in originals
@@ -243,7 +239,7 @@ class TestWrapAgentInternals:
         agent = _make_agent(llm=llm)
 
         originals: dict = {}
-        _wrap_agent_internals(agent, None, originals)
+        _wrap_agent_internals(agent, originals)
 
         llm_wrap_calls = [c for c in mock_wrap.call_args_list if c[0][0] is llm]
         assert len(llm_wrap_calls) == 0
@@ -258,7 +254,7 @@ class TestWrapAgentInternals:
         agent = _make_agent(tools=[tool])
 
         originals: dict = {}
-        _wrap_agent_internals(agent, None, originals)
+        _wrap_agent_internals(agent, originals)
 
         tool_wrap_calls = [c for c in mock_wrap.call_args_list if c[0][0] is tool]
         assert len(tool_wrap_calls) == 0
@@ -310,88 +306,6 @@ class TestRestoreOriginals:
 
         _restore_originals(originals)
         assert agent._llm is original_llm
-
-
-# ========================================================================
-# _resolve_mcp_tools tests
-# ========================================================================
-
-
-class TestResolveMcpTools:
-    def test_none_mcp_returns_empty(self):
-        agent = _make_agent()
-        assert _resolve_mcp_tools(agent, None, {}) == []
-
-    @patch("rastir.llamaindex_support._build_llamaindex_tools_from_mcp")
-    def test_single_session(self, mock_build):
-        """Single session → tools are built for agent."""
-        mock_build.return_value = ["tool1", "tool2"]
-        session = MagicMock()
-        session.list_tools = AsyncMock(return_value=MagicMock(tools=["raw1"]))
-
-        agent = _make_agent()
-        cache: dict = {}
-        result = _resolve_mcp_tools(agent, session, cache)
-
-        assert result == ["tool1", "tool2"]
-        mock_build.assert_called_once()
-
-    @patch("rastir.llamaindex_support._build_llamaindex_tools_from_mcp")
-    def test_list_of_sessions(self, mock_build):
-        """List of sessions → tools from all sessions combined."""
-        s1 = MagicMock()
-        s1.list_tools = AsyncMock(return_value=MagicMock(tools=["a"]))
-        s2 = MagicMock()
-        s2.list_tools = AsyncMock(return_value=MagicMock(tools=["b"]))
-        mock_build.side_effect = [["t1"], ["t2"]]
-
-        agent = _make_agent()
-        cache: dict = {}
-        result = _resolve_mcp_tools(agent, [s1, s2], cache)
-
-        assert result == ["t1", "t2"]
-        assert mock_build.call_count == 2
-
-    @patch("rastir.llamaindex_support._build_llamaindex_tools_from_mcp")
-    def test_dict_session_matching_class(self, mock_build):
-        """Dict mapping: matching class name gets tools."""
-        session = MagicMock()
-        session.list_tools = AsyncMock(return_value=MagicMock(tools=["x"]))
-        mock_build.return_value = ["mt1"]
-
-        agent = _make_agent(cls=_ReActAgentClass)
-        cache: dict = {}
-        result = _resolve_mcp_tools(agent, {"ReActAgent": session}, cache)
-
-        assert result == ["mt1"]
-
-    @patch("rastir.llamaindex_support._build_llamaindex_tools_from_mcp")
-    def test_dict_session_non_matching_class(self, mock_build):
-        """Dict mapping: non-matching class name gets no tools."""
-        session = MagicMock()
-        agent = _make_agent(cls=_ReActAgentClass)
-        cache: dict = {}
-        result = _resolve_mcp_tools(agent, {"FunctionCallingAgent": session}, cache)
-
-        assert result == []
-        mock_build.assert_not_called()
-
-    @patch("rastir.llamaindex_support._build_llamaindex_tools_from_mcp")
-    def test_caches_by_session_id(self, mock_build):
-        """Same session used twice → list_tools called only once."""
-        session = MagicMock()
-        session.list_tools = AsyncMock(return_value=MagicMock(tools=["a"]))
-        mock_build.return_value = ["t1"]
-
-        a1 = _make_agent()
-        a2 = _make_agent()
-        cache: dict = {}
-
-        _resolve_mcp_tools(a1, session, cache)
-        _resolve_mcp_tools(a2, session, cache)
-
-        session.list_tools.assert_called_once()
-        mock_build.assert_called_once()
 
 
 # ========================================================================
@@ -591,58 +505,6 @@ class TestLlamaindexAgentAsync:
 
 
 # ========================================================================
-# _build_llamaindex_tools_from_mcp tests
-# ========================================================================
-
-
-class TestBuildLlamaindexToolsFromMcp:
-    """Tests for MCP → LlamaIndex FunctionTool conversion."""
-
-    @pytest.fixture(autouse=True)
-    def _skip_if_no_llamaindex(self):
-        try:
-            from llama_index.core.tools import FunctionTool  # noqa: F401
-        except ImportError:
-            pytest.skip("llama-index-core not installed")
-
-    def _make_mcp_tool(self, name: str, description: str):
-        """Create a mock MCP Tool descriptor."""
-        tool = MagicMock()
-        tool.name = name
-        tool.description = description
-        return tool
-
-    def test_creates_function_tool_instances(self):
-        from llama_index.core.tools import FunctionTool
-
-        session = MagicMock()
-        mcp_tool = self._make_mcp_tool("web_search", "Search the web")
-        tools = _build_llamaindex_tools_from_mcp(session, [mcp_tool])
-
-        assert len(tools) == 1
-        assert isinstance(tools[0], FunctionTool)
-        assert tools[0].metadata.name == "web_search"
-        assert "Search the web" in tools[0].metadata.description
-
-    def test_empty_tools_list(self):
-        session = MagicMock()
-        tools = _build_llamaindex_tools_from_mcp(session, [])
-        assert tools == []
-
-    def test_multiple_tools(self):
-        session = MagicMock()
-        tools_in = [
-            self._make_mcp_tool("t1", "Tool 1"),
-            self._make_mcp_tool("t2", "Tool 2"),
-            self._make_mcp_tool("t3", "Tool 3"),
-        ]
-        tools_out = _build_llamaindex_tools_from_mcp(session, tools_in)
-        assert len(tools_out) == 3
-        names = {t.metadata.name for t in tools_out}
-        assert names == {"t1", "t2", "t3"}
-
-
-# ========================================================================
 # Integration-style: wrapping flows through the decorator
 # ========================================================================
 
@@ -700,32 +562,3 @@ class TestLlamaindexWrapping:
 
         # After execution, original is restored
         assert agent._tools == [tool]
-
-    @patch("rastir.queue.enqueue_span")
-    def test_mcp_tools_injected(self, mock_enqueue):
-        """With mcp= param, MCP tools are injected into agent."""
-        agent = _make_agent(tools=[])
-
-        session = MagicMock()
-        session.list_tools = AsyncMock(return_value=MagicMock(tools=[]))
-
-        injected_tools: list = []
-
-        @llamaindex_agent(agent_name="mcp_test", mcp=session)
-        def run(a):
-            injected_tools.extend(a._tools)
-            return "ok"
-
-        with patch("rastir.llamaindex_support.wrap") as mw:
-            mw.side_effect = lambda obj, **kw: obj
-            with patch(
-                "rastir.llamaindex_support._build_llamaindex_tools_from_mcp"
-            ) as mb:
-                mb.return_value = [MagicMock(name="mcp_tool")]
-                run(agent)
-
-        # MCP tools were injected
-        assert len(injected_tools) == 1
-
-        # After execution, agent tools restored to empty
-        assert agent._tools == []
