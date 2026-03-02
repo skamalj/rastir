@@ -36,39 +36,28 @@ If the server does **not** use `@mcp_endpoint`, the extra fields are silently dr
 
 ## API Reference
 
-### `@trace_remote_tools`
+### `wrap_mcp()`
 
-Wraps an MCP session-returning function so every `call_tool()` invocation creates a client span and injects trace context.
-
-```python
-from rastir import trace_remote_tools
-
-@trace_remote_tools
-async def get_session():
-    async with streamable_http_client(url) as (read, write, _):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            return session
-```
-
-Or wrap inline after session is created:
+Wraps an MCP `ClientSession` with a transparent proxy. Only `call_tool()` is intercepted — all other methods (`list_tools()`, `initialize()`, etc.) pass through unchanged.
 
 ```python
-@trace_remote_tools
-def wrap():
-    return session   # already initialised ClientSession
+from rastir import wrap_mcp
 
-wrapped = wrap()
-result = await wrapped.call_tool("search", {"query": "hello"})
+async with ClientSession(read, write) as session:
+    await session.initialize()
+    session = wrap_mcp(session)         # one line
+    tools = await session.list_tools()  # pass to any framework
 ```
 
-**What it does to each `call_tool()`:**
+**What the proxy does to each `call_tool()`:**
 
 1. Creates a client-side tool span (`span_type="tool"`, `remote="true"`)
 2. Sets `tool_name`, `agent`, `model`, `provider` attributes from context
 3. Injects `rastir_trace_id` and `rastir_span_id` into tool arguments
 4. Forwards to the original `session.call_tool()`
 5. Records errors and finishes the span
+
+No tool schemas are modified. No framework-specific code.
 
 **Client span attributes:**
 
@@ -137,38 +126,6 @@ async def my_tool(arg: str) -> str:
 
 ---
 
-### `mcp_to_langchain_tools()`
-
-One-line bridge that converts MCP tools to LangChain `StructuredTool` instances with automatic trace injection. Ready for use with `create_react_agent` or any LangChain agent.
-
-```python
-from rastir import mcp_to_langchain_tools
-
-async with ClientSession(read, write) as session:
-    await session.initialize()
-    tools = await mcp_to_langchain_tools(session)
-    agent = create_react_agent(llm, tools)
-```
-
-**Parameters:**
-
-| Parameter | Type            | Default | Description                                    |
-|-----------|-----------------|---------|------------------------------------------------|
-| `session` | `ClientSession` | —       | An initialised MCP client session              |
-| `trace`   | `bool`          | `True`  | Wrap session with `@trace_remote_tools`        |
-
-**What it handles:**
-
-1. Fetches tool list via `session.list_tools()`
-2. Wraps the session with `@trace_remote_tools` (unless `trace=False`)
-3. Builds Pydantic `args_schema` from each tool's JSON `inputSchema`
-4. Filters out `rastir_*` internal fields from the schema
-5. Returns `StructuredTool` objects that call `session.call_tool()` under the hood
-
-**Requires:** `pip install langchain-core`
-
----
-
 ## Complete Examples
 
 ### Example 1: Direct MCP tool call
@@ -202,7 +159,7 @@ if __name__ == "__main__":
 
 ```python
 # ── client.py  (agent process) ──────────────────────
-from rastir import configure, agent_span, trace_remote_tools
+from rastir import configure, agent_span, wrap_mcp
 from mcp.client.streamable_http import streamable_http_client
 from mcp.client.session import ClientSession
 
@@ -213,13 +170,8 @@ async def run():
     async with streamable_http_client("http://localhost:9000/mcp") as (r, w, _):
         async with ClientSession(r, w) as session:
             await session.initialize()
-
-            @trace_remote_tools
-            def wrap():
-                return session
-
-            wrapped = wrap()
-            result = await wrapped.call_tool("get_weather", {"city": "Tokyo"})
+            session = wrap_mcp(session)
+            result = await session.call_tool("get_weather", {"city": "Tokyo"})
             return result
 ```
 
@@ -239,10 +191,12 @@ weather_agent (agent)
 ### Example 2: LangGraph agent with MCP tools
 
 ```python
-from rastir import configure, agent_span, mcp_to_langchain_tools
+from rastir import configure, agent_span, wrap_mcp
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.prebuilt import create_react_agent
 from langchain_core.messages import HumanMessage
+from langchain_core.tools import StructuredTool
+from pydantic import create_model
 from mcp.client.streamable_http import streamable_http_client
 from mcp.client.session import ClientSession
 
@@ -252,12 +206,17 @@ async def run():
     async with streamable_http_client("http://localhost:9000/mcp") as (r, w, _):
         async with ClientSession(r, w) as session:
             await session.initialize()
+            session = wrap_mcp(session)
 
-            # One line: MCP tools → LangChain tools with trace injection
-            tools = await mcp_to_langchain_tools(session)
+            # Fetch tools and convert to LangChain format (your code)
+            tools_resp = await session.list_tools()
+            lc_tools = []
+            for t in tools_resp.tools:
+                # ... build StructuredTool from t.inputSchema ...
+                pass
 
             llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
-            agent = create_react_agent(llm, tools)
+            agent = create_react_agent(llm, lc_tools)
 
             @agent_span(agent_name="gemini_agent")
             async def invoke():
@@ -269,12 +228,17 @@ async def run():
             print(response["messages"][-1].content)
 ```
 
+> **Note:** Converting MCP tools to LangChain `StructuredTool` is your
+> framework's responsibility. Rastir only handles trace propagation —
+> `wrap_mcp()` ensures that when any framework calls `session.call_tool()`,
+> trace IDs are injected automatically.
+
 ### Example 3: Model and provider context propagation
 
 When a tool call happens inside an `@llm`-decorated function, the model and provider are automatically propagated to tool spans:
 
 ```python
-from rastir import agent_span, llm_span, trace_remote_tools
+from rastir import agent_span, llm_span, wrap_mcp
 
 @agent_span(agent_name="research_agent")
 async def run():
@@ -286,14 +250,9 @@ async def call_llm(prompt: str):
     async with streamable_http_client(url) as (r, w, _):
         async with ClientSession(r, w) as session:
             await session.initialize()
-
-            @trace_remote_tools
-            def wrap():
-                return session
-
-            wrapped = wrap()
+            session = wrap_mcp(session)
             # This client span will have: model="gpt-4o", provider="openai", agent="research_agent"
-            result = await wrapped.call_tool("search", {"query": prompt})
+            result = await session.call_tool("search", {"query": prompt})
             return result
 ```
 
@@ -313,7 +272,7 @@ set_current_provider("google")
 
 All Rastir attributes are prefixed with `rastir.` in OTLP/Tempo. The full attribute set for MCP tool spans:
 
-### Client span (created by `@trace_remote_tools`)
+### Client span (created by `wrap_mcp()`)
 
 | Tempo attribute        | Type   | Value                  |
 |------------------------|--------|------------------------|
@@ -352,6 +311,6 @@ When the server doesn't use `@mcp_endpoint`, the `rastir_trace_id` and `rastir_s
 Rastir uses argument-based injection rather than HTTP headers or `_meta` because:
 
 1. **MCP transport-agnostic** — works over stdio, SSE, and Streamable HTTP
-2. **No monkey-patching** — no need to intercept transport layer
+2. **Framework-agnostic** — `wrap_mcp()` is a simple proxy; no LangChain, CrewAI, or other framework coupling
 3. **Schema-safe** — FastMCP's Pydantic validation drops unknown fields automatically, so servers without `@mcp_endpoint` silently ignore trace fields
 4. **Simple** — the approach adds two string fields to the arguments dict; no protocol extensions needed

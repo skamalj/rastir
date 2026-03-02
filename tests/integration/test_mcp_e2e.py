@@ -98,7 +98,7 @@ from rastir import (
     retrieval_span,
     tool_span,
     trace_span,
-    trace_remote_tools,
+    wrap_mcp,
     mcp_endpoint,
 )
 from rastir.context import (
@@ -651,11 +651,7 @@ async def test_mcp_endpoint_annotations(server_with_endpoint):
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
-                @trace_remote_tools
-                def wrap():
-                    return session
-
-                wrapped = wrap()
+                wrapped = wrap_mcp(session)
                 result = await wrapped.call_tool("get_weather", {"city": "Tokyo"})
                 return result
 
@@ -765,11 +761,7 @@ async def test_mcp_without_endpoint(server_without_endpoint):
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
-                @trace_remote_tools
-                def wrap():
-                    return session
-
-                wrapped = wrap()
+                wrapped = wrap_mcp(session)
                 result = await wrapped.call_tool("get_weather", {"city": "London"})
                 return result
 
@@ -829,11 +821,7 @@ async def test_prometheus_metrics(server_with_endpoint):
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
-                @trace_remote_tools
-                def wrap():
-                    return session
-
-                wrapped = wrap()
+                wrapped = wrap_mcp(session)
                 await wrapped.call_tool("get_weather", {"city": "Tokyo"})
                 await wrapped.call_tool("calculate", {"expression": "1 + 1"})
 
@@ -877,7 +865,34 @@ async def test_langgraph_full_stack(server_with_endpoint, server_without_endpoin
       - Server B traces have client spans only
     """
     from langchain_core.messages import HumanMessage
-    from rastir import mcp_to_langchain_tools
+    from langchain_core.tools import StructuredTool
+    from pydantic import create_model
+
+    def _mcp_tools_to_langchain(wrapped_session, tools_response):
+        """Convert MCP tools to LangChain StructuredTools (test helper)."""
+        lc_tools = []
+        for mcp_tool in tools_response.tools:
+            props = (mcp_tool.inputSchema or {}).get("properties", {})
+            required = set((mcp_tool.inputSchema or {}).get("required", []))
+            fields = {}
+            for fname, fschema in props.items():
+                if fname.startswith("rastir_"):
+                    continue
+                ftype = {"string": str, "integer": int, "number": float, "boolean": bool}.get(fschema.get("type", "string"), str)
+                fields[fname] = (ftype, ... if fname in required else None)
+            model = create_model(f"{mcp_tool.name}_args", **fields)
+            tn = mcp_tool.name
+
+            async def _call(*, _tn=tn, **kwargs):
+                r = await wrapped_session.call_tool(_tn, kwargs)
+                return " ".join(getattr(c, "text", str(c)) for c in r.content) if r.content else str(r)
+
+            lc_tools.append(StructuredTool.from_function(
+                coroutine=_call, name=tn,
+                description=mcp_tool.description or tn,
+                args_schema=model,
+            ))
+        return lc_tools
 
     baseline = _get_prometheus_metric_sum("rastir_spans_ingested_total")
 
@@ -887,7 +902,9 @@ async def test_langgraph_full_stack(server_with_endpoint, server_without_endpoin
     async with streamable_http_client(URL_WITH_ENDPOINT) as (read, write, _):
         async with ClientSession(read, write) as session:
             await session.initialize()
-            lc_tools_a = await mcp_to_langchain_tools(session)
+            wrapped_a = wrap_mcp(session)
+            tools_resp_a = await wrapped_a.list_tools()
+            lc_tools_a = _mcp_tools_to_langchain(wrapped_a, tools_resp_a)
 
             llm_a = ChatGoogleGenerativeAI(
                 model="gemini-2.5-flash",
@@ -915,7 +932,9 @@ async def test_langgraph_full_stack(server_with_endpoint, server_without_endpoin
     async with streamable_http_client(URL_WITHOUT_ENDPOINT) as (read, write, _):
         async with ClientSession(read, write) as session:
             await session.initialize()
-            lc_tools_b = await mcp_to_langchain_tools(session)
+            wrapped_b = wrap_mcp(session)
+            tools_resp_b = await wrapped_b.list_tools()
+            lc_tools_b = _mcp_tools_to_langchain(wrapped_b, tools_resp_b)
 
             llm_b = ChatGoogleGenerativeAI(
                 model="gemini-2.5-flash",

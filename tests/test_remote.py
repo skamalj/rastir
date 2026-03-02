@@ -1,9 +1,8 @@
 """Unit tests for rastir.remote — argument-based trace propagation.
 
 Tests cover:
-- @trace_remote_tools: session wrapping, rastir_* injection into arguments
+- wrap_mcp: session proxy, call_tool interception, rastir_* injection
 - @mcp_endpoint: rastir_* extraction, span linking, signature extension
-- mcp_to_langchain_tools: schema building, rastir_* filtering
 - End-to-end: client→server trace_id propagation via arguments
 """
 
@@ -18,81 +17,66 @@ from rastir.remote import (
     TRACE_ID_KEY,
     SPAN_ID_KEY,
     mcp_endpoint,
-    mcp_to_langchain_tools,
-    trace_remote_tools,
+    wrap_mcp,
 )
 from rastir.spans import SpanRecord, SpanType
 
 
-class TestTraceRemoteTools(unittest.TestCase):
-    """Test @trace_remote_tools decorator."""
+class TestWrapMcp(unittest.TestCase):
+    """Test wrap_mcp() session proxy."""
 
-    def test_wraps_client_session(self):
-        """Session's call_tool should be replaced by traced version."""
+    def _make_session(self):
+        """Create a mock MCP ClientSession."""
         session = MagicMock()
         type(session).__name__ = "ClientSession"
         type(session).__module__ = "mcp.client.session"
-        original = AsyncMock(return_value="result")
-        session.call_tool = original
+        session.call_tool = AsyncMock(return_value="result")
+        session.list_tools = AsyncMock(return_value=MagicMock(tools=[]))
+        session.initialize = AsyncMock()
+        return session
 
-        @trace_remote_tools
-        def get_session():
-            return session
+    def test_returns_proxy(self):
+        """wrap_mcp should return a proxy, not the original session."""
+        session = self._make_session()
+        wrapped = wrap_mcp(session)
+        assert wrapped is not session
 
-        result = get_session()
-        assert result.call_tool is not original
+    def test_proxy_delegates_list_tools(self):
+        """list_tools should pass through to the real session."""
+        session = self._make_session()
+        wrapped = wrap_mcp(session)
+        result = asyncio.get_event_loop().run_until_complete(
+            wrapped.list_tools()
+        )
+        session.list_tools.assert_called_once()
 
-    def test_wraps_session_in_tuple(self):
-        """Session inside a tuple should also be wrapped."""
-        session = MagicMock()
-        type(session).__name__ = "ClientSession"
-        type(session).__module__ = "mcp.client.session"
-        original = AsyncMock()
-        session.call_tool = original
+    def test_proxy_delegates_initialize(self):
+        """initialize should pass through to the real session."""
+        session = self._make_session()
+        wrapped = wrap_mcp(session)
+        asyncio.get_event_loop().run_until_complete(wrapped.initialize())
+        session.initialize.assert_called_once()
 
-        @trace_remote_tools
-        def get_resources():
-            return (["tool1"], session)
+    def test_proxy_delegates_arbitrary_attrs(self):
+        """Arbitrary attributes should delegate to the real session."""
+        session = self._make_session()
+        session.some_attr = "hello"
+        wrapped = wrap_mcp(session)
+        assert wrapped.some_attr == "hello"
 
-        result = get_resources()
-        assert isinstance(result, tuple)
-        assert result[1].call_tool is not original
-
-    def test_non_session_passthrough(self):
-        """Non-session return values pass through unchanged."""
-        @trace_remote_tools
-        def get_data():
-            return {"key": "value"}
-
-        assert get_data() == {"key": "value"}
-
-    def test_async_function_support(self):
-        """Async functions should be supported."""
-        session = MagicMock()
-        type(session).__name__ = "ClientSession"
-        type(session).__module__ = "mcp.client.session"
-        session.call_tool = AsyncMock()
-
-        @trace_remote_tools
-        async def get_session():
-            return session
-
-        result = asyncio.get_event_loop().run_until_complete(get_session())
-        assert not isinstance(result.call_tool, AsyncMock)
+    def test_prevents_double_wrapping(self):
+        """Wrapping an already-wrapped session should return it as-is."""
+        session = self._make_session()
+        wrapped = wrap_mcp(session)
+        double = wrap_mcp(wrapped)
+        assert double is wrapped
 
     @patch("rastir.queue.enqueue_span")
     def test_call_tool_creates_span(self, mock_enqueue):
         """Wrapped call_tool should create a tool span with remote=true."""
-        session = MagicMock()
-        type(session).__name__ = "ClientSession"
-        type(session).__module__ = "mcp.client.session"
-        session.call_tool = AsyncMock(return_value="ok")
+        session = self._make_session()
+        wrapped = wrap_mcp(session)
 
-        @trace_remote_tools
-        def get_session():
-            return session
-
-        wrapped = get_session()
         asyncio.get_event_loop().run_until_complete(
             wrapped.call_tool("search", {"query": "test"})
         )
@@ -106,9 +90,7 @@ class TestTraceRemoteTools(unittest.TestCase):
     @patch("rastir.queue.enqueue_span")
     def test_injects_rastir_keys_into_arguments(self, mock_enqueue):
         """Should inject rastir_trace_id / rastir_span_id into arguments."""
-        session = MagicMock()
-        type(session).__name__ = "ClientSession"
-        type(session).__module__ = "mcp.client.session"
+        session = self._make_session()
 
         captured_args = {}
         async def fake_call_tool(name, arguments=None, *a, **kw):
@@ -116,11 +98,7 @@ class TestTraceRemoteTools(unittest.TestCase):
             return "ok"
         session.call_tool = fake_call_tool
 
-        @trace_remote_tools
-        def get_session():
-            return session
-
-        wrapped = get_session()
+        wrapped = wrap_mcp(session)
         asyncio.get_event_loop().run_until_complete(
             wrapped.call_tool("search", {"query": "hi"})
         )
@@ -134,10 +112,8 @@ class TestTraceRemoteTools(unittest.TestCase):
 
     @patch("rastir.queue.enqueue_span")
     def test_preserves_original_arguments(self, mock_enqueue):
-        """Original arguments should not be mutated."""
-        session = MagicMock()
-        type(session).__name__ = "ClientSession"
-        type(session).__module__ = "mcp.client.session"
+        """Original arguments dict should not be mutated."""
+        session = self._make_session()
 
         captured = {}
         async def fake(name, arguments=None, *a, **kw):
@@ -145,12 +121,8 @@ class TestTraceRemoteTools(unittest.TestCase):
             return "ok"
         session.call_tool = fake
 
-        @trace_remote_tools
-        def get_session():
-            return session
-
+        wrapped = wrap_mcp(session)
         original_args = {"city": "Tokyo"}
-        wrapped = get_session()
         asyncio.get_event_loop().run_until_complete(
             wrapped.call_tool("weather", original_args)
         )
@@ -163,16 +135,10 @@ class TestTraceRemoteTools(unittest.TestCase):
     @patch("rastir.queue.enqueue_span")
     def test_call_tool_error_propagation(self, mock_enqueue):
         """Errors should mark span as ERROR and re-raise."""
-        session = MagicMock()
-        type(session).__name__ = "ClientSession"
-        type(session).__module__ = "mcp.client.session"
+        session = self._make_session()
         session.call_tool = AsyncMock(side_effect=RuntimeError("down"))
 
-        @trace_remote_tools
-        def get_session():
-            return session
-
-        wrapped = get_session()
+        wrapped = wrap_mcp(session)
         with self.assertRaises(RuntimeError):
             asyncio.get_event_loop().run_until_complete(
                 wrapped.call_tool("search", {"q": "hi"})
@@ -180,6 +146,31 @@ class TestTraceRemoteTools(unittest.TestCase):
 
         span = mock_enqueue.call_args[0][0]
         assert span.status.value == "ERROR"
+
+    @patch("rastir.queue.enqueue_span")
+    def test_call_tool_none_arguments(self, mock_enqueue):
+        """call_tool with None arguments should still inject trace IDs."""
+        session = self._make_session()
+
+        captured_args = {}
+        async def fake(name, arguments=None, *a, **kw):
+            captured_args.update(arguments or {})
+            return "ok"
+        session.call_tool = fake
+
+        wrapped = wrap_mcp(session)
+        asyncio.get_event_loop().run_until_complete(
+            wrapped.call_tool("ping", None)
+        )
+
+        assert TRACE_ID_KEY in captured_args
+        assert SPAN_ID_KEY in captured_args
+
+    def test_repr(self):
+        """Proxy repr should identify itself as rastir.wrap_mcp."""
+        session = self._make_session()
+        wrapped = wrap_mcp(session)
+        assert "rastir.wrap_mcp" in repr(wrapped)
 
 
 class TestMcpEndpoint(unittest.TestCase):
@@ -307,8 +298,7 @@ class TestEndToEndTracing(unittest.TestCase):
 
         # Client-side session mock
         session = MagicMock()
-        type(session).__name__ = "ClientSession"
-        type(session).__module__ = "mcp.client.session"
+        session.call_tool = AsyncMock()
 
         async def fake_call_tool(name, arguments=None, *a, **kw):
             # Simulate server receiving arguments with rastir_* fields
@@ -316,13 +306,9 @@ class TestEndToEndTracing(unittest.TestCase):
 
         session.call_tool = fake_call_tool
 
-        @trace_remote_tools
-        async def get_session():
-            return session
-
         async def run():
-            s = await get_session()
-            return await s.call_tool("search", {"query": "test"})
+            wrapped = wrap_mcp(session)
+            return await wrapped.call_tool("search", {"query": "test"})
 
         asyncio.get_event_loop().run_until_complete(run())
 
@@ -343,184 +329,6 @@ class TestEndToEndTracing(unittest.TestCase):
         # Correct remote flags
         assert client_span.attributes["remote"] == "true"
         assert server_span.attributes["remote"] == "false"
-
-
-class TestMcpToLangchainTools(unittest.TestCase):
-    """Tests for mcp_to_langchain_tools helper."""
-
-    @patch("rastir.queue.enqueue_span")
-    def test_returns_structured_tools(self, mock_enqueue):
-        """Should return a StructuredTool for each MCP tool."""
-        from langchain_core.tools import StructuredTool
-
-        tool1 = MagicMock()
-        tool1.name = "weather"
-        tool1.description = "Get weather"
-        tool1.inputSchema = {
-            "properties": {"city": {"type": "string"}},
-            "required": ["city"],
-        }
-        tool2 = MagicMock()
-        tool2.name = "calc"
-        tool2.description = "Calculator"
-        tool2.inputSchema = {
-            "properties": {"expr": {"type": "string"}},
-            "required": ["expr"],
-        }
-
-        resp = MagicMock()
-        resp.tools = [tool1, tool2]
-        session = AsyncMock()
-        session.list_tools = AsyncMock(return_value=resp)
-
-        tools = asyncio.get_event_loop().run_until_complete(
-            mcp_to_langchain_tools(session)
-        )
-
-        assert len(tools) == 2
-        assert all(isinstance(t, StructuredTool) for t in tools)
-        assert tools[0].name == "weather"
-        assert tools[1].name == "calc"
-
-    @patch("rastir.queue.enqueue_span")
-    def test_filters_rastir_fields_from_schema(self, mock_enqueue):
-        """Should exclude rastir_* fields from args_schema."""
-        tool1 = MagicMock()
-        tool1.name = "search"
-        tool1.description = "Search"
-        tool1.inputSchema = {
-            "properties": {
-                "query": {"type": "string"},
-                "rastir_trace_id": {"type": "string"},
-                "rastir_span_id": {"type": "string"},
-            },
-            "required": ["query"],
-        }
-
-        resp = MagicMock()
-        resp.tools = [tool1]
-        session = AsyncMock()
-        session.list_tools = AsyncMock(return_value=resp)
-
-        tools = asyncio.get_event_loop().run_until_complete(
-            mcp_to_langchain_tools(session)
-        )
-
-        fields = tools[0].args_schema.model_fields
-        assert "query" in fields
-        assert "rastir_trace_id" not in fields
-        assert "rastir_span_id" not in fields
-
-    @patch("rastir.queue.enqueue_span")
-    def test_args_schema_types(self, mock_enqueue):
-        """Should map JSON schema types correctly."""
-        tool1 = MagicMock()
-        tool1.name = "test"
-        tool1.description = "Test"
-        tool1.inputSchema = {
-            "properties": {
-                "name": {"type": "string"},
-                "count": {"type": "integer"},
-                "ratio": {"type": "number"},
-                "flag": {"type": "boolean"},
-            },
-            "required": ["name"],
-        }
-
-        resp = MagicMock()
-        resp.tools = [tool1]
-        session = AsyncMock()
-        session.list_tools = AsyncMock(return_value=resp)
-
-        tools = asyncio.get_event_loop().run_until_complete(
-            mcp_to_langchain_tools(session)
-        )
-
-        fields = tools[0].args_schema.model_fields
-        assert fields["name"].is_required()
-        assert not fields["count"].is_required()
-
-    @patch("rastir.queue.enqueue_span")
-    def test_calls_tool_via_session(self, mock_enqueue):
-        """Should call session.call_tool with correct args."""
-        tool1 = MagicMock()
-        tool1.name = "greet"
-        tool1.description = "Greet"
-        tool1.inputSchema = {
-            "properties": {"name": {"type": "string"}},
-            "required": ["name"],
-        }
-
-        content_item = MagicMock()
-        content_item.text = "Hello!"
-        call_result = MagicMock()
-        call_result.content = [content_item]
-
-        resp = MagicMock()
-        resp.tools = [tool1]
-        session = AsyncMock()
-        session.list_tools = AsyncMock(return_value=resp)
-        session.call_tool = AsyncMock(return_value=call_result)
-
-        tools = asyncio.get_event_loop().run_until_complete(
-            mcp_to_langchain_tools(session)
-        )
-
-        result = asyncio.get_event_loop().run_until_complete(
-            tools[0].ainvoke({"name": "World"})
-        )
-        assert "Hello!" in result
-
-    @patch("rastir.queue.enqueue_span")
-    def test_trace_false_skips_wrapping(self, mock_enqueue):
-        """With trace=False, no rastir_* injection."""
-        tool1 = MagicMock()
-        tool1.name = "ping"
-        tool1.description = "Ping"
-        tool1.inputSchema = {
-            "properties": {"host": {"type": "string"}},
-            "required": ["host"],
-        }
-
-        content_item = MagicMock()
-        content_item.text = "pong"
-        call_result = MagicMock()
-        call_result.content = [content_item]
-
-        resp = MagicMock()
-        resp.tools = [tool1]
-        session = AsyncMock()
-        session.list_tools = AsyncMock(return_value=resp)
-        session.call_tool = AsyncMock(return_value=call_result)
-
-        tools = asyncio.get_event_loop().run_until_complete(
-            mcp_to_langchain_tools(session, trace=False)
-        )
-
-        asyncio.get_event_loop().run_until_complete(
-            tools[0].ainvoke({"host": "localhost"})
-        )
-        session.call_tool.assert_called_once()
-
-    @patch("rastir.queue.enqueue_span")
-    def test_empty_input_schema(self, mock_enqueue):
-        """Should handle tools with no inputSchema."""
-        tool1 = MagicMock()
-        tool1.name = "noop"
-        tool1.description = "No-op"
-        tool1.inputSchema = None
-
-        resp = MagicMock()
-        resp.tools = [tool1]
-        session = AsyncMock()
-        session.list_tools = AsyncMock(return_value=resp)
-
-        tools = asyncio.get_event_loop().run_until_complete(
-            mcp_to_langchain_tools(session)
-        )
-
-        assert len(tools) == 1
-        assert len(tools[0].args_schema.model_fields) == 0
 
 
 if __name__ == "__main__":

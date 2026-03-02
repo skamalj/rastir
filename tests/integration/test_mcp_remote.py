@@ -4,7 +4,7 @@ This test verifies end-to-end trace propagation across MCP tool boundaries:
 
 1. Starts a real FastMCP server with tools instrumented by @mcp_endpoint
 2. Creates a LangGraph agent (Gemini model) that calls MCP tools
-3. Uses @trace_remote_tools to auto-inject rastir trace context via arguments
+3. Uses wrap_mcp() to auto-inject rastir trace context via arguments
 4. Verifies client and server spans share the same trace_id
 5. Verifies parent-child span relationships
 
@@ -60,7 +60,7 @@ pytestmark = [
 # Rastir setup
 # ---------------------------------------------------------------------------
 import rastir
-from rastir import configure, agent_span, trace_remote_tools, mcp_endpoint
+from rastir import configure, agent_span, wrap_mcp, mcp_endpoint
 from rastir.context import set_current_model, set_current_provider
 from rastir.spans import SpanType
 
@@ -207,12 +207,8 @@ async def test_direct_mcp_call_with_tracing(mcp_server_fixture):
                     async with ClientSession(read, write) as session:
                         await session.initialize()
 
-                        # Wrap session after initialization
-                        @trace_remote_tools
-                        def wrap_session():
-                            return session
-
-                        wrapped = wrap_session()
+                        # Wrap session for trace propagation
+                        wrapped = wrap_mcp(session)
                         result = await wrapped.call_tool("get_weather", {"city": "Tokyo"})
                         return result
 
@@ -265,11 +261,7 @@ async def test_multiple_tool_calls(mcp_server_fixture):
                     async with ClientSession(read, write) as session:
                         await session.initialize()
 
-                        @trace_remote_tools
-                        def wrap_session():
-                            return session
-
-                        wrapped = wrap_session()
+                        wrapped = wrap_mcp(session)
                         r1 = await wrapped.call_tool("get_weather", {"city": "London"})
                         r2 = await wrapped.call_tool("calculate", {"expression": "7 * 8"})
                         return r1, r2
@@ -302,11 +294,7 @@ async def test_error_propagation(mcp_server_fixture):
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
-                @trace_remote_tools
-                def wrap_session():
-                    return session
-
-                wrapped = wrap_session()
+                wrapped = wrap_mcp(session)
 
                 # Call a non-existent tool — MCP SDK should raise an error
                 try:
@@ -342,11 +330,7 @@ async def test_model_provider_attributes(mcp_server_fixture):
                     async with ClientSession(read, write) as session:
                         await session.initialize()
 
-                        @trace_remote_tools
-                        def wrap():
-                            return session
-
-                        wrapped = wrap()
+                        wrapped = wrap_mcp(session)
                         result = await wrapped.call_tool("get_weather", {"city": "Paris"})
                         return result
 
@@ -377,10 +361,11 @@ async def test_langgraph_agent_with_mcp_tools(mcp_server_fixture):
     """Full integration: LangGraph agent (Gemini) calling MCP tools.
 
     This is the flagship test — a real AI agent uses real MCP tools
-    with automatic distributed trace propagation via mcp_to_langchain_tools().
+    with automatic distributed trace propagation via wrap_mcp().
     """
     from langchain_core.messages import HumanMessage
-    from rastir import mcp_to_langchain_tools
+    from langchain_core.tools import StructuredTool
+    from pydantic import create_model
 
     with patch("rastir.queue.enqueue_span", side_effect=_capture_span):
         with patch("rastir.decorators.enqueue_span", side_effect=_capture_span):
@@ -389,9 +374,33 @@ async def test_langgraph_agent_with_mcp_tools(mcp_server_fixture):
                 async with ClientSession(read, write) as session:
                     await session.initialize()
 
-                    # One line: converts MCP tools to LangChain tools
-                    # with automatic trace propagation
-                    lc_tools = await mcp_to_langchain_tools(session)
+                    # Wrap session for trace propagation
+                    wrapped = wrap_mcp(session)
+
+                    # Fetch tools and convert to LangChain StructuredTools
+                    tools_response = await wrapped.list_tools()
+                    lc_tools = []
+                    for mcp_tool in tools_response.tools:
+                        props = (mcp_tool.inputSchema or {}).get("properties", {})
+                        required = set((mcp_tool.inputSchema or {}).get("required", []))
+                        fields = {}
+                        for fname, fschema in props.items():
+                            if fname.startswith("rastir_"):
+                                continue
+                            ftype = {"string": str, "integer": int, "number": float, "boolean": bool}.get(fschema.get("type", "string"), str)
+                            fields[fname] = (ftype, ... if fname in required else None)
+                        model = create_model(f"{mcp_tool.name}_args", **fields)
+                        tn = mcp_tool.name
+
+                        async def _call(*, _tn=tn, **kwargs):
+                            r = await wrapped.call_tool(_tn, kwargs)
+                            return " ".join(getattr(c, "text", str(c)) for c in r.content) if r.content else str(r)
+
+                        lc_tools.append(StructuredTool.from_function(
+                            coroutine=_call, name=tn,
+                            description=mcp_tool.description or tn,
+                            args_schema=model,
+                        ))
 
                     # Create LangGraph agent with Gemini
                     llm = ChatGoogleGenerativeAI(
