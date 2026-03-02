@@ -30,6 +30,7 @@ from rastir.remote import mcp_endpoint, wrap_mcp
 from rastir.transport import get_export_stats, stop_exporter
 from rastir.wrapper import wrap
 from rastir.crewai_support import crew_kickoff
+from rastir.llamaindex_support import llamaindex_agent
 
 # _span aliases — preferred when using alongside LangChain/LangGraph
 # to avoid name collisions (e.g. langchain_core.tools.tool vs rastir.tool)
@@ -63,6 +64,8 @@ __all__ = [
     "mcp_endpoint",
     # CrewAI
     "crew_kickoff",
+    # LlamaIndex
+    "llamaindex_agent",
     "stop_exporter",
     "get_export_stats",
 ]
