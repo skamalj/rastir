@@ -3,6 +3,11 @@
   max-width: 95%;
 }
 
+// Remove the inner content width cap (just-the-docs defaults to ~800px)
+.main-content {
+  max-width: none !important;
+}
+
 // Increase base font size globally
 body {
   font-size: 17px !important;
