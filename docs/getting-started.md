@@ -114,19 +114,7 @@ scrape_configs:
 
 ### Metrics (Prometheus)
 
-| Metric | Type | Description |
-|--------|------|-------------|
-| `rastir_spans_ingested_total` | Counter | Total spans by service, env, type, status |
-| `rastir_llm_calls_total` | Counter | LLM calls by model, provider, agent |
-| `rastir_tokens_input_total` | Counter | Input tokens by model, provider, agent |
-| `rastir_tokens_output_total` | Counter | Output tokens by model, provider, agent |
-| `rastir_tool_calls_total` | Counter | Tool invocations by tool_name, agent |
-| `rastir_retrieval_calls_total` | Counter | Retrieval operations by agent |
-| `rastir_errors_total` | Counter | Error spans by type and normalised error category |
-| `rastir_guardrail_requests_total` | Counter | Guardrail-enabled LLM calls |
-| `rastir_guardrail_violations_total` | Counter | Guardrail interventions |
-| `rastir_duration_seconds` | Histogram | Span duration by service, env, type |
-| `rastir_tokens_per_call` | Histogram | Tokens per LLM call by model, provider |
+The collector server exposes 30+ Prometheus metrics covering LLM calls, tokens, tool invocations, errors, cost, TTFT, guardrails, evaluations, and system health. See the [Metrics Reference](metrics) for the complete list with all labels, bucket configurations, and PromQL examples.
 
 ### Traces
 

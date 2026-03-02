@@ -94,10 +94,11 @@ That's it. Rastir automatically:
 
 - [Getting Started](getting-started.md) — Installation, configuration, first steps
 - [Decorators](decorators.md) — Full decorator reference (`@trace`, `@agent`, `@llm`, `@tool`, `@retrieval`, `@metric`)
-- [MCP Distributed Tracing](mcp-tracing.md) — `wrap_mcp()`, `@mcp_endpoint`
 - [Adapters](adapters.md) — 15 adapters with two-phase enrichment
-- [Server](server.md) — Collector, metrics, guardrails, error normalisation, sampling
-- [Configuration](configuration.md) — Client and server configuration reference
-- [Dashboards](dashboards.md) — Six pre-built Grafana dashboards for LLM observability
-- [Environment Variables](environment-variables.md) — Complete reference of all environment variables
-- [Contributing Adapters](contributing-adapters.md) — How to write and register custom adapters
+- [MCP Distributed Tracing](mcp-tracing.md) — `wrap_mcp()`, `@mcp_endpoint`
+- [Metrics Reference](metrics.md) — All Prometheus counters, histograms, gauges, exemplars, and PromQL examples
+- [Dashboards](dashboards.md) — Six ready-to-use Grafana dashboards
+- [Server](server.md) — Collector architecture, endpoints, sampling, backpressure, OTLP export
+- [Configuration](configuration.md) — Client and server configuration, all environment variables
+- [Architecture](architecture-responsibilities.md) — Responsibility boundaries across layers
+- [Contributing Adapters](contributing-adapters.md) — Guide to writing custom adapters

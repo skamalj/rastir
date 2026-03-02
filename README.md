@@ -517,12 +517,13 @@ Full documentation at **[skamalj.github.io/rastir](https://skamalj.github.io/ras
 
 - [Getting Started](https://skamalj.github.io/rastir/getting-started) — Installation, quick start, nested spans
 - [Decorators](https://skamalj.github.io/rastir/decorators) — `@trace`, `@agent`, `@llm`, `@tool`, `@retrieval`, `@metric`
-- [MCP Distributed Tracing](https://skamalj.github.io/rastir/mcp-tracing) — `wrap_mcp()`, `@mcp_endpoint`
 - [Adapters](https://skamalj.github.io/rastir/adapters) — 15 adapters with two-phase enrichment
-- [Server](https://skamalj.github.io/rastir/server) — Collector, metrics, histograms, exemplars, OTLP, sampling
-- [Configuration](https://skamalj.github.io/rastir/configuration) — Client & server config reference
-- [Dashboards](https://skamalj.github.io/rastir/dashboards) — Six pre-built Grafana dashboards
-- [Environment Variables](https://skamalj.github.io/rastir/environment-variables) — Complete env var reference
+- [MCP Distributed Tracing](https://skamalj.github.io/rastir/mcp-tracing) — `wrap_mcp()`, `@mcp_endpoint`
+- [Metrics Reference](https://skamalj.github.io/rastir/metrics) — All Prometheus counters, histograms, gauges, exemplars
+- [Dashboards](https://skamalj.github.io/rastir/dashboards) — Six ready-to-use Grafana dashboards
+- [Server](https://skamalj.github.io/rastir/server) — Collector architecture, endpoints, sampling, OTLP export
+- [Configuration](https://skamalj.github.io/rastir/configuration) — Client & server config, all environment variables
+- [Architecture](https://skamalj.github.io/rastir/architecture-responsibilities) — Responsibility boundaries across layers
 - [Contributing Adapters](https://skamalj.github.io/rastir/contributing-adapters) — Write your own adapter
 
 ## License
