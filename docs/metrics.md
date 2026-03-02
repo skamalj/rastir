@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Metrics Reference
-nav_order: 6
+nav_order: 7
 ---
 
 # Metrics Reference

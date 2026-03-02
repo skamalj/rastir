@@ -309,23 +309,47 @@ def run(query: str):
 
 ## Works with CrewAI
 
+The `@crew_kickoff` decorator gives you **per-LLM-call and per-tool visibility** inside CrewAI agents — with a single annotation. It auto-wraps every agent's LLM and tools, and optionally injects MCP tools.
+
 ```python
+from rastir import configure, crew_kickoff
 from crewai import Agent, Task, Crew, LLM
 
-crewai_llm = LLM(model="gemini/gemini-2.5-flash", api_key="...")
-researcher = Agent(role="Researcher", goal="Research topics", llm=crewai_llm, tools=[...])
-task = Task(description="Research AI trends", expected_output="Summary", agent=researcher)
-crew = Crew(agents=[researcher], tasks=[task])
+configure(service="my-app", push_url="http://localhost:8080")
 
-@agent(agent_name="crewai_agent")
-def run():
-    @llm(model="gemini-2.5-flash", provider="gemini")
-    def invoke():
-        return crew.kickoff()
-        # Rastir detects CrewOutput → extracts crewai_task_count,
-        # crewai_total_tokens, crewai_successful_requests, tokens_input/output
-    return invoke()
+researcher = Agent(role="Researcher", goal="Research topics",
+                   llm=LLM(model="gemini/gemini-2.5-flash"), tools=[...])
+crew = Crew(agents=[researcher], tasks=[Task(...)])
+
+@crew_kickoff(agent_name="research_crew")
+def run(crew):
+    return crew.kickoff()
 ```
+
+What happens under the hood:
+1. Each agent's LLM is wrapped → per-call spans with token/model/latency metrics
+2. Each agent's tools are wrapped → per-invocation tool spans
+3. An `@agent` span wraps the entire `kickoff()`
+4. After execution, original objects are restored (Crew reuse is safe)
+
+### With MCP tools
+
+Inject MCP tools into CrewAI agents — no manual conversion needed:
+
+```python
+from rastir import crew_kickoff, wrap_mcp
+
+session = wrap_mcp(mcp_session)
+
+@crew_kickoff(agent_name="research_crew", mcp=session)
+def run(crew):
+    return crew.kickoff()
+    # MCP tools are converted to CrewAI BaseTool instances and injected into agents
+```
+
+`mcp=` accepts a single session (all agents), a list (all agents), or a dict mapping agent role → session.
+
+Full CrewAI documentation → [CrewAI Integration](https://skamalj.github.io/rastir/crewai)
 
 ## Generic Object Wrapper
 
@@ -465,12 +489,14 @@ Full configuration reference → [Configuration Documentation](https://skamalj.g
 
 ```
 src/rastir/
-├── __init__.py          # Public API: configure, trace, agent, llm, tool, retrieval, wrap
+├── __init__.py          # Public API: configure, trace, agent, llm, tool, retrieval, wrap, crew_kickoff
 ├── config.py            # GlobalConfig, configure()
 ├── context.py           # Span & agent context (ContextVar-based)
 ├── decorators.py        # All decorator implementations + two-phase enrichment
 ├── remote.py            # MCP distributed tracing: wrap_mcp, mcp_endpoint
 │                        #   argument-based trace propagation via session proxy
+├── crewai_support.py    # @crew_kickoff decorator for CrewAI integration
+│                        #   auto-wraps LLMs, tools, MCP-to-BaseTool bridge
 ├── wrapper.py           # rastir.wrap() generic object wrapper
 ├── spans.py             # SpanRecord data model
 ├── queue.py             # Bounded in-memory span queue
@@ -519,6 +545,7 @@ Full documentation at **[skamalj.github.io/rastir](https://skamalj.github.io/ras
 - [Decorators](https://skamalj.github.io/rastir/decorators) — `@trace`, `@agent`, `@llm`, `@tool`, `@retrieval`, `@metric`
 - [Adapters](https://skamalj.github.io/rastir/adapters) — 15 adapters with two-phase enrichment
 - [MCP Distributed Tracing](https://skamalj.github.io/rastir/mcp-tracing) — `wrap_mcp()`, `@mcp_endpoint`
+- [CrewAI Integration](https://skamalj.github.io/rastir/crewai) — `@crew_kickoff` decorator with MCP tool bridge
 - [Metrics Reference](https://skamalj.github.io/rastir/metrics) — All Prometheus counters, histograms, gauges, exemplars
 - [Dashboards](https://skamalj.github.io/rastir/dashboards) — Six ready-to-use Grafana dashboards
 - [Server](https://skamalj.github.io/rastir/server) — Collector architecture, endpoints, sampling, OTLP export

@@ -17,6 +17,7 @@ Rastir provides decorator-based instrumentation for LLM applications and AI agen
 
 - **Six semantic decorators** — `@trace`, `@agent`, `@llm`, `@tool`, `@retrieval`, `@metric`
 - **MCP distributed tracing** — `wrap_mcp()` and `@mcp_endpoint` for end-to-end tracing across MCP tool boundaries
+- **CrewAI integration** — `@crew_kickoff` auto-wraps agent LLMs and tools for per-call visibility, with optional MCP tool injection
 - **15 adapters** — automatic model, token, and provider detection for OpenAI, Azure OpenAI, Anthropic, AWS Bedrock, Google Gemini, Cohere, Mistral, Groq, LangChain, LangGraph, LlamaIndex, and CrewAI
 - **Two-phase enrichment** — model/provider extracted from function kwargs *before* the call, refined from the response *after*. Metadata survives even when API calls fail.
 - **Generic object wrapper** — `rastir.wrap(obj)` instruments any object (Redis, databases, caches) without decorator access
@@ -96,6 +97,7 @@ That's it. Rastir automatically:
 - [Decorators](decorators.md) — Full decorator reference (`@trace`, `@agent`, `@llm`, `@tool`, `@retrieval`, `@metric`)
 - [Adapters](adapters.md) — 15 adapters with two-phase enrichment
 - [MCP Distributed Tracing](mcp-tracing.md) — `wrap_mcp()`, `@mcp_endpoint`
+- [CrewAI Integration](crewai.md) — `@crew_kickoff` decorator with MCP tool bridge
 - [Metrics Reference](metrics.md) — All Prometheus counters, histograms, gauges, exemplars, and PromQL examples
 - [Dashboards](dashboards.md) — Six ready-to-use Grafana dashboards
 - [Server](server.md) — Collector architecture, endpoints, sampling, backpressure, OTLP export

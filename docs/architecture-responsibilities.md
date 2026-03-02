@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Architecture — Responsibility Boundaries
-nav_order: 10
+nav_order: 12
 ---
 
 # Architecture — Responsibility Boundaries
