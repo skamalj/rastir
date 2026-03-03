@@ -13,54 +13,58 @@ Rastir provides decorator-based instrumentation for LLM applications and AI agen
 
 ---
 
-## Key Features
+## Why Rastir?
 
-- **Six semantic decorators** — `@trace`, `@agent`, `@llm`, `@tool`, `@retrieval`, `@metric`
-- **MCP distributed tracing** — `wrap_mcp()` and `@mcp_endpoint` for end-to-end tracing across MCP tool boundaries
-- **CrewAI integration** — `@crew_kickoff` auto-wraps agent LLMs and tools for per-call visibility, with optional MCP tool injection
-- **15 adapters** — automatic model, token, and provider detection for OpenAI, Azure OpenAI, Anthropic, AWS Bedrock, Google Gemini, Cohere, Mistral, Groq, LangChain, LangGraph, LlamaIndex, and CrewAI
-- **Two-phase enrichment** — model/provider extracted from function kwargs *before* the call, refined from the response *after*. Metadata survives even when API calls fail.
-- **Generic object wrapper** — `rastir.wrap(obj)` instruments any object (Redis, databases, caches) without decorator access
-- **Prometheus metrics** — duration histograms, token counters, error rates with normalised categories, cardinality-guarded labels
-- **Cost observability** — client-side cost calculation with `PricingRegistry`, cost counters and histograms, pricing profile labeling
-- **Streaming TTFT** — Time-To-First-Token measurement on streaming LLM calls with Prometheus histograms
-- **Guardrail observability** — automatic tracking of AWS Bedrock guardrail requests and violations with bounded enum validation
-- **Error normalisation** — raw exceptions mapped to six fixed categories (timeout, rate_limit, validation_error, provider_error, internal_error, unknown)
-- **OpenTelemetry traces** — full parent-child span hierarchy with OTLP export and exemplar support
-- **Built-in collector server** — FastAPI-based server with in-memory trace store, sampling, backpressure, rate limiting, and exemplar support
-- **Zero external dependencies for tracing** — no database, no Redis, no Kafka
+Most LLM observability tools require SDK wrappers, monkey-patching, or vendor-specific clients. Rastir takes a different approach:
+
+- **One decorator per framework** — `@langgraph_agent`, `@crew_kickoff`, `@llamaindex_agent` auto-discover and wrap LLMs, tools, and nodes inside the framework
+- **Adapters, not patches** — 15 adapters extract model, tokens, and provider from return values. Works across SDK versions
+- **Two-phase enrichment** — metadata captured from function kwargs *before* the call, refined from the response *after*. Survives API failures
+- **Self-hosted collector** — a lightweight FastAPI server you own. Prometheus metrics, OTLP export, zero external infrastructure
 
 ---
 
 ## Quick Example
 
 ```python
-from rastir import configure, trace, agent, llm, tool
+from rastir import configure, langgraph_agent
 
-configure(service="my-app", env="production", push_url="http://localhost:8080")
+configure(service="my-app", push_url="http://localhost:8080")
 
-@agent(agent_name="qa_bot")
-def answer_question(query: str) -> str:
-    context = search_docs(query)
-    return ask_llm(query, context)
-
-@tool
-def search_docs(query: str) -> list[str]:
-    return vector_db.search(query, top_k=5)
-
-@llm
-def ask_llm(query: str, context: list[str]) -> str:
-    return openai.chat.completions.create(
-        model="gpt-4",
-        messages=[{"role": "user", "content": query}],
-    )
+@langgraph_agent(agent_name="react_agent")
+def run(query):
+    graph = create_react_agent(model, tools)
+    return graph.invoke({"messages": [("user", query)]})
 ```
 
-That's it. Rastir automatically:
-- Creates parent-child spans (`qa_bot → search_docs → ask_llm`)
-- Extracts model name, token counts, and provider from the OpenAI response
-- Emits `rastir_llm_calls_total`, `rastir_duration_seconds`, `rastir_tokens_input_total`, etc.
-- Pushes span data to the collector server
+Every LLM call, tool invocation, and node execution is now traced:
+
+```
+react_agent (AGENT)
+  ├── node:agent (TRACE)
+  │   └── langgraph.llm.gpt-4o.invoke (LLM)
+  ├── node:tools (TRACE)
+  │   └── langgraph.tool.search.invoke (TOOL)
+  └── node:agent (TRACE)
+      └── langgraph.llm.gpt-4o.invoke (LLM)
+```
+
+---
+
+## Key Features
+
+- **Framework decorators** — `@langgraph_agent`, `@crew_kickoff`, `@llamaindex_agent` with automatic LLM/tool discovery
+- **15 provider adapters** — OpenAI, Azure, Anthropic, Bedrock, Gemini, Cohere, Mistral, Groq, LangChain, LangGraph, LlamaIndex, CrewAI
+- **MCP distributed tracing** — `wrap(session)` and `@mcp_endpoint` for end-to-end tracing across MCP tool boundaries
+- **Generic `wrap()`** — instrument any object (Redis, databases, MCP sessions) without decorator access
+- **Cost observability** — per-model USD cost tracking with `PricingRegistry`, pricing profiles
+- **Streaming TTFT** — Time-To-First-Token measurement on streaming LLM calls
+- **Guardrail tracking** — automatic AWS Bedrock guardrail violation metrics
+- **Error normalisation** — exceptions mapped to 6 fixed categories
+- **Prometheus metrics** — duration histograms, token counters, cost metrics, error rates
+- **7 Grafana dashboards** — ready-to-import dashboards for LLM, agent, cost, SRE, and system health
+- **OTLP export** — forward spans to Tempo, Jaeger, or any OTLP backend
+- **Self-hosted collector** — FastAPI server with sampling, backpressure, rate limiting, cardinality guards
 
 ---
 
@@ -70,7 +74,9 @@ That's it. Rastir automatically:
 ┌─────────────────────────────────────────────────┐
 │  Your Application                               │
 │  ┌──────────────────────────────────────────┐   │
-│  │  @trace / @agent / @llm / @tool          │   │
+│  │  @langgraph_agent / @crew_kickoff /      │   │
+│  │  @llamaindex_agent                       │   │
+│  │  @agent / @llm / @tool / wrap()          │   │
 │  │  Decorators → SpanRecord → Queue         │   │
 │  └───────────────┬──────────────────────────┘   │
 │                  │ HTTP POST /v1/telemetry       │
@@ -93,14 +99,27 @@ That's it. Rastir automatically:
 
 ## Pages
 
-- [Getting Started](getting-started.md) — Installation, configuration, first steps
-- [Decorators](decorators.md) — Full decorator reference (`@trace`, `@agent`, `@llm`, `@tool`, `@retrieval`, `@metric`)
+### Getting Started
+- [Installation & Quick Start](getting-started.md)
+
+### Core
+- [Decorators](decorators.md) — `@trace`, `@agent`, `@llm`, `@tool`, `@retrieval`, `@metric`
 - [Adapters](adapters.md) — 15 adapters with two-phase enrichment
-- [MCP Distributed Tracing](mcp-tracing.md) — `wrap_mcp()`, `@mcp_endpoint`
-- [CrewAI Integration](crewai.md) — `@crew_kickoff` decorator with MCP tool bridge
-- [Metrics Reference](metrics.md) — All Prometheus counters, histograms, gauges, exemplars, and PromQL examples
-- [Dashboards](dashboards.md) — Six ready-to-use Grafana dashboards
-- [Server](server.md) — Collector architecture, endpoints, sampling, backpressure, OTLP export
-- [Configuration](configuration.md) — Client and server configuration, all environment variables
-- [Architecture](architecture-responsibilities.md) — Responsibility boundaries across layers
-- [Contributing Adapters](contributing-adapters.md) — Guide to writing custom adapters
+- [wrap() & MCP](wrap.md) — Generic object wrapper and MCP session wrapping
+- [MCP Distributed Tracing](mcp-tracing.md) — `wrap(session)`, `@mcp_endpoint`
+
+### Frameworks
+- [LangGraph](frameworks/langgraph.md) — `@langgraph_agent` decorator
+- [CrewAI](frameworks/crewai.md) — `@crew_kickoff` decorator
+- [LlamaIndex](frameworks/llamaindex.md) — `@llamaindex_agent` decorator
+
+### Operations
+- [Metrics Reference](metrics.md) — All Prometheus counters, histograms, gauges
+- [Dashboards](dashboards.md) — 7 Grafana dashboards
+- [Server](server.md) — Collector architecture, endpoints, sampling, OTLP
+- [Configuration](configuration.md) — Client & server config, environment variables
+
+### Reference
+- [Architecture](architecture-responsibilities.md) — Responsibility boundaries
+- [Environment Variables](environment-variables.md) — Complete env var reference
+- [Contributing Adapters](contributing-adapters.md) — Write your own adapter

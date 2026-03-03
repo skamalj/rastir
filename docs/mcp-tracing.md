@@ -1,7 +1,7 @@
 ---
 layout: default
 title: MCP Distributed Tracing
-nav_order: 5
+nav_order: 7
 ---
 
 # MCP Distributed Tracing

@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Contributing Adapters
-nav_order: 13
+nav_order: 14
 ---
 
 # Contributing New Adapters

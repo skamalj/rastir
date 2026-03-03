@@ -25,5 +25,8 @@ aux_links_new_tab: true
 # Footer
 footer_content: "Rastir — LLM & Agent Observability Library"
 
+# Enable navigation sections with children
+nav_external_links: []
+
 markdown: kramdown
 highlighter: rouge
