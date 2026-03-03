@@ -4,10 +4,22 @@ Provides ``langgraph_agent`` — a single decorator that instruments
 LangGraph compiled-graph execution.  The decorator:
 
   1. Scans function arguments for a LangGraph CompiledGraph
-  2. Walks graph nodes to find chat models (via Runnable chains,
+  2. Wraps every graph node function with a ``TRACE`` span
+     (``node:<name>``) so node execution is visible
+  3. Walks graph nodes to find chat models (via Runnable chains,
      closures, globals) and wraps them for per-call tracing
-  3. Wraps tools inside ToolNode instances for per-invocation tracing
-  4. Creates an ``@agent`` span around the entire run
+  4. Wraps tools inside ToolNode instances for per-invocation tracing
+  5. Creates an ``@agent`` span around the entire run
+
+Resulting span hierarchy::
+
+    react_agent (AGENT)
+      ├── node:agent (TRACE)
+      │   └── langgraph.llm.gpt-4o.invoke (LLM)
+      ├── node:tools (TRACE)
+      │   └── langgraph.tool.search.invoke (TOOL)
+      └── node:agent (TRACE)
+          └── langgraph.llm.gpt-4o.invoke (LLM)
 
 Usage::
 
@@ -232,7 +244,7 @@ async def _async_langgraph_agent_impl(
 def _wrap_graph_internals(
     graph: Any, originals: list[tuple],
 ) -> None:
-    """Walk compiled graph nodes, wrap chat models and tools."""
+    """Walk compiled graph nodes, wrap node functions, chat models and tools."""
     nodes = getattr(graph, "nodes", None)
     if not isinstance(nodes, dict):
         return
@@ -243,7 +255,11 @@ def _wrap_graph_internals(
             continue
         bound = getattr(node, "bound", None)
         if bound is not None:
+            # 1. Walk inside to wrap LLMs and tools (before node-func
+            #    replacement, so closure/globals inspection sees originals)
             _wrap_runnable(bound, originals, seen)
+            # 2. Wrap the node function itself with a trace span
+            _wrap_node_func(bound, name, originals)
 
 
 def _wrap_runnable(
@@ -330,6 +346,77 @@ def _walk_func_for_wrapping(
                 seen.add(id(val))
                 _wrap_model_at(func_globals, varname, val, originals,
                                kind="dict")
+
+
+# ---------------------------------------------------------------------------
+# Node-level wrapping
+# ---------------------------------------------------------------------------
+
+def _wrap_node_func(
+    bound: Any, node_name: str, originals: list[tuple],
+) -> None:
+    """Replace ``bound.func`` (and ``bound.afunc``) with traced wrappers.
+
+    Each node invocation will emit a ``TRACE`` span named
+    ``node:<node_name>``.
+    """
+    from rastir.context import end_span, start_span
+    from rastir.queue import enqueue_span
+    from rastir.spans import SpanStatus, SpanType
+
+    span_name = f"node:{node_name}"
+
+    # --- sync func ---
+    orig_func = getattr(bound, "func", None)
+    if orig_func is not None and callable(orig_func):
+        if getattr(orig_func, "_rastir_node_traced", False):
+            return  # already wrapped
+
+        @functools.wraps(orig_func)
+        def traced_func(*args: Any, **kwargs: Any) -> Any:
+            span, token = start_span(span_name, SpanType.TRACE)
+            span.set_attribute("langgraph.node", node_name)
+            try:
+                result = orig_func(*args, **kwargs)
+                span.finish(SpanStatus.OK)
+                return result
+            except BaseException as exc:
+                span.record_error(exc)
+                span.finish(SpanStatus.ERROR)
+                raise
+            finally:
+                end_span(token)
+                enqueue_span(span)
+
+        traced_func._rastir_node_traced = True  # type: ignore[attr-defined]
+        originals.append(("attr", bound, "func", orig_func))
+        bound.func = traced_func
+
+    # --- async afunc ---
+    orig_afunc = getattr(bound, "afunc", None)
+    if orig_afunc is not None and callable(orig_afunc):
+        if getattr(orig_afunc, "_rastir_node_traced", False):
+            return
+
+        @functools.wraps(orig_afunc)
+        async def traced_afunc(*args: Any, **kwargs: Any) -> Any:
+            span, token = start_span(span_name, SpanType.TRACE)
+            span.set_attribute("langgraph.node", node_name)
+            try:
+                result = await orig_afunc(*args, **kwargs)
+                span.finish(SpanStatus.OK)
+                return result
+            except BaseException as exc:
+                span.record_error(exc)
+                span.finish(SpanStatus.ERROR)
+                raise
+            finally:
+                end_span(token)
+                enqueue_span(span)
+
+        traced_afunc._rastir_node_traced = True  # type: ignore[attr-defined]
+        originals.append(("attr", bound, "afunc", orig_afunc))
+        bound.afunc = traced_afunc
 
 
 # ---------------------------------------------------------------------------

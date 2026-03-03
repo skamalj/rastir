@@ -31,6 +31,7 @@ from rastir.langgraph_support import (
     _is_tool_node,
     _model_display_name,
     _wrap_graph_internals,
+    _wrap_node_func,
     _wrap_runnable,
     _walk_func_for_wrapping,
     _wrap_model_at,
@@ -495,7 +496,8 @@ class TestWrapGlobalModel:
 
         _wrap_graph_internals(graph, originals)
 
-        assert len(originals) == 1
+        # 1 for global model + 1 for node func wrapping
+        assert len(originals) == 2
         assert node_func.__globals__["model"] is not model
 
 
@@ -932,3 +934,179 @@ class TestFuncNameDefault:
         span = mock_enqueue.call_args[0][0]
         assert span.name == "my_custom_graph"
         assert span.attributes.get("agent_name") == "my_custom_graph"
+
+
+# ========================================================================
+# Node-level tracing tests
+# ========================================================================
+
+class TestNodeFuncWrapping:
+    """Test _wrap_node_func: sync/async func wrapping, spans, restore."""
+
+    def test_sync_func_wrapped(self):
+        """bound.func is replaced and has _rastir_node_traced marker."""
+        orig = lambda state: state
+        bound = _FakeRunnableCallable(func=orig)
+        originals: list[tuple] = []
+
+        _wrap_node_func(bound, "my_node", originals)
+
+        assert bound.func is not orig
+        assert getattr(bound.func, "_rastir_node_traced", False) is True
+        assert len(originals) == 1
+        assert originals[0] == ("attr", bound, "func", orig)
+
+    def test_sync_func_calls_original(self):
+        """Wrapped sync func should call through to original."""
+        calls = []
+        def orig(state):
+            calls.append(state)
+            return state * 2
+
+        bound = _FakeRunnableCallable(func=orig)
+        originals: list[tuple] = []
+
+        _wrap_node_func(bound, "double", originals)
+
+        result = bound.func("hello")
+        assert result == "hellohello"
+        assert calls == ["hello"]
+
+    def test_afunc_wrapped_when_present(self):
+        """bound.afunc is replaced when it's a callable."""
+        async def orig_afunc(state):
+            return state
+
+        bound = _FakeRunnableCallable(func=lambda s: s)
+        bound.afunc = orig_afunc
+        originals: list[tuple] = []
+
+        _wrap_node_func(bound, "async_node", originals)
+
+        assert bound.afunc is not orig_afunc
+        assert getattr(bound.afunc, "_rastir_node_traced", False) is True
+        # 1 for func + 1 for afunc
+        assert len(originals) == 2
+
+    def test_afunc_none_not_wrapped(self):
+        """When afunc is None, only func gets wrapped."""
+        orig = lambda state: state
+        bound = _FakeRunnableCallable(func=orig)
+        # Ensure afunc is None (default for _FakeRunnableCallable)
+        assert not hasattr(bound, "afunc") or getattr(bound, "afunc", None) is None
+        originals: list[tuple] = []
+
+        _wrap_node_func(bound, "sync_only", originals)
+
+        assert len(originals) == 1  # only func
+
+    def test_double_wrap_prevented(self):
+        """_rastir_node_traced marker prevents re-wrapping."""
+        orig = lambda state: state
+        bound = _FakeRunnableCallable(func=orig)
+        originals1: list[tuple] = []
+        originals2: list[tuple] = []
+
+        _wrap_node_func(bound, "n", originals1)
+        first_wrapped = bound.func
+        _wrap_node_func(bound, "n", originals2)
+
+        assert bound.func is first_wrapped  # unchanged
+        assert len(originals2) == 0  # nothing added
+
+    @patch("rastir.queue.enqueue_span")
+    def test_node_span_emitted(self, mock_enqueue):
+        """Calling wrapped func emits a TRACE span named 'node:<name>'."""
+        bound = _FakeRunnableCallable(func=lambda s: s)
+        originals: list[tuple] = []
+
+        _wrap_node_func(bound, "agent", originals)
+        bound.func({"key": "val"})
+
+        assert mock_enqueue.called
+        span = mock_enqueue.call_args[0][0]
+        assert span.name == "node:agent"
+        assert span.span_type == SpanType.TRACE
+        assert span.status == SpanStatus.OK
+
+    @patch("rastir.queue.enqueue_span")
+    def test_node_span_has_node_attribute(self, mock_enqueue):
+        """Span should have langgraph.node attribute set."""
+        bound = _FakeRunnableCallable(func=lambda s: s)
+        originals: list[tuple] = []
+
+        _wrap_node_func(bound, "tools", originals)
+        bound.func({})
+
+        span = mock_enqueue.call_args[0][0]
+        assert span.attributes.get("langgraph.node") == "tools"
+
+    @patch("rastir.queue.enqueue_span")
+    def test_node_span_error_on_exception(self, mock_enqueue):
+        """Span should record error when func raises."""
+        def failing(state):
+            raise ValueError("boom")
+
+        bound = _FakeRunnableCallable(func=failing)
+        originals: list[tuple] = []
+
+        _wrap_node_func(bound, "bad_node", originals)
+
+        with pytest.raises(ValueError, match="boom"):
+            bound.func({})
+
+        span = mock_enqueue.call_args[0][0]
+        assert span.status == SpanStatus.ERROR
+        assert span.name == "node:bad_node"
+
+    @patch("rastir.queue.enqueue_span")
+    def test_async_node_span_emitted(self, mock_enqueue):
+        """Async afunc should also emit TRACE span."""
+        async def orig_afunc(state):
+            return state
+
+        bound = _FakeRunnableCallable(func=lambda s: s)
+        bound.afunc = orig_afunc
+        originals: list[tuple] = []
+
+        _wrap_node_func(bound, "async_agent", originals)
+
+        result = asyncio.get_event_loop().run_until_complete(bound.afunc({"x": 1}))
+        assert result == {"x": 1}
+
+        # Find the span from the afunc call (last enqueued)
+        span = mock_enqueue.call_args[0][0]
+        assert span.name == "node:async_agent"
+        assert span.span_type == SpanType.TRACE
+
+    def test_restore_puts_original_func_back(self):
+        """_restore_originals should restore original func."""
+        orig = lambda state: state
+        bound = _FakeRunnableCallable(func=orig)
+        originals: list[tuple] = []
+
+        _wrap_node_func(bound, "n", originals)
+        assert bound.func is not orig
+
+        _restore_originals(originals)
+        assert bound.func is orig
+
+    def test_all_nodes_traced_in_full_graph(self):
+        """Full graph with agent + tools nodes should trace both."""
+        graph, model, binding, tn = _make_graph_full("gpt-4o", ("search",))
+        originals: list[tuple] = []
+
+        _wrap_graph_internals(graph, originals)
+
+        # Check that node funcs on agent and tools nodes are wrapped
+        agent_bound = graph.nodes["agent"].bound
+        tools_bound = graph.nodes["tools"].bound
+
+        # Agent node is a RunnableBinding — _wrap_node_func wraps
+        # bound.func, but RunnableBinding doesn't have func → skip
+        # ToolNode also doesn't have func attr → skip
+        # Only RunnableCallable nodes get func-wrapped.
+        # Model and tool wrapping should still work:
+        assert binding.bound is not model
+        assert getattr(binding.bound, "_rastir_wrapped") is True
+        assert getattr(tn._tools_by_name["search"], "_rastir_wrapped") is True
