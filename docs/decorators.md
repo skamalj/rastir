@@ -6,11 +6,124 @@ nav_order: 3
 
 # Decorator Reference
 
-Rastir provides six semantic decorators. All support both sync and async functions. Decorators never perform network I/O — they emit spans to an internal queue that is flushed by a background exporter.
+Rastir provides six **core** decorators for manual instrumentation, plus three **framework** decorators that auto-discover and wrap everything inside a framework's agent loop. All support both sync and async functions.
 
 ---
 
-## @trace
+## Which Decorator Should I Use?
+
+| Scenario | Decorator | What it does |
+|----------|-----------|-------------|
+| Building with **LangGraph** | `@langgraph_agent` | Auto-discovers LLMs, tools, and nodes inside the compiled graph. **No manual wrapping needed.** |
+| Building with **CrewAI** | `@crew_kickoff` | Auto-discovers LLMs and tools on every agent in the Crew. Optional MCP injection. |
+| Building with **LlamaIndex** | `@llamaindex_agent` | Creates the agent span; you pre-wrap LLMs/tools with `wrap()`. |
+| Building your **own agent loop** | `@agent` + `@llm` + `@tool` | Full manual control — you decorate each function yourself. |
+| **Simple tracing** (no agent) | `@trace` | General-purpose span for any function. |
+| **Standalone metrics** only | `@metric` | Prometheus counters/histograms, no tracing. |
+
+**Rule of thumb:** If you're using LangGraph, CrewAI, or LlamaIndex — use the corresponding framework decorator. It does all the heavy lifting. Use `@agent` / `@llm` / `@tool` only when you're calling LLM APIs directly without a framework.
+
+---
+
+## Framework Decorators
+
+### @langgraph_agent
+
+**Purpose:** Instrument a LangGraph compiled graph. Auto-discovers all chat models, tools, and graph nodes — wraps them for tracing and restores originals after execution.
+
+```python
+from rastir import langgraph_agent
+from langgraph.prebuilt import create_react_agent
+
+@langgraph_agent(agent_name="react")
+def run(query):
+    graph = create_react_agent(model, tools)
+    return graph.invoke({"messages": [("user", query)]})
+```
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `agent_name` | `str` | Function name | Agent identity label |
+
+**What gets auto-discovered:**
+- Graph nodes → `TRACE` spans (`node:<name>`)
+- Chat models → `LLM` spans with token/latency metrics
+- Tools in `ToolNode` → `TOOL` spans
+
+**Supports:** bare `@langgraph_agent` or `@langgraph_agent(...)`, sync/async, graph as argument or in closure.
+
+→ Full details: [LangGraph framework page](frameworks/langgraph)
+
+---
+
+### @crew_kickoff
+
+**Purpose:** Instrument a CrewAI Crew. Auto-discovers each agent's LLM and tools, wraps them before `kickoff()`, and restores after.
+
+```python
+from rastir import crew_kickoff
+
+@crew_kickoff(agent_name="research_crew", mcp=session)
+def run(crew):
+    return crew.kickoff()
+```
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `agent_name` | `str` | Function name | Agent identity label |
+| `mcp` | session / list / dict | `None` | MCP session(s) to inject as CrewAI tools |
+
+**What gets auto-discovered:**
+- Each agent's `llm` → `LLM` spans
+- Each agent's `tools` → `TOOL` spans
+- MCP tools → converted to CrewAI `BaseTool` and injected
+
+**Supports:** bare `@crew_kickoff` or `@crew_kickoff(...)`, sync/async, per-agent MCP mapping via dict.
+
+→ Full details: [CrewAI framework page](frameworks/crewai)
+
+---
+
+### @llamaindex_agent
+
+**Purpose:** Create an agent span around LlamaIndex agent execution. You pre-wrap LLMs and tools with `wrap()` before creating the agent.
+
+```python
+from rastir import llamaindex_agent, wrap
+from llama_index.core.agent import ReActAgent
+
+llm = wrap(OpenAI(model="gpt-4o"), span_type="llm")
+tools = [wrap(t, span_type="tool") for t in my_tools]
+agent = ReActAgent.from_tools(tools, llm=llm)
+
+@llamaindex_agent(agent_name="qa_agent")
+def run(agent, query):
+    return agent.chat(query)
+```
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `agent_name` | `str` | Function name | Agent identity label |
+
+**Note:** Unlike `@langgraph_agent` and `@crew_kickoff`, LlamaIndex requires explicit `wrap()` calls on LLMs and tools. The decorator provides the outer agent span and restore-after-execution.
+
+→ Full details: [LlamaIndex framework page](frameworks/llamaindex)
+
+---
+
+## Core Decorators
+
+These decorators are for **manual instrumentation** — use them when you're calling LLM APIs directly without a framework, or when building a custom agent loop.
+
+---
+
+### @trace
 
 **Purpose:** Create a root or general span. Entry point for request tracing.
 
@@ -44,9 +157,9 @@ def process(data: dict) -> dict:
 
 ---
 
-## @agent
+### @agent
 
-**Purpose:** Mark a function as an agent entry point. Sets agent identity so child `@llm`, `@tool`, and `@retrieval` spans inherit the `agent` label in their Prometheus metrics.
+**Purpose:** Mark a function as an agent entry point. Use this when you're building your own agent loop (calling LLM APIs directly). If you're using LangGraph, CrewAI, or LlamaIndex, use the corresponding framework decorator instead — it handles everything automatically. Sets agent identity so child `@llm`, `@tool`, and `@retrieval` spans inherit the `agent` label in their Prometheus metrics.
 
 ```python
 from rastir import agent
@@ -74,7 +187,7 @@ def run_research(query: str) -> str:
 
 ---
 
-## @llm
+### @llm
 
 **Purpose:** Create an LLM span. Automatically extracts model, provider, token usage, and finish reason from the return value using the adapter pipeline.
 
@@ -115,7 +228,7 @@ def ask_with_hints(query: str) -> str:
 
 ---
 
-## @tool
+### @tool
 
 **Purpose:** Track tool/function call invocations within an agent pipeline.
 
@@ -145,7 +258,7 @@ def google_search(query: str) -> list[str]:
 
 ---
 
-## @retrieval
+### @retrieval
 
 **Purpose:** Track retrieval/vector search operations.
 
@@ -171,7 +284,7 @@ def vector_search(query: str, top_k: int = 5) -> list[str]:
 
 ---
 
-## @metric
+### @metric
 
 **Purpose:** Emit generic function-level Prometheus metrics. Independent of tracing — does not create spans.
 
