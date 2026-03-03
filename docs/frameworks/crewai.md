@@ -62,9 +62,7 @@ research_crew (AGENT)
 
 ## Why a Dedicated Decorator?
 
-CrewAI controls the agent loop internally — your code calls `crew.kickoff()` and CrewAI manages all LLM calls, tool invocations, and task delegation inside. Standard Rastir decorators like `@llm` and `@tool` can't be applied to CrewAI's internal code.
-
-`@crew_kickoff` solves this by reaching into the `Crew` object at runtime that is passed as argument, wrapping each agent's LLM and tools before `kickoff()` runs, and restoring originals after.
+CrewAI controls the agent loop internally — your code calls `crew.kickoff()` and CrewAI manages all LLM calls, tool invocations, and task delegation inside. `@crew_kickoff` wraps each agent's LLM and tools before `kickoff()` runs, and restores originals after.
 
 ---
 
@@ -241,17 +239,6 @@ result3 = run(crew)
 
 ---
 
-## MCP Tool Conversion Details
-
-When `mcp=` is provided, MCP tools are automatically converted to CrewAI `BaseTool` subclasses:
-
-1. **Input schema** → Pydantic model via `create_model()` — required/optional fields preserved from JSON Schema
-2. **`_run()`** → calls `session.call_tool(name, args)` synchronously (CrewAI runs sync internally)
-3. **Trace context** → if the session is wrapped with `wrap()`, trace IDs are injected automatically
-4. **Caching** → `list_tools()` is called once per session and cached; shared sessions only fetch once
-
----
-
 ## Restore After Execution
 
 After `crew.kickoff()` completes (success or error), `@crew_kickoff` restores:
@@ -303,33 +290,5 @@ All child spans inherit the `agent` label, so Prometheus metrics are grouped by 
 | `rastir_tool_calls_total{tool_name, agent}` | Wrapped tool `run()` |
 | `rastir_duration_seconds{span_type="tool"}` | Tool invocation latency |
 | `rastir_duration_seconds{span_type="agent"}` | Entire crew kickoff latency |
-
----
-
-## Limitations and Edge Cases
-
-### Covered Patterns
-
-| Pattern | Status |
-|---------|--------|
-| Basic `crew.kickoff()` | ✅ Fully auto-discovered |
-| Multiple agents with different LLMs | ✅ Each wrapped independently |
-| Agent with multiple tools | ✅ All tools wrapped |
-| MCP tools — single session | ✅ Injected into all agents |
-| MCP tools — list of sessions | ✅ Tools from all sessions combined |
-| MCP tools — per-agent dict | ✅ Matched by agent `role` |
-| Async `kickoff_async()` | ✅ Async code path |
-| Crew reuse across calls | ✅ Originals restored after each call |
-| Already-wrapped LLMs/tools | ✅ Skipped, no double-wrap |
-
-### Known Constraints
-
-| Scenario | Behaviour |
-|----------|-----------|
-| `Crew` not passed as an argument | LLMs/tools won't be discovered — always pass the Crew as an argument |
-| Agents created dynamically inside `kickoff()` | Not discoverable — define agents before calling the decorated function |
-| CrewAI agents that don't use the standard `llm` attribute | LLM won't be discovered |
-| CrewAI agents that don't use the standard `tools` list | Tools won't be discovered |
-| MCP dict key doesn't match agent `role` exactly | Tools won't be injected for that agent |
 
 **Recommendation:** Always pass the `Crew` object as an argument to the decorated function. Define all agents and their LLMs/tools before the decorated function call.

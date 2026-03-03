@@ -46,9 +46,7 @@ qa_agent (AGENT)
 
 ## Why `wrap()` Is Required
 
-LlamaIndex has a clean object model where agents expose `.llm` and `._tools` attributes directly. However, LlamaIndex LLMs don't inherit from a common base class with a known module path (unlike LangChain's `BaseChatModel`), making reliable auto-detection fragile.
-
-Instead, you wrap LLMs and tools explicitly with `wrap()`, which is unambiguous and works with every LlamaIndex LLM provider and tool type — including MCP tools from `McpToolSpec`.
+You wrap LLMs and tools explicitly with `wrap()` before passing them to the agent. This works with every LlamaIndex LLM provider and tool type — including MCP tools from `McpToolSpec`.
 
 The `@llamaindex_agent` decorator then:
 1. Creates an `AGENT` span around the entire execution
@@ -290,32 +288,4 @@ All child spans inherit the `agent` label, so Prometheus metrics are grouped by 
 | `rastir_duration_seconds{span_type="tool"}` | Tool invocation latency |
 | `rastir_duration_seconds{span_type="agent"}` | Entire agent execution latency |
 
----
-
-## Limitations and Edge Cases
-
-### Covered Patterns
-
-| Pattern | Status |
-|---------|--------|
-| ReActAgent | ✅ |
-| OpenAIAgent | ✅ |
-| FunctionCallingAgent | ✅ |
-| StructuredPlannerAgent | ✅ |
-| AgentRunner | ✅ |
-| Custom BaseAgent subclass | ✅ Via MRO walk |
-| MCP tools via McpToolSpec | ✅ Treated as regular FunctionTool |
-| Async `achat()` / `astream_chat()` | ✅ |
-| Agent reuse across calls | ✅ Originals restored |
-| Already-wrapped LLMs/tools | ✅ Skipped |
-
-### Known Constraints
-
-| Scenario | Behaviour |
-|----------|-----------|
-| Agent not passed as an argument | LLM/tools not auto-wrapped by the decorator — but pre-wrapping with `wrap()` still works |
-| LLM not on standard `._llm` or `.llm` attribute | Won't be discovered by decorator — pre-wrap with `wrap()` |
-| Tools not on standard `._tools` or `.tools` attribute | Won't be discovered by decorator — pre-wrap with `wrap()` |
-| Agent class not in recognised list and not subclass of BaseAgent | Won't be detected — but pre-wrapped components still emit spans |
-
-**Key difference from LangGraph/CrewAI:** Because LlamaIndex requires explicit `wrap()` calls on LLMs and tools, the decorator is mainly responsible for the outer agent span and restore-after-execution. The wrapping is done upfront by the user, making it more explicit but also more predictable — there are no edge cases in discovery because you control exactly what gets wrapped.
+**Tip:** Always pass the agent as an argument to the decorated function and pre-wrap LLMs and tools with `wrap()` for predictable results.

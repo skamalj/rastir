@@ -74,32 +74,20 @@ def run(graph): ...
 
 ## What Gets Auto-Discovered
 
-When the decorated function is called, `@langgraph_agent` scans all arguments for LangGraph `CompiledGraph` objects. For each graph found, it walks the internal structure to discover and wrap:
+When the decorated function is called, `@langgraph_agent` scans all arguments for LangGraph `CompiledGraph` objects. For each graph found, it automatically discovers and wraps:
 
 ### 1. Graph Nodes → TRACE spans
 
-Every node in `graph.nodes` (except `__start__`) gets its function wrapped with a `TRACE` span named `node:<name>`. This gives you execution-level visibility into the graph flow.
+Every node in the graph (except `__start__`) gets a `TRACE` span named `node:<name>`, giving you execution-level visibility into the graph flow.
 
 | Attribute | Value |
 |-----------|-------|
 | Span name | `node:<node_name>` |
 | Span type | `TRACE` |
-| `langgraph.node` | The node name |
-
-Both `func` (sync) and `afunc` (async) are wrapped if present.
 
 ### 2. Chat Models → LLM spans
 
-The decorator walks each node's Runnable chain to find `BaseChatModel` instances:
-
-| Location found | How discovered |
-|---|---|
-| `RunnableBinding.bound` | Direct attribute check |
-| `RunnableSequence.first / .last / .middle` | Recursive walk |
-| `RunnableCallable.func` closure | `__closure__` cell inspection |
-| `RunnableCallable.func` globals | `__globals__` by `co_names` check |
-
-Each chat model is wrapped with:
+All `BaseChatModel` instances used inside the graph are discovered and wrapped automatically.
 
 | Attribute | Value |
 |-----------|-------|
@@ -109,7 +97,7 @@ Each chat model is wrapped with:
 
 ### 3. Tools → TOOL spans
 
-`ToolNode` instances are detected by class name. Each tool in `toolnode._tools_by_name` is wrapped:
+All tools inside the graph's `ToolNode` are discovered and wrapped.
 
 | Attribute | Value |
 |-----------|-------|
@@ -138,8 +126,6 @@ def run(query):
     return graph.invoke({"messages": [("user", query)]})
 ```
 
-**How discovery works:** The model is captured in a closure inside the agent node's function. Rastir inspects `func.__closure__` cells to find the `RunnableBinding(bound=ChatOpenAI)` and wraps its `.bound`.
-
 ### Pattern 2: Graph passed as argument
 
 ```python
@@ -152,14 +138,12 @@ def run(graph, query):
 result = run(graph, "Hello")
 ```
 
-**How discovery works:** The decorator scans all function arguments for `CompiledGraph` instances.
-
-### Pattern 3: Manual `StateGraph` with global model
+### Pattern 3: Manual `StateGraph` with model
 
 ```python
 from langgraph.graph import StateGraph
 
-model = ChatOpenAI(model="gpt-4o")  # module-level variable
+model = ChatOpenAI(model="gpt-4o")
 
 def agent_node(state):
     return {"messages": [model.invoke(state["messages"])]}
@@ -179,8 +163,6 @@ def run(query):
     return compiled.invoke({"messages": [("user", query)]})
 ```
 
-**How discovery works:** The model is a module-level variable. Rastir inspects `agent_node.__globals__` by looking at `agent_node.__code__.co_names` to find only the global names the function actually references. It finds `model` → detects it as a `BaseChatModel` subclass → wraps it.
-
 ### Pattern 4: Manual `StateGraph` with closure model
 
 ```python
@@ -199,32 +181,7 @@ def run(query):
     return compiled.invoke({"messages": [("user", query)]})
 ```
 
-**How discovery works:** The model is captured in `agent_node.__closure__`. Rastir walks the closure cells, finds the `ChatOpenAI` instance, and wraps it.
-
-### Pattern 5: Model inside RunnableSequence
-
-```python
-from langchain_core.runnables import RunnableSequence
-
-prompt = ChatPromptTemplate.from_messages([...])
-model = ChatOpenAI(model="gpt-4o")
-chain = prompt | model  # creates RunnableSequence
-
-def agent_node(state):
-    return {"messages": [chain.invoke(state["messages"])]}
-
-graph = StateGraph(State)
-graph.add_node("agent", agent_node)
-compiled = graph.compile()
-
-@langgraph_agent
-def run(query):
-    return compiled.invoke({"messages": [("user", query)]})
-```
-
-**How discovery works:** Rastir walks the closure cells, finds the `RunnableSequence`, then recursively walks `.first` and `.last` to find the model inside a `RunnableBinding.bound`.
-
-### Pattern 6: Async graph
+### Pattern 5: Async graph
 
 ```python
 @langgraph_agent(agent_name="async_react")
@@ -233,12 +190,11 @@ async def run(query):
     return await graph.ainvoke({"messages": [("user", query)]})
 ```
 
-The decorator auto-detects `async def` and uses the async code path. All wrapping and discovery is identical — `afunc` is also traced in addition to `func`.
+The decorator auto-detects `async def` and uses the async code path.
 
-### Pattern 7: Graph created outside the function
+### Pattern 6: Graph created outside the function
 
 ```python
-# Graph compiled once at module startup
 graph = create_react_agent(model, tools)
 
 @langgraph_agent(agent_name="react")
@@ -246,9 +202,7 @@ def run(query):
     return graph.invoke({"messages": [("user", query)]})
 ```
 
-**Important:** This works because the graph is passed implicitly via the function's closure. The decorator scans all arguments first — if the graph is found there, it's used. Otherwise, the compiled graph referenced inside the function body still gets invoked with the pre-discovered wrapped models.
-
-**Note:** If the graph is not passed as an argument AND is only referenced inside the function body (not as a closure or global that Rastir scans), the LLMs/tools won't be auto-discovered. To be safe, pass the graph as an argument:
+**Tip:** For most reliable discovery, pass the graph as an argument:
 
 ```python
 @langgraph_agent(agent_name="react")
@@ -258,9 +212,9 @@ def run(graph, query):
 run(graph, "Hello")
 ```
 
-### Pattern 8: MCP tools
+### Pattern 7: MCP tools
 
-LangGraph handles MCP tools natively — they're converted to LangChain tools by the framework. Rastir wraps them like any other tool inside `ToolNode`.
+LangGraph handles MCP tools natively — they're converted to LangChain tools by the framework. Rastir wraps them like any other tool.
 
 ```python
 from langchain_mcp_adapters.tools import load_mcp_tools
@@ -273,58 +227,16 @@ def run(query):
     return graph.invoke({"messages": [("user", query)]})
 ```
 
-No special MCP handling is needed — `@langgraph_agent` wraps MCP-sourced tools the same way it wraps any tool in the `ToolNode._tools_by_name` dict.
-
----
-
-## How Discovery Works Under the Hood
-
-The decorator walks the compiled graph's internal structure:
-
-```
-graph.nodes = {
-    "__start__": PregelNode(bound=RunnableCallable)    ← SKIPPED
-    "agent":     PregelNode(bound=RunnableCallable)    ← WALKED
-    "tools":     PregelNode(bound=ToolNode)            ← WALKED
-}
-```
-
-For each node's `.bound`:
-
-1. **`_wrap_runnable(bound)`** — pattern-matches on `type(obj).__name__`:
-   - `ToolNode` → wrap each tool in `_tools_by_name`
-   - `RunnableBinding` → check `.bound` — if `BaseChatModel`, wrap it; else recurse
-   - `RunnableSequence` → recurse into `.first`, `.last`, `.middle`
-   - `RunnableCallable` → inspect `.func`'s closures and globals
-
-2. **`_wrap_node_func(bound, name)`** — replace `bound.func` with a traced wrapper that emits a `TRACE` span. Also wraps `bound.afunc` if present.
-
-**Order matters:** LLM/tool discovery runs *before* node func wrapping, because the traced wrapper would replace the original function and its closure/globals wouldn't be traversable.
+No special MCP handling needed.
 
 ---
 
 ## Restore After Execution
 
 After the decorated function completes (success or error), all original objects are restored:
-- Chat models put back on `RunnableBinding.bound` or function globals
-- Tools put back in `ToolNode._tools_by_name`
-- Node functions put back on `bound.func` / `bound.afunc`
-
-This means:
+- Chat models, tools, and node functions are put back to their originals
 - The graph can be reused across multiple calls
-- No accumulated wrapping layers from repeated calls
 - Originals are restored even if an exception is raised
-
----
-
-## Double-Wrap Prevention
-
-All wrapping operations check for marker attributes before wrapping:
-- Chat models: `_rastir_wrapped`
-- Tools: `_rastir_wrapped`
-- Node functions: `_rastir_node_traced`
-
-Calling `@langgraph_agent` on a function that uses an already-wrapped graph is safe — no double wrapping occurs.
 
 ---
 
@@ -334,7 +246,6 @@ If the decorated function raises an exception:
 - The agent span records the error (type + message)
 - Span status is set to `ERROR`
 - The exception is re-raised unchanged
-- All originals are still restored (via `finally` block)
 
 ---
 
@@ -373,34 +284,4 @@ All child spans inherit the `agent` label from the outer span, so Prometheus met
 | `rastir_duration_seconds{span_type="tool"}` | Tool invocation latency |
 | `rastir_duration_seconds{span_type="agent"}` | Entire graph execution latency |
 
----
-
-## Limitations and Edge Cases
-
-### Covered Patterns
-
-All common LangGraph patterns are supported:
-
-| Pattern | Status |
-|---------|--------|
-| `create_react_agent` | ✅ Fully auto-discovered |
-| Manual `StateGraph` with global model | ✅ Discovered via `__globals__` |
-| Manual `StateGraph` with closure model | ✅ Discovered via `__closure__` |
-| Model inside `RunnableSequence` | ✅ Recursive walk through `.first`/`.last`/`.middle` |
-| Model inside `RunnableBinding` | ✅ Direct `.bound` check |
-| `ToolNode` with multiple tools | ✅ All tools in `_tools_by_name` wrapped |
-| MCP tools via `langchain_mcp_adapters` | ✅ Treated as regular tools |
-| Async `ainvoke` / `astream` | ✅ Both sync and async paths |
-| Graph reuse across calls | ✅ Originals restored after each call |
-| Nested graphs | ✅ If the inner graph is an argument or in a closure |
-
-### Known Constraints
-
-| Scenario | Behaviour |
-|----------|-----------|
-| Graph not passed as argument and not in closure/globals | LLMs/tools won't be discovered — pass the graph as an argument |
-| Custom Runnable subclasses (not `RunnableBinding`/`RunnableSequence`/`RunnableCallable`) | May not be walked — add a fallback `.bound`/`.first` attribute if needed |
-| Models constructed dynamically inside a node function body (not captured in closure or globals) | Not discoverable — move to closure or module scope |
-| `__start__` node | Intentionally skipped |
-
-**Recommendation:** Always pass the compiled graph as an argument to the decorated function. This guarantees discovery works regardless of how the graph was constructed.
+**Recommendation:** Always pass the compiled graph as an argument to the decorated function for most reliable results.
