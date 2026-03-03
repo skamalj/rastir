@@ -335,6 +335,13 @@ def llm(
         # enrichment and prompt capture.
         _fn_sig = inspect.signature(fn)
 
+        # Lazy import to avoid circular dependency
+        from rastir.llm_discovery import (
+            discover_llm_clients,
+            install_interceptors,
+            restore_originals,
+        )
+
         if is_async_gen or (streaming is True and is_async):
 
             @functools.wraps(fn)
@@ -346,6 +353,9 @@ def llm(
                 _extract_request_metadata(span, args, bound_kw)
                 _capture_prompt_text(span, args, bound_kw)
                 span.set_attribute("streaming", True)
+                # Auto-discover LLM clients and install interceptors
+                _disc_targets = discover_llm_clients(fn, args, kwargs)
+                _disc_originals = install_interceptors(_disc_targets, span)
                 collected_text: list[str] = []
                 first_chunk_seen = False
                 try:
@@ -364,6 +374,7 @@ def llm(
                     span.finish(SpanStatus.ERROR)
                     raise
                 finally:
+                    restore_originals(_disc_originals)
                     if collected_text and span.attributes.get("evaluation_enabled"):
                         span.set_attribute("completion_text", "".join(collected_text))
                     _finalize_llm_span(span)
@@ -383,6 +394,9 @@ def llm(
                 _extract_request_metadata(span, args, bound_kw)
                 _capture_prompt_text(span, args, bound_kw)
                 span.set_attribute("streaming", True)
+                # Auto-discover LLM clients and install interceptors
+                _disc_targets = discover_llm_clients(fn, args, kwargs)
+                _disc_originals = install_interceptors(_disc_targets, span)
                 collected_text: list[str] = []
                 first_chunk_seen = False
                 try:
@@ -400,6 +414,7 @@ def llm(
                     span.finish(SpanStatus.ERROR)
                     raise
                 finally:
+                    restore_originals(_disc_originals)
                     if collected_text and span.attributes.get("evaluation_enabled"):
                         span.set_attribute("completion_text", "".join(collected_text))
                     _finalize_llm_span(span)
@@ -421,6 +436,9 @@ def llm(
                 # Propagate model/provider to context early so child
                 # @tool / @retrieval spans can inherit them.
                 _propagate_model_provider_to_context(span)
+                # Auto-discover LLM clients and install interceptors
+                _disc_targets = discover_llm_clients(fn, args, kwargs)
+                _disc_originals = install_interceptors(_disc_targets, span)
                 try:
                     result = await fn(*args, **kwargs)
                     _extract_llm_metadata(span, result)
@@ -432,6 +450,7 @@ def llm(
                     span.finish(SpanStatus.ERROR)
                     raise
                 finally:
+                    restore_originals(_disc_originals)
                     _finalize_llm_span(span)
                     end_span(token)
                     enqueue_span(span)
@@ -451,6 +470,9 @@ def llm(
                 # Propagate model/provider to context early so child
                 # @tool / @retrieval spans can inherit them.
                 _propagate_model_provider_to_context(span)
+                # Auto-discover LLM clients and install interceptors
+                _disc_targets = discover_llm_clients(fn, args, kwargs)
+                _disc_originals = install_interceptors(_disc_targets, span)
                 try:
                     result = fn(*args, **kwargs)
                     _extract_llm_metadata(span, result)
@@ -462,6 +484,7 @@ def llm(
                     span.finish(SpanStatus.ERROR)
                     raise
                 finally:
+                    restore_originals(_disc_originals)
                     _finalize_llm_span(span)
                     end_span(token)
                     enqueue_span(span)

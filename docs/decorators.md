@@ -14,7 +14,11 @@ Rastir provides six **core** decorators for manual instrumentation, plus three *
 
 Understanding this difference is key to choosing the right decorator.
 
-**Core decorators** wrap **your function**. They record timing from function entry/exit, and `@llm` extracts metadata (model, tokens, cost) from the **return value** using the adapter pipeline. If your function strips the provider response and returns only a string, `@llm` gets no model/token data.
+**Core decorators** wrap **your function**. They record timing from function entry/exit. `@llm` uses a two-phase strategy:
+
+1. **Interceptor phase** — `@llm` scans the decorated function for known LLM client objects (OpenAI, Azure OpenAI, Anthropic, Google GenAI, Cohere, Mistral, Groq, LangChain, Bedrock) in arguments, closures, and globals. When found, the client's call method is temporarily monkey-patched so the interceptor sees the **full provider response** — model, tokens, cost — regardless of what your function returns. Interceptors are automatically removed after each call.
+
+2. **Return-value phase** — the adapter pipeline also inspects the return value. If your function returns the raw provider response, the adapter extracts metadata from it. If the interceptor already captured the data, the return-value phase is a no-op.
 
 **Framework decorators** reach inside the framework's objects and **monkey-patch the model/tool methods directly**. They always see the full provider response regardless of what your code does with it — model, tokens, cost, and latency are always captured.
 
@@ -26,7 +30,7 @@ Every span always records: **duration, status, trace_id, span_id, parent_span_id
 |-----------|------|:-----:|:--------:|:------:|:----:|:---------:|-----|
 | `@trace` | Core | — | — | — | — | — | Function execution only |
 | `@agent` | Core | — | — | — | — | — | Function execution only |
-| `@llm` | Core | ✅* | ✅* | ✅* | ✅* | — | Extracted from **return value** — requires raw provider response object |
+| `@llm` | Core | ✅ | ✅ | ✅ | ✅ | — | **Auto-discovers LLM clients** in args/closures/globals and intercepts their call methods. Also extracts from return value as fallback. |
 | `@tool` | Core | — | — | — | — | ✅ | Function execution only |
 | `@retrieval` | Core | — | — | — | — | — | Function execution only |
 | `@metric` | Core | — | — | — | — | — | Counters/histograms only, no spans |
@@ -34,20 +38,22 @@ Every span always records: **duration, status, trace_id, span_id, parent_span_id
 | `@crew_kickoff` | Framework | ✅ | ✅ | ✅ | ✅ | ✅ | **Wraps model/tool objects directly** — always captures full data |
 | `@llamaindex_agent` | Framework | ✅ | ✅ | ✅ | ✅ | ✅ | Uses `wrap()` on objects — same reliability as framework wrapping |
 
-_* Only if the function returns the raw provider response object (e.g. `ChatCompletion`). Returns a plain string → no metadata extracted. Use `@llm(model="...", provider="...")` to provide hints manually._
+_`@llm` auto-discovers client objects from: OpenAI, Azure OpenAI, Anthropic, Google GenAI, Cohere, Mistral, Groq, LangChain chat models, and Bedrock. If the client is in function arguments, closure variables, or module globals, the interceptor captures full metadata automatically._
 
-**Example — `@llm` loses metadata:**
+**Example — `@llm` auto-discovery in action:**
 
 ```python
-@llm
-def ask(query):
-    result = openai.chat.completions.create(model="gpt-4", messages=[...])
-    return result.choices[0].message.content  # ← plain string, no metadata extracted!
+client = OpenAI()
 
 @llm
-def ask_correct(query):
-    return openai.chat.completions.create(model="gpt-4", messages=[...])  # ← full object, adapter extracts everything
+def ask(query):
+    result = client.chat.completions.create(model="gpt-4", messages=[...])
+    return result.choices[0].message.content  # ← returns plain string
+    # Auto-discovery intercepts client.chat.completions.create() and
+    # captures model, tokens, cost from the full ChatCompletion response
 ```
+
+The interceptor works with clients passed as arguments, stored in closures, or defined as module-level globals. No configuration needed — just use `@llm`.
 
 ---
 
@@ -230,19 +236,31 @@ def run_research(query: str) -> str:
 
 ### @llm
 
-**Purpose:** Create an LLM span. Automatically extracts model, provider, token usage, and finish reason from the return value using the adapter pipeline.
+**Purpose:** Create an LLM span. Automatically discovers LLM client objects inside the decorated function and intercepts their call methods to capture model, provider, token usage, and finish reason — regardless of what your function returns.
+
+**Supported providers for auto-discovery:** OpenAI, Azure OpenAI, Anthropic, Google GenAI, Cohere, Mistral, Groq, LangChain chat models, Bedrock.
 
 ```python
 from rastir import llm
 
+# Client in closure — auto-discovered
+client = OpenAI()
+
 @llm
 def ask_gpt(query: str) -> str:
-    return openai.chat.completions.create(
+    resp = client.chat.completions.create(
         model="gpt-4",
         messages=[{"role": "user", "content": query}],
     )
+    return resp.choices[0].message.content  # returns plain text — metadata still captured
 
-# With explicit metadata (overrides adapter extraction)
+# Client as argument — also auto-discovered
+@llm
+def ask_anthropic(client, query: str) -> str:
+    resp = client.messages.create(model="claude-3-opus", messages=[...])
+    return resp.content[0].text  # metadata captured via interceptor
+
+# With explicit metadata hints (overrides auto-detection)
 @llm(model="gpt-4", provider="openai")
 def ask_with_hints(query: str) -> str:
     ...
