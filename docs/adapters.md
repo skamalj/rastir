@@ -152,7 +152,7 @@ graph.invoke() returns {"messages": [HumanMessage(...), AIMessage(...)]}
 ### Example Usage
 
 ```python
-from rastir import configure, agent, llm, tool
+from rastir import configure, agent, llm, trace
 from langgraph.graph import StateGraph, MessagesState, START, END
 
 configure(service="my-langgraph-app", push_url="http://localhost:8080")
@@ -162,7 +162,7 @@ configure(service="my-langgraph-app", push_url="http://localhost:8080")
 def chatbot(state: MessagesState):
     return {"messages": [model.invoke(state["messages"])]}
 
-@tool
+@trace
 def search(state: MessagesState):
     query = state["messages"][-1].tool_calls[0]["args"]["query"]
     return {"messages": [ToolMessage(content=results, tool_call_id=...)]}

@@ -78,9 +78,6 @@ def run(crew): ...
 
 @crew_kickoff(agent_name="my_crew")
 def run(crew): ...
-
-@crew_kickoff(agent_name="my_crew", mcp=session)
-def run(crew): ...
 ```
 
 **Parameters:**
@@ -88,7 +85,8 @@ def run(crew): ...
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `agent_name` | `str` | Function name | Name for the outer agent span |
-| `mcp` | session / list / dict | `None` | MCP session(s) to inject as CrewAI tools |
+
+**MCP tools:** CrewAI now handles MCP natively via `mcps=[]` on agents — no Rastir parameter needed.
 
 **Supports:**
 - Bare usage (`@crew_kickoff`) and parameterized (`@crew_kickoff(...)`)
@@ -171,44 +169,7 @@ async def run(crew):
 
 The decorator auto-detects `async def` and uses the async code path.
 
-### Pattern 5: MCP tools — single session (all agents)
-
-```python
-from rastir import crew_kickoff, wrap
-
-session = wrap(mcp_session)  # auto-detects MCP session
-
-@crew_kickoff(agent_name="my_crew", mcp=session)
-def run(crew):
-    return crew.kickoff()
-# All agents receive MCP tools from this session
-```
-
-### Pattern 6: MCP tools — list of sessions (all agents)
-
-```python
-@crew_kickoff(agent_name="my_crew", mcp=[research_session, data_session])
-def run(crew):
-    return crew.kickoff()
-# All agents receive tools from both sessions
-```
-
-### Pattern 7: MCP tools — per-agent dict mapping
-
-```python
-@crew_kickoff(
-    agent_name="my_crew",
-    mcp={"Researcher": research_session, "Writer": writer_session},
-)
-def run(crew):
-    return crew.kickoff()
-# Only "Researcher" gets tools from research_session
-# Only "Writer" gets tools from writer_session
-```
-
-The dict keys match on the agent's `role` attribute.
-
-### Pattern 8: Multiple Crews
+### Pattern 5: Multiple Crews
 
 ```python
 @crew_kickoff(agent_name="crew_a")

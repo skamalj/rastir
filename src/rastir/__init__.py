@@ -5,11 +5,11 @@ Captures metrics and traces, pushes to a collector server that exposes
 Prometheus metrics and OTLP traces.
 
 Usage:
-    from rastir import configure, trace, agent, llm, tool, retrieval, metric
+    from rastir import configure, trace, agent, llm, retrieval, metric
 
     # When using alongside LangChain/LangGraph, use _span aliases
-    # to avoid name collisions with langchain_core.tools.tool:
-    from rastir import configure, trace_span, agent_span, llm_span, tool_span
+    # to avoid name collisions with langchain_core names:
+    from rastir import configure, trace_span, agent_span, llm_span
 
     configure(service="my-app", env="production")
 
@@ -24,7 +24,7 @@ Usage:
 
 from rastir.config import configure
 from rastir.context import get_current_span
-from rastir.decorators import agent, llm, metric, retrieval, tool, trace
+from rastir.decorators import agent, llm, metric, retrieval, trace
 from rastir.pricing import PricingRegistry
 from rastir.remote import mcp_endpoint, wrap_mcp
 from rastir.transport import get_export_stats, stop_exporter
@@ -34,11 +34,10 @@ from rastir.langgraph_support import langgraph_agent
 from rastir.llamaindex_support import llamaindex_agent
 
 # _span aliases — preferred when using alongside LangChain/LangGraph
-# to avoid name collisions (e.g. langchain_core.tools.tool vs rastir.tool)
+# to avoid name collisions (e.g. langchain_core names)
 trace_span = trace
 agent_span = agent
 llm_span = llm
-tool_span = tool
 retrieval_span = retrieval
 metric_span = metric
 
@@ -49,7 +48,6 @@ __all__ = [
     "agent",
     "metric",
     "llm",
-    "tool",
     "retrieval",
     "wrap",
     "PricingRegistry",
@@ -57,7 +55,6 @@ __all__ = [
     "trace_span",
     "agent_span",
     "llm_span",
-    "tool_span",
     "retrieval_span",
     "metric_span",
     # remote tracing

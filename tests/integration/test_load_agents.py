@@ -67,7 +67,7 @@ from langchain_core.tools import tool as lc_tool
 from langgraph.graph import StateGraph, MessagesState, START, END
 from langgraph.prebuilt import ToolNode
 
-from rastir import agent, llm, tool
+from rastir import agent, llm, trace
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 3. Shared tools — each agent uses a subset
@@ -237,7 +237,7 @@ def invoke_graph(app, prompt: str):
     return result
 
 
-@tool(tool_name="format_report")
+@trace(name="format_report")
 def format_report(data: dict) -> str:
     """Simulated post-processing tool."""
     time.sleep(0.05)

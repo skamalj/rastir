@@ -50,16 +50,16 @@ from langchain_core.tools import tool
 from langgraph.graph import StateGraph, MessagesState, START, END
 from langgraph.prebuilt import ToolNode
 
-from rastir import agent, llm, tool as rastir_tool
+from rastir import agent, llm, trace as rastir_trace
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 3. Tools — ALL wrapped with Rastir @tool for tracing
+# 3. Tools — wrapped with Rastir @trace for tracing
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 # --- Travel Planner tools ---
 
 @tool
-@rastir_tool(tool_name="flight_search")
+@rastir_trace(name="flight_search")
 def flight_search(origin: str, destination: str) -> str:
     """Search for available flights between two airports."""
     time.sleep(0.2)
@@ -75,7 +75,7 @@ def flight_search(origin: str, destination: str) -> str:
 
 
 @tool
-@rastir_tool(tool_name="hotel_search")
+@rastir_trace(name="hotel_search")
 def hotel_search(city: str, nights: int) -> str:
     """Search for hotels in a city for a number of nights."""
     time.sleep(0.15)
@@ -93,7 +93,7 @@ def hotel_search(city: str, nights: int) -> str:
 
 
 @tool
-@rastir_tool(tool_name="currency_converter")
+@rastir_trace(name="currency_converter")
 def currency_converter(amount: float, from_currency: str, to_currency: str) -> str:
     """Convert an amount between currencies."""
     rates = {
@@ -108,7 +108,7 @@ def currency_converter(amount: float, from_currency: str, to_currency: str) -> s
 
 
 @tool
-@rastir_tool(tool_name="weather_forecast")
+@rastir_trace(name="weather_forecast")
 def weather_forecast(city: str, days: int) -> str:
     """Get weather forecast for a city for N days."""
     time.sleep(0.1)
@@ -128,7 +128,7 @@ def weather_forecast(city: str, days: int) -> str:
 # --- Portfolio Manager tools ---
 
 @tool
-@rastir_tool(tool_name="stock_lookup")
+@rastir_trace(name="stock_lookup")
 def stock_lookup(ticker: str) -> str:
     """Look up current stock data including price, market cap, and P/E ratio."""
     time.sleep(0.1)
@@ -151,7 +151,7 @@ def stock_lookup(ticker: str) -> str:
 
 
 @tool
-@rastir_tool(tool_name="portfolio_calculator")
+@rastir_trace(name="portfolio_calculator")
 def portfolio_calculator(expression: str) -> str:
     """Calculate a financial expression (e.g., portfolio value, returns)."""
     try:
@@ -162,7 +162,7 @@ def portfolio_calculator(expression: str) -> str:
 
 
 @tool
-@rastir_tool(tool_name="risk_assessment")
+@rastir_trace(name="risk_assessment")
 def risk_assessment(tickers: str) -> str:
     """Assess risk profile for a comma-separated list of stock tickers."""
     time.sleep(0.2)
@@ -181,7 +181,7 @@ def risk_assessment(tickers: str) -> str:
 
 
 @tool
-@rastir_tool(tool_name="market_news")
+@rastir_trace(name="market_news")
 def market_news(topic: str) -> str:
     """Get latest market news about a topic or sector."""
     time.sleep(0.15)
@@ -197,7 +197,7 @@ def market_news(topic: str) -> str:
 # --- Ops Engineer tools ---
 
 @tool
-@rastir_tool(tool_name="run_query")
+@rastir_trace(name="run_query")
 def run_query(sql: str) -> str:
     """Execute a SQL query against the operations database."""
     time.sleep(0.1)
@@ -227,7 +227,7 @@ def run_query(sql: str) -> str:
 
 
 @tool
-@rastir_tool(tool_name="metric_calculator")
+@rastir_trace(name="metric_calculator")
 def metric_calculator(expression: str) -> str:
     """Calculate operational metrics (SLA, percentages, rates, etc.)."""
     try:
@@ -238,7 +238,7 @@ def metric_calculator(expression: str) -> str:
 
 
 @tool
-@rastir_tool(tool_name="log_search")
+@rastir_trace(name="log_search")
 def log_search(service: str, level: str, minutes: int) -> str:
     """Search application logs for a service at a given level in last N minutes."""
     time.sleep(0.15)
@@ -261,7 +261,7 @@ def log_search(service: str, level: str, minutes: int) -> str:
 
 
 @tool
-@rastir_tool(tool_name="deployment_status")
+@rastir_trace(name="deployment_status")
 def deployment_status(service: str) -> str:
     """Get current deployment status for a service."""
     time.sleep(0.05)
@@ -374,7 +374,7 @@ def invoke_llm(app, prompt: str):
     return result
 
 
-@rastir_tool(tool_name="summarize_output")
+@rastir_trace(name="summarize_output")
 def summarize_output(data: dict) -> str:
     """Post-process agent output into a summary."""
     time.sleep(0.05)

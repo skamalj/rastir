@@ -26,7 +26,7 @@ import openai
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import rastir
-from rastir import agent, configure, llm, retrieval, stop_exporter, tool, trace
+from rastir import agent, configure, llm, retrieval, stop_exporter, trace
 
 # ── Configuration ─────────────────────────────────────────────────
 PUSH_URL = os.environ.get("RASTIR_PUSH_URL", "http://localhost:8080")
@@ -142,7 +142,7 @@ def failing_llm_call() -> str:
     raise RuntimeError("Simulated LLM provider timeout")
 
 
-@tool()
+@trace(name="run_tool")
 def run_tool(tool_name: str, input_data: str) -> str:
     """Simulated tool execution."""
     time.sleep(random.uniform(0.01, 0.08))
@@ -189,7 +189,7 @@ async def async_llm_call(prompt: str):
     return resp
 
 
-@tool(tool_name="async_processor")
+@trace(name="async_processor")
 async def async_tool_work(task_id: str) -> str:
     await asyncio.sleep(random.uniform(0.02, 0.06))
     return f"processed {task_id}"

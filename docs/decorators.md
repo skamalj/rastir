@@ -31,7 +31,6 @@ Every span always records: **duration, status, trace_id, span_id, parent_span_id
 | `@trace` | Core | — | — | — | — | — | Function execution only |
 | `@agent` | Core | — | — | — | — | — | Function execution only |
 | `@llm` | Core | ✅ | ✅ | ✅ | ✅ | — | **Auto-discovers LLM clients** in args/closures/globals and intercepts their call methods. Also extracts from return value as fallback. |
-| `@tool` | Core | — | — | — | — | ✅ | Function execution only |
 | `@retrieval` | Core | — | — | — | — | — | Function execution only |
 | `@metric` | Core | — | — | — | — | — | Counters/histograms only, no spans |
 | `@langgraph_agent` | Framework | ✅ | ✅ | ✅ | ✅ | ✅ | **Wraps model/tool objects directly** — always captures full data |
@@ -62,13 +61,13 @@ The interceptor works with clients passed as arguments, stored in closures, or d
 | Scenario | Decorator | What it does |
 |----------|-----------|-------------|
 | Building with **LangGraph** | `@langgraph_agent` | Auto-discovers LLMs, tools, and nodes inside the compiled graph. **No manual wrapping needed.** |
-| Building with **CrewAI** | `@crew_kickoff` | Auto-discovers LLMs and tools on every agent in the Crew. Optional MCP injection. |
+| Building with **CrewAI** | `@crew_kickoff` | Auto-discovers LLMs and tools on every agent in the Crew. MCP tools are handled natively by CrewAI via `mcps=[]`. |
 | Building with **LlamaIndex** | `@llamaindex_agent` | Creates the agent span; you pre-wrap LLMs/tools with `wrap()`. |
-| Building your **own agent loop** | `@agent` + `@llm` + `@tool` | Full manual control — you decorate each function yourself. |
+| Building your **own agent loop** | `@agent` + `@llm` | Full manual control — you decorate each function yourself. Use `@trace` for non-LLM functions. |
 | **Simple tracing** (no agent) | `@trace` | General-purpose span for any function. |
 | **Standalone metrics** only | `@metric` | Prometheus counters/histograms, no tracing. |
 
-**Rule of thumb:** If you're using LangGraph, CrewAI, or LlamaIndex — use the corresponding framework decorator. It does all the heavy lifting and always captures full metadata. Use `@agent` / `@llm` / `@tool` only when you're calling LLM APIs directly without a framework.
+**Rule of thumb:** If you're using LangGraph, CrewAI, or LlamaIndex — use the corresponding framework decorator. It does all the heavy lifting and always captures full metadata. Use `@agent` / `@llm` only when you're calling LLM APIs directly without a framework.
 
 ---
 
@@ -112,7 +111,7 @@ def run(query):
 ```python
 from rastir import crew_kickoff
 
-@crew_kickoff(agent_name="research_crew", mcp=session)
+@crew_kickoff(agent_name="research_crew")
 def run(crew):
     return crew.kickoff()
 ```
@@ -122,14 +121,14 @@ def run(crew):
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `agent_name` | `str` | Function name | Agent identity label |
-| `mcp` | session / list / dict | `None` | MCP session(s) to inject as CrewAI tools |
 
 **What gets auto-discovered:**
 - Each agent's `llm` → `LLM` spans
 - Each agent's `tools` → `TOOL` spans
-- MCP tools → converted to CrewAI `BaseTool` and injected
 
-**Supports:** bare `@crew_kickoff` or `@crew_kickoff(...)`, sync/async, per-agent MCP mapping via dict.
+**MCP tools:** CrewAI handles MCP natively via `mcps=[]` on agents — no Rastir parameter needed.
+
+**Supports:** bare `@crew_kickoff` or `@crew_kickoff(...)`, sync/async.
 
 → Full details: [CrewAI framework page](frameworks/crewai)
 
@@ -206,7 +205,7 @@ def process(data: dict) -> dict:
 
 ### @agent
 
-**Purpose:** Mark a function as an agent entry point. Use this when you're building your own agent loop (calling LLM APIs directly). If you're using LangGraph, CrewAI, or LlamaIndex, use the corresponding framework decorator instead — it handles everything automatically. Sets agent identity so child `@llm`, `@tool`, and `@retrieval` spans inherit the `agent` label in their Prometheus metrics.
+**Purpose:** Mark a function as an agent entry point. Use this when you're building your own agent loop (calling LLM APIs directly). If you're using LangGraph, CrewAI, or LlamaIndex, use the corresponding framework decorator instead — it handles everything automatically. Sets agent identity so child `@llm` and `@retrieval` spans inherit the `agent` label in their Prometheus metrics.
 
 ```python
 from rastir import agent
@@ -230,7 +229,7 @@ def run_research(query: str) -> str:
 
 **Span type:** `agent`
 
-**Agent label rule:** The `agent` label is injected into child LLM/tool/retrieval metrics **only** when the parent span is explicitly marked via `@agent`. If `@llm` or `@tool` runs under a plain `@trace`, no `agent` label is injected.
+**Agent label rule:** The `agent` label is injected into child LLM/retrieval metrics **only** when the parent span is explicitly marked via `@agent`. If `@llm` runs under a plain `@trace`, no `agent` label is injected.
 
 ---
 
@@ -284,36 +283,6 @@ def ask_with_hints(query: str) -> str:
 - `rastir_tokens_per_call{service, env, model, provider}`
 
 **Streaming:** Auto-detects when the function returns a generator or async generator. Token deltas are accumulated as the stream is consumed. Metrics are recorded after the stream completes.
-
----
-
-### @tool
-
-**Purpose:** Track tool/function call invocations within an agent pipeline.
-
-```python
-from rastir import tool
-
-@tool
-def search_database(query: str) -> list[dict]:
-    ...
-
-@tool(name="web_search")
-def google_search(query: str) -> list[str]:
-    ...
-```
-
-**Parameters:**
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `name` | `str` | Function name | Tool name (used as `tool_name` label) |
-
-**Span type:** `tool`
-
-**Metrics emitted:**
-- `rastir_tool_calls_total{service, env, tool_name, agent}`
-- `rastir_duration_seconds{service, env, span_type="tool"}`
 
 ---
 
@@ -382,8 +351,7 @@ def run_qa(query: str) -> str:
     result = search(query)
     return answer(query, result)
 
-@tool
-@retrieval  # Not typical — usually pick one
+@retrieval
 def search(query: str) -> list[str]:
     ...
 ```
@@ -393,7 +361,6 @@ The most common pattern is:
 ```
 @trace (or @agent)
   └── @llm
-  └── @tool
   └── @retrieval
 ```
 

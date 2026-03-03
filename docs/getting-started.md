@@ -59,7 +59,7 @@ export RASTIR_PUSH_URL=http://localhost:8080
 ### 2. Decorate Your Functions
 
 ```python
-from rastir import trace, agent, llm, tool, retrieval
+from rastir import trace, agent, llm, retrieval
 
 @trace
 def handle_request(query: str) -> str:
@@ -172,7 +172,7 @@ trace("handle_request")
 ### Full Code
 
 ```python
-from rastir import configure, trace, agent, llm, tool, retrieval
+from rastir import configure, trace, agent, llm, retrieval
 
 configure(
     service="research-assistant",
@@ -241,15 +241,15 @@ def synthesize(query: str, tool_results: dict, sources: list[str]) -> str:
 
 
 # ── Tools ─────────────────────────────────────────────
-@tool
+@trace
 def web_search(search_query: str) -> list[str]:
-    """Tool span — tracked as rastir_tool_calls_total{tool_name='web_search'}."""
+    """Trace span — tracked as a general function call."""
     return search_api.query(search_query, max_results=5)
 
 
-@tool
+@trace
 def calculator(expression: str) -> float:
-    """Tool span — tracked as rastir_tool_calls_total{tool_name='calculator'}."""
+    """Trace span — tracked as a general function call."""
     return eval_expression(expression)
 
 
@@ -271,10 +271,10 @@ TraceID: abc123
 │  └─ research_agent         type=agent     status=OK   dur=2.2s
 │     ├─ plan_step           type=llm       status=OK   dur=0.8s
 │     │   model=gpt-4  provider=openai  tokens_in=45  tokens_out=32
-│     ├─ web_search          type=tool      status=OK   dur=0.5s
-│     │   tool_name=web_search  agent=research_agent
-│     ├─ calculator          type=tool      status=OK   dur=0.01s
-│     │   tool_name=calculator  agent=research_agent
+│     ├─ web_search          type=trace     status=OK   dur=0.5s
+│     │   agent=research_agent
+│     ├─ calculator          type=trace     status=OK   dur=0.01s
+│     │   agent=research_agent
 │     ├─ fetch_sources       type=retrieval status=OK   dur=0.3s
 │     │   agent=research_agent
 │     └─ synthesize          type=llm       status=OK   dur=1.1s
@@ -283,8 +283,6 @@ TraceID: abc123
 
 Prometheus metrics emitted:
 - `rastir_llm_calls_total{model="gpt-4", provider="openai", agent="research_agent"}` → 2
-- `rastir_tool_calls_total{tool_name="web_search", agent="research_agent"}` → 1
-- `rastir_tool_calls_total{tool_name="calculator", agent="research_agent"}` → 1
 - `rastir_retrieval_calls_total{agent="research_agent"}` → 1
 - `rastir_tokens_input_total{model="gpt-4"}` → 255
 - `rastir_tokens_output_total{model="gpt-4"}` → 117
@@ -317,7 +315,7 @@ def generate_code(task: str) -> str:
         messages=[{"role": "user", "content": f"Write code: {task}"}],
     )
 
-@tool
+@trace
 def run_code(code: str) -> str:
     return sandbox.execute(code)
 ```
@@ -329,11 +327,11 @@ supervisor (agent)
  ├─ plan_task (llm)
  ├─ research_agent (agent)        ← sub-agent
  │   ├─ plan_step (llm)
- │   ├─ web_search (tool)
+ │   ├─ web_search (trace)
  │   └─ synthesize (llm)
  ├─ coding_agent (agent)          ← sub-agent
  │   ├─ generate_code (llm)
- │   └─ run_code (tool)
+ │   └─ run_code (trace)
  └─ combine_results (llm)
 ```
 

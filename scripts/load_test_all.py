@@ -21,7 +21,7 @@ import time
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import rastir
-from rastir import agent, configure, llm, retrieval, stop_exporter, tool, trace
+from rastir import agent, configure, llm, retrieval, stop_exporter, trace
 
 # ── Configuration ─────────────────────────────────────────────────
 PUSH_URL = os.environ.get("RASTIR_PUSH_URL", "http://localhost:8080")
@@ -197,7 +197,7 @@ def failing_llm_call():
 # Tools & Retrieval
 # =====================================================================
 
-@tool()
+@trace(name="run_tool")
 def run_tool(tool_name: str, input_data: str) -> str:
     time.sleep(random.uniform(0.01, 0.05))
     return f"result from {tool_name}: {input_data}"

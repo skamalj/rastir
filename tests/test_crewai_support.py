@@ -4,12 +4,10 @@ Tests cover:
   - _is_crew / _get_agents detection helpers
   - crew_kickoff decorator: bare and parameterized usage
   - LLM and tool wrapping on agents
-  - MCP tool bridge (_build_crewai_tools_from_mcp)
   - Restore of originals after execution
   - Agent span emission (name, type, status)
   - Error handling (span records error, re-raises)
   - Async variant
-  - mcp= parameter (single session, list, dict by role)
 
 Uses mock Crew/Agent classes that mimic CrewAI's class-name / module
 structure so we can test without requiring crewai to be installed.
@@ -26,10 +24,8 @@ import pytest
 from rastir.crewai_support import (
     _is_crew,
     _get_agents,
-    _mcp_schema_to_python_type,
     _wrap_crew_internals,
     _restore_originals,
-    _resolve_mcp_tools,
     crew_kickoff,
 )
 from rastir.spans import SpanType, SpanStatus
@@ -124,37 +120,6 @@ class TestGetAgents:
 
 
 # ========================================================================
-# _mcp_schema_to_python_type tests
-# ========================================================================
-
-
-class TestMcpSchemaType:
-    def test_string(self):
-        assert _mcp_schema_to_python_type({"type": "string"}) is str
-
-    def test_integer(self):
-        assert _mcp_schema_to_python_type({"type": "integer"}) is int
-
-    def test_number(self):
-        assert _mcp_schema_to_python_type({"type": "number"}) is float
-
-    def test_boolean(self):
-        assert _mcp_schema_to_python_type({"type": "boolean"}) is bool
-
-    def test_array(self):
-        assert _mcp_schema_to_python_type({"type": "array"}) is list
-
-    def test_object(self):
-        assert _mcp_schema_to_python_type({"type": "object"}) is dict
-
-    def test_unknown_defaults_to_str(self):
-        assert _mcp_schema_to_python_type({"type": "unknown"}) is str
-
-    def test_missing_type_defaults_to_str(self):
-        assert _mcp_schema_to_python_type({}) is str
-
-
-# ========================================================================
 # _wrap_crew_internals tests
 # ========================================================================
 
@@ -171,7 +136,7 @@ class TestWrapCrewInternals:
         crew = _make_crew([agent])
 
         originals: dict = {}
-        _wrap_crew_internals(crew, None, originals)
+        _wrap_crew_internals(crew, originals)
 
         # wrap() was called for the LLM
         llm_wrap_calls = [c for c in mock_wrap.call_args_list if c[0][0] is llm]
@@ -193,7 +158,7 @@ class TestWrapCrewInternals:
         crew = _make_crew([agent])
 
         originals: dict = {}
-        _wrap_crew_internals(crew, None, originals)
+        _wrap_crew_internals(crew, originals)
 
         tool_wrap_calls = [c for c in mock_wrap.call_args_list if c[0][0] is tool]
         assert len(tool_wrap_calls) == 1
@@ -213,7 +178,7 @@ class TestWrapCrewInternals:
         crew = _make_crew([agent])
 
         originals: dict = {}
-        _wrap_crew_internals(crew, None, originals)
+        _wrap_crew_internals(crew, originals)
 
         agent_id = id(agent)
         assert agent_id in originals
@@ -231,7 +196,7 @@ class TestWrapCrewInternals:
         crew = _make_crew([agent])
 
         originals: dict = {}
-        _wrap_crew_internals(crew, None, originals)
+        _wrap_crew_internals(crew, originals)
 
         # wrap() should NOT be called for the LLM
         llm_wrap_calls = [c for c in mock_wrap.call_args_list if c[0][0] is llm]
@@ -248,7 +213,7 @@ class TestWrapCrewInternals:
         crew = _make_crew([agent])
 
         originals: dict = {}
-        _wrap_crew_internals(crew, None, originals)
+        _wrap_crew_internals(crew, originals)
 
         # wrap() should NOT be called for the tool
         tool_wrap_calls = [c for c in mock_wrap.call_args_list if c[0][0] is tool]
@@ -299,89 +264,6 @@ class TestRestoreOriginals:
 
         _restore_originals(originals)
         assert agent.llm is original_llm
-
-
-# ========================================================================
-# _resolve_mcp_tools tests
-# ========================================================================
-
-
-class TestResolveMcpTools:
-    def test_none_mcp_returns_empty(self):
-        agent = _make_agent()
-        assert _resolve_mcp_tools(agent, None, {}) == []
-
-    @patch("rastir.crewai_support._build_crewai_tools_from_mcp")
-    def test_single_session(self, mock_build):
-        """Single session → tools are built for all agents."""
-        mock_build.return_value = ["tool1", "tool2"]
-        session = MagicMock()
-        session.list_tools = AsyncMock(return_value=MagicMock(tools=["raw1"]))
-
-        agent = _make_agent()
-        cache: dict = {}
-        result = _resolve_mcp_tools(agent, session, cache)
-
-        assert result == ["tool1", "tool2"]
-        mock_build.assert_called_once()
-
-    @patch("rastir.crewai_support._build_crewai_tools_from_mcp")
-    def test_list_of_sessions(self, mock_build):
-        """List of sessions → tools from all sessions combined."""
-        s1 = MagicMock()
-        s1.list_tools = AsyncMock(return_value=MagicMock(tools=["a"]))
-        s2 = MagicMock()
-        s2.list_tools = AsyncMock(return_value=MagicMock(tools=["b"]))
-        mock_build.side_effect = [["t1"], ["t2"]]
-
-        agent = _make_agent()
-        cache: dict = {}
-        result = _resolve_mcp_tools(agent, [s1, s2], cache)
-
-        assert result == ["t1", "t2"]
-        assert mock_build.call_count == 2
-
-    @patch("rastir.crewai_support._build_crewai_tools_from_mcp")
-    def test_dict_session_matching_role(self, mock_build):
-        """Dict mapping: matching role gets tools."""
-        session = MagicMock()
-        session.list_tools = AsyncMock(return_value=MagicMock(tools=["x"]))
-        mock_build.return_value = ["mt1"]
-
-        agent = _make_agent(role="researcher")
-        cache: dict = {}
-        result = _resolve_mcp_tools(agent, {"researcher": session}, cache)
-
-        assert result == ["mt1"]
-
-    @patch("rastir.crewai_support._build_crewai_tools_from_mcp")
-    def test_dict_session_non_matching_role(self, mock_build):
-        """Dict mapping: non-matching role gets no tools."""
-        session = MagicMock()
-        agent = _make_agent(role="writer")
-        cache: dict = {}
-        result = _resolve_mcp_tools(agent, {"researcher": session}, cache)
-
-        assert result == []
-        mock_build.assert_not_called()
-
-    @patch("rastir.crewai_support._build_crewai_tools_from_mcp")
-    def test_caches_by_session_id(self, mock_build):
-        """Same session used twice → list_tools called only once."""
-        session = MagicMock()
-        session.list_tools = AsyncMock(return_value=MagicMock(tools=["a"]))
-        mock_build.return_value = ["t1"]
-
-        a1 = _make_agent(role="r1")
-        a2 = _make_agent(role="r2")
-        cache: dict = {}
-
-        _resolve_mcp_tools(a1, session, cache)
-        _resolve_mcp_tools(a2, session, cache)
-
-        # list_tools called once, build called once
-        session.list_tools.assert_called_once()
-        mock_build.assert_called_once()
 
 
 # ========================================================================
@@ -576,125 +458,6 @@ class TestCrewKickoffAsync:
 
 
 # ========================================================================
-# _build_crewai_tools_from_mcp tests (requires crewai installed)
-# ========================================================================
-
-
-class TestBuildCrewaiToolsFromMcp:
-    """Tests for MCP → CrewAI BaseTool conversion.
-
-    These tests only run if crewai is installed.
-    """
-
-    @pytest.fixture(autouse=True)
-    def _skip_if_no_crewai(self):
-        try:
-            from crewai.tools.base_tool import BaseTool  # noqa: F401
-        except ImportError:
-            pytest.skip("crewai not installed")
-
-    def _make_mcp_tool(self, name: str, description: str, schema: dict | None = None):
-        """Create a mock MCP Tool descriptor."""
-        tool = MagicMock()
-        tool.name = name
-        tool.description = description
-        tool.inputSchema = schema or {
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "Search query"},
-            },
-            "required": ["query"],
-        }
-        return tool
-
-    def test_creates_basetool_instances(self):
-        from crewai.tools.base_tool import BaseTool
-        from rastir.crewai_support import _build_crewai_tools_from_mcp
-
-        session = MagicMock()
-        mcp_tool = self._make_mcp_tool("web_search", "Search the web")
-        tools = _build_crewai_tools_from_mcp(session, [mcp_tool])
-
-        assert len(tools) == 1
-        assert isinstance(tools[0], BaseTool)
-        assert tools[0].name == "web_search"
-        # CrewAI may augment the description with tool signature info
-        assert "Search the web" in tools[0].description
-
-    def test_args_schema_has_required_fields(self):
-        from rastir.crewai_support import _build_crewai_tools_from_mcp
-
-        session = MagicMock()
-        mcp_tool = self._make_mcp_tool(
-            "calc", "Calculator",
-            {
-                "type": "object",
-                "properties": {
-                    "expression": {"type": "string"},
-                    "precision": {"type": "integer"},
-                },
-                "required": ["expression"],
-            },
-        )
-        tools = _build_crewai_tools_from_mcp(session, [mcp_tool])
-        schema = tools[0].args_schema
-        fields = schema.model_fields
-        assert "expression" in fields
-        assert "precision" in fields
-        # expression is required
-        assert fields["expression"].is_required()
-        # precision is optional
-        assert not fields["precision"].is_required()
-
-    def test_run_calls_session(self):
-        from rastir.crewai_support import _build_crewai_tools_from_mcp
-
-        session = MagicMock()
-        # call_tool is async
-        call_result = MagicMock()
-        call_result.content = [MagicMock(text="result text")]
-        session.call_tool = AsyncMock(return_value=call_result)
-
-        mcp_tool = self._make_mcp_tool("search", "Search")
-        tools = _build_crewai_tools_from_mcp(session, [mcp_tool])
-
-        result = tools[0]._run(query="test")
-        session.call_tool.assert_called_once_with("search", {"query": "test"})
-        assert result == "result text"
-
-    def test_empty_tools_list(self):
-        from rastir.crewai_support import _build_crewai_tools_from_mcp
-
-        session = MagicMock()
-        tools = _build_crewai_tools_from_mcp(session, [])
-        assert tools == []
-
-    def test_no_input_schema(self):
-        from rastir.crewai_support import _build_crewai_tools_from_mcp
-
-        session = MagicMock()
-        mcp_tool = self._make_mcp_tool("ping", "Ping tool", None)
-        mcp_tool.inputSchema = None
-        tools = _build_crewai_tools_from_mcp(session, [mcp_tool])
-        assert len(tools) == 1
-        assert tools[0].name == "ping"
-
-    def test_multiple_tools(self):
-        from rastir.crewai_support import _build_crewai_tools_from_mcp
-
-        session = MagicMock()
-        tools_in = [
-            self._make_mcp_tool("t1", "Tool 1"),
-            self._make_mcp_tool("t2", "Tool 2"),
-            self._make_mcp_tool("t3", "Tool 3"),
-        ]
-        tools_out = _build_crewai_tools_from_mcp(session, tools_in)
-        assert len(tools_out) == 3
-        names = {t.name for t in tools_out}
-        assert names == {"t1", "t2", "t3"}
-
-
-# ========================================================================
 # Integration-style: wrapping flows through the decorator
 # ========================================================================
 
@@ -757,30 +520,4 @@ class TestCrewKickoffWrapping:
         # After execution, original is restored
         assert agent.tools == [tool]
 
-    @patch("rastir.queue.enqueue_span")
-    def test_mcp_tools_injected(self, mock_enqueue):
-        """With mcp= param, MCP tools are injected into agents."""
-        agent = _make_agent("dev", tools=[])
-        crew = _make_crew([agent])
 
-        session = MagicMock()
-        session.list_tools = AsyncMock(return_value=MagicMock(tools=[]))
-
-        injected_tools: list = []
-
-        @crew_kickoff(agent_name="mcp_test", mcp=session)
-        def run(c):
-            injected_tools.extend(agent.tools)
-            return "ok"
-
-        with patch("rastir.crewai_support.wrap") as mw:
-            mw.side_effect = lambda obj, **kw: obj
-            with patch("rastir.crewai_support._build_crewai_tools_from_mcp") as mb:
-                mb.return_value = [MagicMock(name="mcp_tool")]
-                run(crew)
-
-        # MCP tools were injected
-        assert len(injected_tools) == 1
-
-        # After execution, agent tools restored to empty
-        assert agent.tools == []

@@ -42,7 +42,7 @@ from langgraph.prebuilt import ToolNode
 
 from rastir import configure, stop_exporter
 from rastir.config import reset_config
-from rastir.decorators import agent, llm, tool
+from rastir.decorators import agent, llm
 from rastir.adapters.registry import resolve, resolve_stream_chunk
 
 

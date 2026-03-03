@@ -74,7 +74,7 @@ skip_no_aws = pytest.mark.skipif(
 # ── Rastir imports ──────────────────────────────────────────────────
 from rastir import configure, stop_exporter
 from rastir.config import reset_config
-from rastir.decorators import agent, llm, tool, trace, retrieval
+from rastir.decorators import agent, llm, trace, retrieval
 from rastir.adapters.registry import resolve, resolve_stream_chunk
 import rastir.decorators as dec
 import rastir.wrapper as wrp
@@ -906,16 +906,12 @@ class TestWrapIntegration:
 class TestNestedDecoratorIntegration:
     """Verify proper nesting of multiple decorators with real calls."""
 
-    def test_trace_agent_llm_tool_retrieval(self):
-        """Full decorator stack: @trace > @agent > @llm + @tool + @retrieval."""
+    def test_trace_agent_llm_retrieval(self):
+        """Full decorator stack: @trace > @agent > @llm + @retrieval."""
         import openai
 
         captured, originals = _capture_spans()
         try:
-            @tool
-            def search_db(query: str) -> str:
-                return "result from DB"
-
             @retrieval
             def fetch_context(query: str) -> list:
                 return ["doc1", "doc2"]
@@ -931,7 +927,6 @@ class TestNestedDecoratorIntegration:
 
             @agent(agent_name="full_stack_agent")
             def run_pipeline(query: str):
-                tool_result = search_db(query)
                 context = fetch_context(query)
                 return call_model(query, context)
 
@@ -947,10 +942,9 @@ class TestNestedDecoratorIntegration:
                       f"status={s['status']}, "
                       f"agent={s['attributes'].get('agent_name', '-')}")
 
-            # Should have: tool, retrieval, llm, agent, trace (innermost first)
-            assert len(captured) >= 5
+            # Should have: retrieval, llm, agent, trace (innermost first)
+            assert len(captured) >= 4
             types = {s["span_type"] for s in captured}
-            assert "tool" in types
             assert "retrieval" in types
             assert "llm" in types
             assert "agent" in types

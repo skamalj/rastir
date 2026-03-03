@@ -3,7 +3,7 @@
 import asyncio
 import pytest
 from rastir.config import reset_config
-from rastir.decorators import trace, agent, metric, llm, tool, retrieval
+from rastir.decorators import trace, agent, metric, llm, retrieval
 from rastir.queue import drain_batch, reset_queue
 from rastir.spans import SpanStatus, SpanType
 from rastir.context import get_current_span, get_current_agent
@@ -346,84 +346,6 @@ class TestLLM:
 
 
 # ---------------------------------------------------------------------------
-# @tool
-# ---------------------------------------------------------------------------
-
-class TestTool:
-    def test_bare_tool(self):
-        @tool
-        def search_web(q):
-            return f"results for {q}"
-
-        result = search_web("test")
-        assert result == "results for test"
-        spans = drain_batch(10)
-        assert len(spans) == 1
-        s = spans[0]
-        assert s.span_type == SpanType.TOOL
-        assert s.attributes["tool_name"] == "search_web"
-
-    def test_tool_with_name(self):
-        @tool(tool_name="web_search")
-        def search(q):
-            return q
-
-        search("test")
-        spans = drain_batch(10)
-        assert spans[0].attributes["tool_name"] == "web_search"
-        assert spans[0].name == "web_search"
-
-    def test_tool_failure(self):
-        @tool
-        def bad_tool():
-            raise RuntimeError("fail")
-
-        with pytest.raises(RuntimeError):
-            bad_tool()
-
-        spans = drain_batch(10)
-        assert spans[0].status == SpanStatus.ERROR
-
-    def test_tool_agent_label(self):
-        @agent(agent_name="helper")
-        def run():
-            return do_tool()
-
-        @tool
-        def do_tool():
-            return "ok"
-
-        run()
-        spans = drain_batch(10)
-        tool_span = [s for s in spans if s.span_type == SpanType.TOOL][0]
-        assert tool_span.attributes["agent"] == "helper"
-
-    def test_tool_no_agent_under_trace(self):
-        @trace
-        def run():
-            return do_tool()
-
-        @tool
-        def do_tool():
-            return "ok"
-
-        run()
-        spans = drain_batch(10)
-        tool_span = [s for s in spans if s.span_type == SpanType.TOOL][0]
-        assert "agent" not in tool_span.attributes
-
-    def test_async_tool(self):
-        @tool(tool_name="async_tool")
-        async def async_search():
-            return "found"
-
-        result = asyncio.get_event_loop().run_until_complete(async_search())
-        assert result == "found"
-        spans = drain_batch(10)
-        assert spans[0].span_type == SpanType.TOOL
-
-
-# ---------------------------------------------------------------------------
 # @retrieval
 # ---------------------------------------------------------------------------
 
@@ -516,8 +438,8 @@ class TestRetrieval:
 # ---------------------------------------------------------------------------
 
 class TestFullHierarchy:
-    def test_trace_agent_llm_tool_hierarchy(self):
-        """Full trace → agent → llm + tool hierarchy."""
+    def test_trace_agent_llm_hierarchy(self):
+        """Full trace → agent → llm hierarchy."""
 
         @trace(name="api_request")
         def handle_request():
@@ -525,13 +447,8 @@ class TestFullHierarchy:
 
         @agent(agent_name="qa_agent")
         def run_agent(q):
-            context = do_search(q)
-            answer = do_llm(context)
+            answer = do_llm(q)
             return answer
-
-        @tool(tool_name="web_search")
-        def do_search(q):
-            return "search results"
 
         @llm(model="gpt-4", provider="openai")
         def do_llm(context):
@@ -541,31 +458,28 @@ class TestFullHierarchy:
         assert result == "answer"
 
         spans = drain_batch(10)
-        assert len(spans) == 4
+        assert len(spans) == 3
 
         # Find by type
-        trace_span = [s for s in spans if s.span_type == SpanType.TRACE][0]
-        agent_span = [s for s in spans if s.span_type == SpanType.AGENT][0]
-        tool_span = [s for s in spans if s.span_type == SpanType.TOOL][0]
-        llm_span = [s for s in spans if s.span_type == SpanType.LLM][0]
+        trace_s = [s for s in spans if s.span_type == SpanType.TRACE][0]
+        agent_s = [s for s in spans if s.span_type == SpanType.AGENT][0]
+        llm_s = [s for s in spans if s.span_type == SpanType.LLM][0]
 
         # All share the same trace_id
         trace_ids = {s.trace_id for s in spans}
         assert len(trace_ids) == 1
 
         # Parent-child relationships
-        assert agent_span.parent_id == trace_span.span_id
-        assert tool_span.parent_id == agent_span.span_id
-        assert llm_span.parent_id == agent_span.span_id
+        assert agent_s.parent_id == trace_s.span_id
+        assert llm_s.parent_id == agent_s.span_id
 
         # Agent label on children
-        assert tool_span.attributes["agent"] == "qa_agent"
-        assert llm_span.attributes["agent"] == "qa_agent"
-        assert "agent" not in trace_span.attributes
+        assert llm_s.attributes["agent"] == "qa_agent"
+        assert "agent" not in trace_s.attributes
 
         # LLM attributes
-        assert llm_span.attributes["model"] == "gpt-4"
-        assert llm_span.attributes["provider"] == "openai"
+        assert llm_s.attributes["model"] == "gpt-4"
+        assert llm_s.attributes["provider"] == "openai"
 
     def test_all_spans_have_duration(self):
         @trace

@@ -95,7 +95,7 @@ Each wrapped method call produces a span with:
 | Framework | Usage |
 |-----------|-------|
 | **LangGraph** | Not needed — `@langgraph_agent` auto-discovers LLMs/tools |
-| **CrewAI** | `wrap(mcp_session)` for MCP tool injection via `mcp=` param |
+| **CrewAI** | Not needed \u2014 `@crew_kickoff` auto-wraps LLMs/tools; MCP handled natively by CrewAI |
 | **LlamaIndex** | `wrap(llm, span_type="llm")` and `wrap(tool, span_type="tool")` |
 | **Infrastructure** | `wrap(redis_client, name="redis")` for any object |
 

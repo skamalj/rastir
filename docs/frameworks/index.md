@@ -17,8 +17,8 @@ Rastir provides dedicated decorators for three major AI agent frameworks. Each d
 | **LLM tracing** | Auto-discovered | Auto-discovered | Manual `wrap(llm)` |
 | **Tool tracing** | Auto-discovered | Auto-discovered | Manual `wrap(tool)` |
 | **Node tracing** | Automatic (all nodes) | N/A | N/A |
-| **MCP tools** | Pass as normal tools | `wrap(session)` + `mcp=` | `wrap()` on McpToolSpec tools |
-| **Lines of user code** | 1 decorator | 1 decorator (+`wrap` for MCP) | 1 decorator + `wrap()` calls |
+| **MCP tools** | Pass as normal tools | Native via `mcps=[]` on agents | `wrap()` on McpToolSpec tools |
+| **Lines of user code** | 1 decorator | 1 decorator | 1 decorator + `wrap()` calls |
 
 All three decorators:
 - Support both sync and async functions

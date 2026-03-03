@@ -76,7 +76,7 @@ react_agent (AGENT)
 │  ┌──────────────────────────────────────────┐   │
 │  │  @langgraph_agent / @crew_kickoff /      │   │
 │  │  @llamaindex_agent                       │   │
-│  │  @agent / @llm / @tool / wrap()          │   │
+│  │  @agent / @llm / wrap()                 │   │
 │  │  Decorators → SpanRecord → Queue         │   │
 │  └───────────────┬──────────────────────────┘   │
 │                  │ HTTP POST /v1/telemetry       │
@@ -103,7 +103,7 @@ react_agent (AGENT)
 - [Installation & Quick Start](getting-started.md)
 
 ### Core
-- [Decorators](decorators.md) — `@trace`, `@agent`, `@llm`, `@tool`, `@retrieval`, `@metric`
+- [Decorators](decorators.md) — `@trace`, `@agent`, `@llm`, `@retrieval`, `@metric`
 - [Adapters](adapters.md) — 15 adapters with two-phase enrichment
 - [wrap() & MCP](wrap.md) — Generic object wrapper and MCP session wrapping
 - [MCP Distributed Tracing](mcp-tracing.md) — `wrap(session)`, `@mcp_endpoint`

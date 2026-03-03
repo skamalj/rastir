@@ -67,7 +67,7 @@ That's it. Every LLM call, tool invocation, and node execution inside the graph 
 | **LLM tracing** | Auto-discovered | Auto-discovered | `wrap(llm)` |
 | **Tool tracing** | Auto-discovered | Auto-discovered | `wrap(tool)` |
 | **Node tracing** | Automatic (all nodes) | N/A | N/A |
-| **MCP tools** | Pass as normal tools | `wrap(session)` + `mcp=` | `wrap()` on McpToolSpec tools |
+| **MCP tools** | Pass as normal tools | Native via `mcps=[]` on agents | `wrap()` on McpToolSpec tools |
 | **User code** | 1 decorator | 1 decorator | 1 decorator + `wrap()` calls |
 
 ### LangGraph
@@ -141,7 +141,7 @@ pip install rastir[all]         # Everything
 ## Quick Start
 
 ```python
-from rastir import configure, agent, llm, tool
+from rastir import configure, agent, llm, trace
 
 configure(service="my-app", push_url="http://localhost:8080")
 
@@ -149,7 +149,7 @@ configure(service="my-app", push_url="http://localhost:8080")
 def answer(query):
     return ask_llm(search(query))
 
-@tool
+@trace
 def search(query):
     return vector_db.search(query)
 
@@ -171,7 +171,6 @@ rastir_llm_calls_total{model="gpt-4o", provider="openai", agent="qa_bot"} 150
 rastir_tokens_input_total{model="gpt-4o"} 25000
 rastir_tokens_output_total{model="gpt-4o"} 8500
 rastir_duration_seconds_bucket{span_type="llm", le="1.0"} 120
-rastir_tool_calls_total{tool_name="search", agent="qa_bot"} 89
 rastir_errors_total{span_type="llm", error_type="rate_limit"} 3
 rastir_cost_total{model="gpt-4o", pricing_profile="prod"} 12.50
 rastir_ttft_seconds_bucket{model="gpt-4o", le="0.5"} 95
@@ -187,7 +186,7 @@ Your Application                             Rastir Collector
 │  @langgraph_agent              │   HTTP    │  FastAPI                   │
 │  @crew_kickoff                 │  ──────▸  │  ├── Prometheus /metrics   │
 │  @llamaindex_agent             │   spans   │  ├── Trace store /v1/traces│
-│  @agent / @llm / @tool         │           │  ├── Sampling & backpressure│
+│  @agent / @llm                 │           │  ├── Sampling & backpressure│
 │  wrap(obj)                     │           │  └── OTLP → Tempo/Jaeger  │
 └────────────────────────────────┘           └────────────────────────────┘
 ```

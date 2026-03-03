@@ -83,7 +83,6 @@ lifecycle, context propagation, and batch transport.
 |---|---|---|
 | `@llm` | `llm` | Create span; call `resolve_request()` pre-invocation; call `resolve()` or stream-accumulate post-invocation; apply `model=`/`provider=` overrides; set `agent` from context |
 | `@agent` | `agent` | Create span; set agent name in context for child spans to inherit |
-| `@tool` | `tool` | Create span; set `tool_name` from function name; inherit `model`, `provider`, `agent` from parent |
 | `@trace` | `system` | Create span; generic function tracing with no AI-specific logic |
 | `@metric` | `metric` | Create span for metric emission only (calls, duration, failures) |
 | `@retrieval` | `retrieval` | Create span; call retrieval adapter for metadata |
@@ -96,7 +95,6 @@ lifecycle, context propagation, and batch transport.
 | Set span_type | Decorator determines type |
 | Set `service`, `env`, `version` | `rastir.configure()` |
 | Set `agent` label on child spans | `@agent` pushes to context; `@llm` reads it |
-| Set `tool_name` | `@tool` sets from function name |
 | Compute `duration_ms` | `span.finish()` |
 | Set `status` (OK / ERROR) | `span.finish(SpanStatus.OK / ERROR)` |
 | Record exception details | `span.record_error(exc)` — stores class, message, traceback |
@@ -183,7 +181,7 @@ User Code
 ┌─────────────────────────────────────────────────────────┐
 │  CLIENT (decorators)                                    │
 │                                                         │
-│  @agent / @llm / @tool / @trace / @retrieval            │
+│  @agent / @llm / @trace / @retrieval                    │
 │    │                                                    │
 │    ├─ start_span()           → create SpanRecord        │
 │    ├─ resolve_request()      → ADAPTER request phase    │
@@ -255,25 +253,24 @@ it uses dedicated `ContextVar` variables that decorators set and read:
 | ContextVar | Set by | Read by | Value |
 |---|---|---|---|
 | `_current_span` | `start_span()` | `get_current_span()` | Current span (for parent-child linking) |
-| `_current_agent` | `@agent` | `@llm`, `@tool`, `@retrieval` | Agent name string |
-| `_current_model` | `@llm` (in `_finalize_llm_span`) | `@tool` | Model name string |
-| `_current_provider` | `@llm` (in `_finalize_llm_span`) | `@tool` | Provider name string |
+| `_current_agent` | `@agent` | `@llm`, `@retrieval` | Agent name string |
+| `_current_model` | `@llm` (in `_finalize_llm_span`) | — | Model name string |
+| `_current_provider` | `@llm` (in `_finalize_llm_span`) | — | Provider name string |
 
 ### 6.2 Inheritance Rules (Normative)
 
 Every span type MUST carry these labels when available. The table below
 specifies who sets each label and where the value comes from.
 
-| Label | `@agent` | `@llm` | `@tool` | `@retrieval` | `@trace` | `evaluation` (server) |
-|---|---|---|---|---|---|---|
-| `agent` | Sets from decorator arg | Reads from `_current_agent` | Reads from `_current_agent` | Reads from `_current_agent` | — | Copies from parent LLM span |
-| `model` | — | Adapter extracts (request + response) or decorator override | Reads from `_current_model` | **Should** read from `_current_model` | — | Copies from parent LLM span |
-| `provider` | — | Adapter extracts (request + response) or decorator override | Reads from `_current_provider` | **Should** read from `_current_provider` | — | Copies from parent LLM span |
-| `service` | From `configure()` | From `configure()` | From `configure()` | From `configure()` | From `configure()` | From parent LLM span |
-| `env` | From `configure()` | From `configure()` | From `configure()` | From `configure()` | From `configure()` | From parent LLM span |
-| `tool_name` | — | — | From function name | — | — | — |
-| `evaluator_model` | — | — | — | — | — | **NEW:** From `JudgeConfig.model` |
-| `evaluator_provider` | — | — | — | — | — | **NEW:** From `JudgeConfig.provider` |
+| Label | `@agent` | `@llm` | `@retrieval` | `@trace` | `evaluation` (server) |
+|---|---|---|---|---|---|
+| `agent` | Sets from decorator arg | Reads from `_current_agent` | Reads from `_current_agent` | — | Copies from parent LLM span |
+| `model` | — | Adapter extracts (request + response) or decorator override | **Should** read from `_current_model` | — | Copies from parent LLM span |
+| `provider` | — | Adapter extracts (request + response) or decorator override | **Should** read from `_current_provider` | — | Copies from parent LLM span |
+| `service` | From `configure()` | From `configure()` | From `configure()` | From `configure()` | From parent LLM span |
+| `env` | From `configure()` | From `configure()` | From `configure()` | From `configure()` | From parent LLM span |
+| `evaluator_model` | — | — | — | — | **NEW:** From `JudgeConfig.model` |
+| `evaluator_provider` | — | — | — | — | **NEW:** From `JudgeConfig.provider` |
 
 ### 6.3 Typical Call Tree & Label Flow
 
@@ -288,12 +285,6 @@ specifies who sets each label and where the value comes from.
         │         provider="openai"   (from adapter)
         │  pushes: _current_model = "gpt-4o-mini"
         │          _current_provider = "openai"
-        │
-        ├─▶ @tool("flight_search")
-        │     reads: agent    from _current_agent    → "travel_planner"
-        │            model    from _current_model    → "gpt-4o-mini"
-        │            provider from _current_provider → "openai"
-        │     sets:  tool_name = "flight_search"
         │
         ├─▶ @retrieval("search_docs")
         │     reads: agent    from _current_agent    → "travel_planner"
@@ -336,7 +327,7 @@ MUST be present on the span for the corresponding metric to be meaningful:
 
 | # | Gap | Location | Fix |
 |---|---|---|---|
-| 1 | `@retrieval` does not inherit `model`/`provider` from context | `decorators.py` `@retrieval` wrapper | Add `get_current_model()` / `get_current_provider()` reads, same as `@tool` |
+| 1 | `@retrieval` does not inherit `model`/`provider` from context | `decorators.py` `@retrieval` wrapper | Add `get_current_model()` / `get_current_provider()` reads |
 | 2 | `duration` histogram gets empty `model`/`provider` for non-LLM spans | `metrics.py` `record_span()` model extraction gated on `span_type == "llm"` | Extract model/provider from attrs for ALL span types that carry them (tool, evaluation, retrieval) |
 | 3 | `errors` metric gets empty `model`/`provider` for non-LLM spans | Same gating as #2 | Same fix as #2 |
 
