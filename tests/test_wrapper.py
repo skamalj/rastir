@@ -296,3 +296,50 @@ class TestWrapSetattr:
         getter1 = wrapped.get
         getter2 = wrapped.get
         assert getter1 is getter2
+
+
+# ========================================================================
+# MCP auto-detection tests
+# ========================================================================
+
+
+class TestWrapMCPAutoDetect:
+    """wrap() should auto-detect MCP ClientSession and delegate to wrap_mcp."""
+
+    def _make_fake_session(self):
+        """Create a mock that looks like an MCP ClientSession."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        session = MagicMock()
+        type(session).__name__ = "ClientSession"
+        type(session).__module__ = "mcp.client.session"
+        session.call_tool = AsyncMock(return_value="result")
+        session.list_tools = AsyncMock(return_value=MagicMock(tools=[]))
+        return session
+
+    def test_mcp_session_detected(self):
+        """wrap(session) should return a _TracedMCPSession proxy."""
+        session = self._make_fake_session()
+        wrapped = wrap(session)
+        # Should be the MCP proxy, not a _WrappedProxy
+        assert getattr(wrapped, "_rastir_mcp_wrapped", False) is True
+
+    def test_mcp_session_not_double_wrapped(self):
+        """wrap(wrap(session)) should not double-wrap MCP session."""
+        session = self._make_fake_session()
+        wrapped1 = wrap(session)
+        wrapped2 = wrap(wrapped1)
+        assert wrapped1 is wrapped2
+
+    def test_non_mcp_not_affected(self):
+        """Regular objects should still use the generic proxy."""
+        cache = SampleCache()
+        wrapped = wrap(cache)
+        assert wrapped._rastir_wrapped is True
+        assert not getattr(wrapped, "_rastir_mcp_wrapped", False)
+
+    def test_mcp_ignores_extra_kwargs(self):
+        """Extra kwargs (name, span_type, etc.) are ignored for MCP."""
+        session = self._make_fake_session()
+        wrapped = wrap(session, name="ignored", span_type="tool")
+        assert getattr(wrapped, "_rastir_mcp_wrapped", False) is True

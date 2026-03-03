@@ -47,6 +47,19 @@ _WRAPPABLE_SPAN_TYPES = {
 _WRAPPED_MARKER = "_rastir_wrapped"
 
 
+def _is_mcp_session(obj: Any) -> bool:
+    """Return True if *obj* is an MCP ClientSession (or already wrapped)."""
+    cls = type(obj)
+    module = getattr(cls, "__module__", "") or ""
+    # Match mcp.client.session.ClientSession (standard MCP SDK)
+    if cls.__name__ == "ClientSession" and "mcp" in module:
+        return True
+    # Already wrapped by wrap_mcp — has the marker
+    if getattr(obj, "_rastir_mcp_wrapped", False):
+        return True
+    return False
+
+
 def wrap(
     obj: Any,
     *,
@@ -57,18 +70,25 @@ def wrap(
 ) -> Any:
     """Wrap an object so its public methods emit Rastir spans.
 
+    **Smart detection**: if *obj* is an MCP ``ClientSession`` (from the
+    ``mcp`` package), ``wrap()`` automatically delegates to the
+    MCP-specific proxy that intercepts ``call_tool()`` and injects
+    distributed trace context.  This means you can always use
+    ``wrap(session)`` instead of the more explicit ``wrap_mcp(session)``.
+
     Args:
         obj: The object to wrap. Can be any Python object with callable
-            public methods.
+            public methods, or an MCP ``ClientSession``.
         name: Prefix for span names. Defaults to the class name.
             E.g., ``name="redis"`` → spans named ``redis.get``,
-            ``redis.set``, etc.
+            ``redis.set``, etc.  Ignored for MCP sessions.
         span_type: The span type for wrapped methods. Must be one of:
             ``"infra"`` (default), ``"tool"``, ``"llm"``, ``"trace"``,
-            ``"agent"``, ``"retrieval"``.
-        include: If provided, only wrap these method names.
+            ``"agent"``, ``"retrieval"``.  Ignored for MCP sessions.
+        include: If provided, only wrap these method names.  Ignored for
+            MCP sessions.
         exclude: If provided, skip these method names. Applied after
-            include.
+            include.  Ignored for MCP sessions.
 
     Returns:
         A proxy object that wraps the original, emitting spans for each
@@ -79,6 +99,10 @@ def wrap(
         ValueError: If ``span_type`` is not a recognised type.
         TypeError: If ``obj`` is already wrapped.
     """
+    # --- MCP ClientSession auto-detection ---
+    if _is_mcp_session(obj):
+        from rastir.remote import wrap_mcp
+        return wrap_mcp(obj)
     # Validate span type
     resolved_type = _WRAPPABLE_SPAN_TYPES.get(span_type.lower())
     if resolved_type is None:
