@@ -10,6 +10,47 @@ Rastir provides six **core** decorators for manual instrumentation, plus three *
 
 ---
 
+## How Data Is Captured
+
+Understanding this difference is key to choosing the right decorator.
+
+**Core decorators** wrap **your function**. They record timing from function entry/exit, and `@llm` extracts metadata (model, tokens, cost) from the **return value** using the adapter pipeline. If your function strips the provider response and returns only a string, `@llm` gets no model/token data.
+
+**Framework decorators** reach inside the framework's objects and **monkey-patch the model/tool methods directly**. They always see the full provider response regardless of what your code does with it — model, tokens, cost, and latency are always captured.
+
+### What each decorator records
+
+Every span always records: **duration, status, trace_id, span_id, parent_span_id**.
+
+| Decorator | Type | Model | Provider | Tokens | Cost | Tool name | How |
+|-----------|------|:-----:|:--------:|:------:|:----:|:---------:|-----|
+| `@trace` | Core | — | — | — | — | — | Function execution only |
+| `@agent` | Core | — | — | — | — | — | Function execution only |
+| `@llm` | Core | ✅* | ✅* | ✅* | ✅* | — | Extracted from **return value** — requires raw provider response object |
+| `@tool` | Core | — | — | — | — | ✅ | Function execution only |
+| `@retrieval` | Core | — | — | — | — | — | Function execution only |
+| `@metric` | Core | — | — | — | — | — | Counters/histograms only, no spans |
+| `@langgraph_agent` | Framework | ✅ | ✅ | ✅ | ✅ | ✅ | **Wraps model/tool objects directly** — always captures full data |
+| `@crew_kickoff` | Framework | ✅ | ✅ | ✅ | ✅ | ✅ | **Wraps model/tool objects directly** — always captures full data |
+| `@llamaindex_agent` | Framework | ✅ | ✅ | ✅ | ✅ | ✅ | Uses `wrap()` on objects — same reliability as framework wrapping |
+
+_* Only if the function returns the raw provider response object (e.g. `ChatCompletion`). Returns a plain string → no metadata extracted. Use `@llm(model="...", provider="...")` to provide hints manually._
+
+**Example — `@llm` loses metadata:**
+
+```python
+@llm
+def ask(query):
+    result = openai.chat.completions.create(model="gpt-4", messages=[...])
+    return result.choices[0].message.content  # ← plain string, no metadata extracted!
+
+@llm
+def ask_correct(query):
+    return openai.chat.completions.create(model="gpt-4", messages=[...])  # ← full object, adapter extracts everything
+```
+
+---
+
 ## Which Decorator Should I Use?
 
 | Scenario | Decorator | What it does |
@@ -21,7 +62,7 @@ Rastir provides six **core** decorators for manual instrumentation, plus three *
 | **Simple tracing** (no agent) | `@trace` | General-purpose span for any function. |
 | **Standalone metrics** only | `@metric` | Prometheus counters/histograms, no tracing. |
 
-**Rule of thumb:** If you're using LangGraph, CrewAI, or LlamaIndex — use the corresponding framework decorator. It does all the heavy lifting. Use `@agent` / `@llm` / `@tool` only when you're calling LLM APIs directly without a framework.
+**Rule of thumb:** If you're using LangGraph, CrewAI, or LlamaIndex — use the corresponding framework decorator. It does all the heavy lifting and always captures full metadata. Use `@agent` / `@llm` / `@tool` only when you're calling LLM APIs directly without a framework.
 
 ---
 
