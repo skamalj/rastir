@@ -97,6 +97,15 @@ def run(crew):
     return crew.kickoff()
 ```
 
+```
+research_crew (AGENT)
+  ├── crewai.Researcher.llm.call (LLM) — model, provider, tokens, cost
+  ├── crewai.Researcher.tool.search (TOOL) — tool.input, tool.output
+  │   └── mcpserver:search (TOOL)       ← server span via traceparent
+  ├── crewai.Researcher.llm.call (LLM)
+  └── crewai.Writer.llm.call (LLM)
+```
+
 ### LlamaIndex
 
 ```python
@@ -127,7 +136,7 @@ def run(agent):
 | **LangChain** | ✅ | ✅ | ✅ | ✅ | — |
 | **LangGraph** | ✅ | ✅ | ✅ | ✅ | — |
 | **LlamaIndex** | ✅ | ✅ | ✅ | ✅ | — |
-| **CrewAI** | ✅ | ✅ | — | — | — |
+| **CrewAI** | ✅ | ✅ | ✅ | — | — |
 
 ---
 

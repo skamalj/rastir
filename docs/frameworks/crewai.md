@@ -7,7 +7,7 @@ nav_order: 2
 
 # CrewAI Integration
 
-Rastir provides `@crew_kickoff` — a single decorator that instruments [CrewAI](https://www.crewai.com/) workflows. It **auto-discovers and wraps** every agent's LLM and tools, with optional MCP tool injection.
+Rastir provides `@crew_kickoff` — a single decorator that instruments [CrewAI](https://www.crewai.com/) workflows. It **auto-discovers and wraps** every agent's LLM and tools for per-call tracing — tokens, cost, model, provider, input/output — with no code changes inside your agents.
 
 ---
 
@@ -22,7 +22,7 @@ configure(service="my-app", push_url="http://localhost:8080")
 researcher = Agent(
     role="Researcher",
     goal="Research AI trends",
-    llm=LLM(model="gemini/gemini-2.5-flash"),
+    llm=LLM(model="openai/gpt-4o-mini"),
     tools=[SearchTool()],
 )
 
@@ -51,11 +51,11 @@ This produces:
 
 ```
 research_crew (AGENT)
-├── crewai.Researcher.llm (LLM) — model, tokens, latency
-│   └── crewai.Researcher.llm (LLM) — subsequent calls
-├── SearchTool (TOOL) — per-invocation
-├── crewai.Writer.llm (LLM)
-│   └── ...
+├── crewai.Researcher.llm.call (LLM)  — model, provider, tokens, cost, input
+├── crewai.Researcher.tool.search (TOOL) — tool.input, tool.output
+├── crewai.Researcher.llm.call (LLM)  — subsequent calls
+├── crewai.Writer.llm.call (LLM)
+└── crewai.Writer.llm.call (LLM)      — output on final response
 ```
 
 ---
@@ -86,7 +86,7 @@ def run(crew): ...
 |-----------|------|---------|-------------|
 | `agent_name` | `str` | Function name | Name for the outer agent span |
 
-**MCP tools:** CrewAI now handles MCP natively via `mcps=[]` on agents — no Rastir parameter needed.
+**MCP tools:** CrewAI handles MCP natively via `mcps=[]` on agents — no Rastir parameter needed.
 
 **Supports:**
 - Bare usage (`@crew_kickoff`) and parameterized (`@crew_kickoff(...)`)
@@ -99,28 +99,112 @@ def run(crew): ...
 
 ### LLMs
 
-Each agent's `llm` attribute is wrapped with `wrap(llm, include=["call"])`:
+Each agent's `llm` attribute is wrapped with a transparent proxy (`include=["call"]`):
 
 | Attribute | Value |
 |-----------|-------|
-| Span name | `crewai.<role>.llm` (e.g., `crewai.Researcher.llm`) |
+| Span name | `crewai.<role>.llm.call` (e.g., `crewai.Researcher.llm.call`) |
 | Span type | `LLM` |
 | Methods wrapped | `call()` only — avoids noise from Pydantic internals |
-| Metadata | Model, provider, tokens, latency extracted by the adapter pipeline |
+
+**LLM span attributes captured:**
+
+| Attribute | Source | Example |
+|-----------|--------|---------|
+| `model` | LLM object's `model_name` / `model` attribute | `gpt-4o-mini` |
+| `provider` | Module path detection via `_MODULE_PROVIDER_MAP` | `openai` |
+| `tokens_input` | Per-call delta from CrewAI's cumulative `_token_usage` | `235` |
+| `tokens_output` | Per-call delta from CrewAI's cumulative `_token_usage` | `70` |
+| `cost_usd` | Calculated from tokens × pricing registry rates | `0.000077` |
+| `input` | Prompt messages passed to `.call()` | System + user messages |
+| `output` | Final text response (on the last call in a tool-use loop) | `"The answer is..."` |
+| `agent` | Inherited from `@crew_kickoff` agent span | `research_crew` |
+
+**Token extraction:** CrewAI's `.call()` method returns a plain string (not an OpenAI `ChatCompletion` object), so standard token extraction adapters cannot read usage directly. Rastir solves this by **snapshotting** the LLM instance's internal `_token_usage` dict before each call and computing a per-call delta after — giving accurate per-call prompt and completion token counts.
+
+**Provider detection:** CrewAI's LLM classes live at `crewai.llms.providers.<provider>.completion`. Rastir maps these module paths to provider names: `openai`, `anthropic`, `gemini`, `groq`.
 
 ### Tools
 
-Each agent's existing tools are wrapped with `wrap(tool, include=["run"])`:
+Each agent's tools have their `.run()` method **patched in-place** via `tool.__dict__["run"]`:
 
 | Attribute | Value |
 |-----------|-------|
-| Span name | The tool's `name` attribute |
+| Span name | `crewai.<role>.tool.<tool_name>` (e.g., `crewai.Researcher.tool.search`) |
 | Span type | `TOOL` |
 | Methods wrapped | `run()` only |
 
+**Tool span attributes captured:**
+
+| Attribute | Source | Example |
+|-----------|--------|---------|
+| `tool.input` | Keyword arguments passed by CrewAI to `.run(**kwargs)` | `{'city': 'Tokyo'}` |
+| `tool.output` | Return value from the tool function | `"15°C, rainy"` |
+| `agent` | Inherited from `@crew_kickoff` agent span | `research_crew` |
+
+**Why in-place patching?** CrewAI's `Agent` is a Pydantic model with a `tools` field validated as `list[BaseTool]`. Proxy wrappers are stripped by Pydantic validation. Rastir patches `.run()` directly on each tool's instance `__dict__`, which bypasses Pydantic's `__setattr__` while being fully transparent to CrewAI's tool executor.
+
 ### Skip Already-Wrapped Objects
 
-If an LLM or tool already has `_rastir_wrapped = True`, `@crew_kickoff` does not re-wrap it.
+- LLMs with `_rastir_wrapped = True` are not re-wrapped
+- Tools with `_rastir_tool_patched = True` are not re-patched
+
+---
+
+## MCP Tool Tracing
+
+### Propagating Trace Context to MCP Servers
+
+When tools inside your crew call remote MCP servers, you can propagate the trace context so server-side spans appear as children of the client tool span. Use `traceparent_headers()` in your tool's HTTP calls:
+
+```python
+from crewai.tools import tool as crewai_tool
+from rastir.remote import traceparent_headers
+import httpx
+
+MCP_URL = "http://localhost:8080/mcp"
+
+@crewai_tool
+def get_weather(city: str) -> str:
+    """Get the current weather for a city."""
+    headers = {"Accept": "application/json", **traceparent_headers()}
+    with httpx.Client(timeout=10) as c:
+        r = c.post(MCP_URL, json={
+            "jsonrpc": "2.0", "id": 1,
+            "method": "tools/call",
+            "params": {"name": "get_weather", "arguments": {"city": city}},
+        }, headers=headers)
+        data = r.json()
+        return data["result"]["content"][0]["text"]
+```
+
+This produces a fully linked trace:
+
+```
+research_crew (AGENT)
+├── crewai.Researcher.llm.call (LLM)
+├── crewai.Researcher.tool.get_weather (TOOL)     ← client span
+│   └── mcpserver:get_weather (TOOL)               ← server span (same trace)
+├── crewai.Researcher.llm.call (LLM)
+```
+
+**How it works:** When `@crew_kickoff` patches `tool.run()`, the wrapper calls `start_span()` which sets the tool span as the active span in the ContextVar. Inside the tool body, `traceparent_headers()` reads the current span and returns a `{"traceparent": "00-<trace_id>-<span_id>-01"}` header. The MCP server's `RastirMCPMiddleware` reads this header and creates a child span linked to the client tool span.
+
+### Native MCP via `mcps=[]`
+
+CrewAI 1.9+ supports MCP natively via the `mcps=[]` field on agents:
+
+```python
+from crewai.mcp import MCPServerHTTP
+
+agent = Agent(
+    role="Researcher",
+    llm=llm,
+    mcps=[MCPServerHTTP(url="http://localhost:8080/mcp")],
+)
+```
+
+`@crew_kickoff` auto-discovers `MCPServerHTTP` / `MCPServerSSE` configs and injects the `traceparent` header on them. The tools CrewAI discovers from the MCP server are wrapped like any other tool.
 
 ---
 
@@ -180,12 +264,44 @@ def run_a(crew):
 def run_b(crew):
     return crew.kickoff()
 
-# Each decorated function wraps/restores independently
 result_a = run_a(crew_a)
 result_b = run_b(crew_b)
 ```
 
-### Pattern 9: Reusing the same Crew
+### Pattern 6: Tools with MCP trace propagation
+
+```python
+from rastir.remote import traceparent_headers
+
+@crewai_tool
+def remote_search(query: str) -> str:
+    """Search via remote MCP server."""
+    headers = {"Accept": "application/json", **traceparent_headers()}
+    with httpx.Client() as c:
+        r = c.post(MCP_URL, json={...}, headers=headers)
+        return r.json()["result"]["content"][0]["text"]
+
+agent = Agent(role="Searcher", llm=llm, tools=[remote_search])
+```
+
+### Pattern 7: Cost tracking with pricing registry
+
+```python
+from rastir import configure
+from rastir.config import get_pricing_registry
+
+configure(service="my-app", push_url="...", enable_cost_calculation=True)
+
+pr = get_pricing_registry()
+pr.register("openai", "gpt-4o-mini", input_price=0.15, output_price=0.60)
+
+@crew_kickoff(agent_name="my_crew")
+def run(crew):
+    return crew.kickoff()
+# Each LLM span will now include cost_usd
+```
+
+### Pattern 8: Reusing the same Crew
 
 ```python
 @crew_kickoff(agent_name="my_crew")
@@ -195,7 +311,6 @@ def run(crew):
 # Safe to call multiple times — originals restored after each call
 result1 = run(crew)
 result2 = run(crew)
-result3 = run(crew)
 ```
 
 ---
@@ -203,8 +318,8 @@ result3 = run(crew)
 ## Restore After Execution
 
 After `crew.kickoff()` completes (success or error), `@crew_kickoff` restores:
-- Original LLMs on every agent
-- Original tools list on every agent (MCP-injected tools are removed)
+- Original LLM proxy on every agent
+- Tool `.run()` methods unpatched (instance `__dict__` entries removed)
 
 This means the `Crew` object can be safely reused across multiple calls with no accumulated wrapping.
 
@@ -222,21 +337,58 @@ If the decorated function raises an exception:
 
 ## Span Hierarchy
 
+A typical CrewAI trace looks like this:
+
 ```
 @crew_kickoff agent span
 │
-├── Agent "Researcher"
-│   ├── crewai.Researcher.llm (LLM call 1)
-│   ├── crewai.Researcher.llm (LLM call 2)
-│   ├── SearchTool (tool invocation)
-│   └── MCP_web_search (injected MCP tool)
+├── crewai.Researcher.llm.call (LLM)    — model=gpt-4o-mini, tokens, cost
+├── crewai.Researcher.tool.search (TOOL) — input={query}, output=results
+│   └── mcpserver:search (TOOL)          — server span (if using traceparent)
+├── crewai.Researcher.llm.call (LLM)    — tool result fed back to LLM
+├── crewai.Researcher.llm.call (LLM)    — final answer, has output
 │
-├── Agent "Writer"
-│   ├── crewai.Writer.llm (LLM call 1)
-│   └── crewai.Writer.llm (LLM call 2)
+├── crewai.Writer.llm.call (LLM)
+└── crewai.Writer.llm.call (LLM)
 ```
 
-All child spans inherit the `agent` label, so Prometheus metrics are grouped by crew.
+All child spans inherit the `agent` label from `@crew_kickoff`, so Prometheus metrics are grouped by crew.
+
+---
+
+## Span Attributes in Tempo
+
+Here's what you'll see in Tempo/Grafana for each span type:
+
+### Agent span
+
+| Attribute | Example |
+|-----------|---------|
+| `rastir.span_type` | `agent` |
+| `rastir.agent_name` | `research_crew` |
+
+### LLM span
+
+| Attribute | Example |
+|-----------|---------|
+| `rastir.span_type` | `llm` |
+| `rastir.model` | `gpt-4o-mini` |
+| `rastir.provider` | `openai` |
+| `rastir.tokens_input` | `235` |
+| `rastir.tokens_output` | `70` |
+| `rastir.cost_usd` | `0.000077` |
+| `rastir.input` | `system: You are Researcher...` |
+| `rastir.output` | `The answer is...` (final call only) |
+| `rastir.agent` | `research_crew` |
+
+### Tool span
+
+| Attribute | Example |
+|-----------|---------|
+| `rastir.span_type` | `tool` |
+| `rastir.tool.input` | `{'city': 'Tokyo'}` |
+| `rastir.tool.output` | `15°C, rainy, humidity 80%` |
+| `rastir.agent` | `research_crew` |
 
 ---
 
@@ -245,11 +397,26 @@ All child spans inherit the `agent` label, so Prometheus metrics are grouped by 
 | Metric | Source |
 |--------|--------|
 | `rastir_llm_calls_total{model, provider, agent}` | Wrapped LLM `call()` |
-| `rastir_tokens_input_total{model, provider, agent}` | Token extraction from LLM response |
-| `rastir_tokens_output_total{model, provider, agent}` | Token extraction from LLM response |
+| `rastir_tokens_input_total{model, provider, agent}` | Per-call token delta |
+| `rastir_tokens_output_total{model, provider, agent}` | Per-call token delta |
+| `rastir_cost_total{model, provider, agent}` | Cost calculation from pricing registry |
 | `rastir_duration_seconds{span_type="llm"}` | LLM call latency |
-| `rastir_tool_calls_total{tool_name, agent}` | Wrapped tool `run()` |
+| `rastir_tool_calls_total{tool_name, agent}` | Tool `.run()` invocation |
 | `rastir_duration_seconds{span_type="tool"}` | Tool invocation latency |
 | `rastir_duration_seconds{span_type="agent"}` | Entire crew kickoff latency |
 
-**Recommendation:** Always pass the `Crew` object as an argument to the decorated function. Define all agents and their LLMs/tools before the decorated function call.
+---
+
+## Technical Notes
+
+### CrewAI Token Extraction
+
+CrewAI's LLM `.call()` method calls `self.client.chat.completions.create()` internally, extracts `usage` into a cumulative `_token_usage` dict on the LLM instance, and returns only the response text (a plain string). Since the adapter pipeline receives a string rather than a `ChatCompletion` object, Rastir snapshots `_token_usage` before each call and computes a per-call delta. This gives accurate per-call prompt and completion token counts.
+
+### CrewAI Tool Wrapping
+
+CrewAI's `Agent` is a Pydantic `BaseModel` with a `tools` field typed as `list[BaseTool]`. A Pydantic `@field_validator` checks each tool via `isinstance(tool, BaseTool)` — proxy wrapper objects fail this validation and are silently replaced. Rastir works around this by patching the tool's `.run()` method directly in the instance's `__dict__`, which:
+
+1. Takes precedence over the class method in Python's attribute lookup
+2. Is invisible to Pydantic's model validation
+3. Is cleanly reversible by removing the `__dict__` entry after execution
