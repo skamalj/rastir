@@ -188,6 +188,17 @@ shutdown:
 logging:
   structured: false
   level: INFO
+
+sre:
+  enabled: true
+  default_slo_error_rate: 0.01    # 1% error budget
+  default_cost_budget_usd: 25.0   # $25/period
+  agents:
+    my_agent:
+      slo_error_rate: 0.02        # 2% for this agent
+    critical_agent:
+      slo_error_rate: 0.005       # stricter 0.5%
+      cost_budget_usd: 50.0       # per-agent override
 ```
 
 ### Server Environment Variables
@@ -317,6 +328,25 @@ All server settings can be overridden via `RASTIR_SERVER_*` environment variable
 | `RASTIR_SERVER_LOGGING_STRUCTURED` | `false` | Enable JSON structured logging |
 | `RASTIR_SERVER_LOGGING_LEVEL` | `INFO` | Log level: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` |
 
+#### SRE
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RASTIR_SERVER_SRE_ENABLED` | `false` | Enable SRE config gauges for Prometheus recording rules |
+| `RASTIR_SERVER_SRE_DEFAULT_SLO_ERROR_RATE` | `0.01` | Default SLO error rate (0.01 = 1% error budget) |
+| `RASTIR_SERVER_SRE_DEFAULT_COST_BUDGET_USD` | `0.0` | Default cost budget in USD per period (0 = disabled) |
+
+Per-agent SLO and cost budget overrides are configured in the YAML file under `sre.agents` (see YAML example above). They cannot be set via environment variables.
+
+When enabled, the server exposes two Prometheus **Gauge** metrics at startup:
+
+| Gauge | Labels | Description |
+|-------|--------|-------------|
+| `rastir_slo_error_rate` | `agent` | Configured SLO error rate per agent |
+| `rastir_cost_budget_usd` | `agent` | Configured cost budget in USD per agent |
+
+These gauges are consumed by **Prometheus recording rules** (see [Server — SRE Recording Rules](server#sre--prometheus-recording-rules)) to derive error budgets, burn rates, cost budgets, and days-to-exhaustion metrics.
+
 ---
 
 ## Testing & Script Variables
@@ -351,3 +381,6 @@ The server validates configuration at startup and refuses to start if:
 - TTL seconds is negative
 - Shutdown grace period is negative
 - Logging level is not a valid Python log level
+- SRE default_slo_error_rate is outside (0.0, 1.0]
+- SRE default_cost_budget_usd is negative
+- Per-agent SLO error rates are outside (0.0, 1.0]

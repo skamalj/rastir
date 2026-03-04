@@ -35,6 +35,7 @@ import functools
 import logging
 from typing import Any, Callable, TypeVar
 
+from rastir.remote import discover_mcp_client, inject_traceparent_into_mcp_clients
 from rastir.wrapper import wrap
 
 logger = logging.getLogger("rastir")
@@ -131,12 +132,18 @@ def _crew_kickoff_impl(
     agent_token = set_current_agent(agent_name)
 
     originals: dict[int, dict[str, Any]] = {}
+    mcp_clients: list[Any] = []
 
     try:
         # 2. Find Crew objects in args, wrap internals
         for obj in (*args, *kwargs.values()):
             if _is_crew(obj):
                 _wrap_crew_internals(obj, originals)
+                # Discover MCP server configs on agents
+                _discover_crew_mcp_clients(obj, mcp_clients)
+
+        # Inject traceparent header into discovered MCP clients
+        inject_traceparent_into_mcp_clients(mcp_clients)
 
         # 3. Run the user function
         result = fn(*args, **kwargs)
@@ -170,11 +177,16 @@ async def _async_crew_kickoff_impl(
     agent_token = set_current_agent(agent_name)
 
     originals: dict[int, dict[str, Any]] = {}
+    mcp_clients: list[Any] = []
 
     try:
         for obj in (*args, *kwargs.values()):
             if _is_crew(obj):
                 _wrap_crew_internals(obj, originals)
+                _discover_crew_mcp_clients(obj, mcp_clients)
+
+        # Inject traceparent header into discovered MCP clients
+        inject_traceparent_into_mcp_clients(mcp_clients)
 
         result = await fn(*args, **kwargs)
         span.finish(SpanStatus.OK)
@@ -240,3 +252,17 @@ def _restore_originals(originals: dict[int, dict[str, Any]]) -> None:
             ag.llm = saved["llm"]
         if "tools" in saved:
             ag.tools = saved["tools"]
+
+
+def _discover_crew_mcp_clients(
+    crew: Any, mcp_clients: list[Any],
+) -> None:
+    """Discover MCP server configs on agents' ``mcp_servers`` field."""
+    for ag in _get_agents(crew):
+        mcp_servers = getattr(ag, "mcp_servers", None)
+        if not mcp_servers:
+            continue
+        for srv in mcp_servers:
+            mc = discover_mcp_client(srv)
+            if mc is not None:
+                mcp_clients.append(mc)

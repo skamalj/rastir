@@ -195,13 +195,13 @@ class SREAgentConfig:
 
 @dataclass(frozen=True)
 class SRESection:
-    """SRE Engine — SLO / SLA / error & cost budget tracking.
+    """SRE configuration — SLO / SLA / error & cost budget tracking.
 
-    The SRE engine runs server-side and exposes derived Prometheus
-    gauges for error budgets, cost budgets, burn rates, and SLA status.
+    When enabled, the server exposes config gauge metrics
+    (rastir_slo_error_rate, rastir_cost_budget_usd) per agent.
+    Prometheus recording rules compute all derived SRE metrics.
     """
     enabled: bool = False
-    update_interval_seconds: int = 60  # gauge refresh interval
     default_slo_error_rate: float = 0.01  # 1% default
     default_cost_budget_usd: float = 0.0  # 0 = disabled
     # Per-agent overrides: {"agent_role": SREAgentConfig(...)}
@@ -465,7 +465,6 @@ def load_config(config_path: Optional[str] = None) -> ServerConfig:
 
     sre_section = SRESection(
         enabled=_get("sre", "enabled", False, as_type=bool),
-        update_interval_seconds=_get("sre", "update_interval_seconds", 60, as_type=int),
         default_slo_error_rate=_get_float("sre", "default_slo_error_rate", 0.01),
         default_cost_budget_usd=_get_float("sre", "default_cost_budget_usd", 0.0),
         agents=sre_agents,
@@ -682,11 +681,6 @@ def validate_config(cfg: ServerConfig) -> None:
         )
 
     # SRE validation
-    if cfg.sre.update_interval_seconds <= 0:
-        errors.append(
-            f"sre.update_interval_seconds must be positive "
-            f"(got {cfg.sre.update_interval_seconds})"
-        )
     if not (0.0 < cfg.sre.default_slo_error_rate <= 1.0):
         errors.append(
             f"sre.default_slo_error_rate must be in (0.0, 1.0] "

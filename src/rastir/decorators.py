@@ -163,7 +163,7 @@ def agent(
             @functools.wraps(fn)
             async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
                 span, span_token = start_span(resolved_name, SpanType.AGENT)
-                span.set_attribute("agent_name", resolved_name)
+                span.set_attribute("agent", resolved_name)
                 agent_token = set_current_agent(resolved_name)
                 try:
                     result = await fn(*args, **kwargs)
@@ -185,7 +185,7 @@ def agent(
             @functools.wraps(fn)
             def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
                 span, span_token = start_span(resolved_name, SpanType.AGENT)
-                span.set_attribute("agent_name", resolved_name)
+                span.set_attribute("agent", resolved_name)
                 agent_token = set_current_agent(resolved_name)
                 try:
                     result = fn(*args, **kwargs)

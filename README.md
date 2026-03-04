@@ -53,6 +53,7 @@ That's it. Every LLM call, tool invocation, and node execution inside the graph 
 | **Guardrail tracking** | Automatic AWS Bedrock guardrail violation metrics |
 | **Error normalisation** | Exceptions mapped to 6 fixed categories: timeout, rate_limit, validation_error, provider_error, internal_error, unknown |
 | **Self-hosted collector** | FastAPI server you own. Prometheus `/metrics`, in-memory trace store, OTLP export to Tempo/Jaeger |
+| **SRE budgets & burn rates** | Error and cost budget tracking via Prometheus recording rules — SLO status, burn rates, days-to-exhaustion, all config-driven |
 | **7 Grafana dashboards** | LLM Performance, Agent-Tool, Cost-TTFT, Evaluation, Guardrail, SRE Budgets, System Health |
 | **Generic `wrap()`** | Instrument any object — Redis, databases, MCP sessions — without decorator access |
 

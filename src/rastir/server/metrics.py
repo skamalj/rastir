@@ -195,7 +195,7 @@ class MetricsRegistry:
         self.errors = Counter(
             "rastir_errors_total",
             "Total spans that finished with error status",
-            ["service", "env", "span_type", "error_type", "model", "provider"],
+            ["service", "env", "span_type", "error_type", "model", "provider", "agent"],
             registry=self._registry,
         )
 
@@ -416,6 +416,20 @@ class MetricsRegistry:
         # Evaluation type cardinality guard
         self._seen_evaluation_types: set[str] = set()
 
+        # ---- SRE Config Gauges (set once at startup from config) ----
+        self.sre_slo_error_rate = Gauge(
+            "rastir_slo_error_rate",
+            "Configured SLO error rate per agent (e.g. 0.01 = 1%)",
+            ["agent"],
+            registry=self._registry,
+        )
+        self.sre_cost_budget_usd = Gauge(
+            "rastir_cost_budget_usd",
+            "Configured cost budget in USD per agent per period",
+            ["agent"],
+            registry=self._registry,
+        )
+
         # Ingestion rate tracking state
         self._rate_spans: int = 0
         self._rate_timestamp: float = time.monotonic()
@@ -483,6 +497,9 @@ class MetricsRegistry:
             error_type = self._guard_cardinality(
                 error_type, self._seen_error_types, "error_type"
             )
+            agent_label = self._guard_cardinality(
+                attrs.get("agent", ""), self._seen_agents, "agent"
+            )
             self.errors.labels(
                 service=self._clip(service),
                 env=self._clip(env),
@@ -490,6 +507,7 @@ class MetricsRegistry:
                 error_type=error_type,
                 model=model_label,
                 provider=provider_label,
+                agent=agent_label,
             ).inc()
 
         # -- LLM-specific

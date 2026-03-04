@@ -186,6 +186,93 @@ The server drains the ingestion queue and flushes exporter buffers before exitin
 
 ---
 
+## SRE — Prometheus Recording Rules
+
+Rastir's SRE layer uses a **Prometheus-native** approach: the server exposes static config gauges (`rastir_slo_error_rate`, `rastir_cost_budget_usd`) and Prometheus recording rules compute all derived SRE metrics from raw counters.
+
+### Architecture
+
+```
+Rastir Server                    Prometheus
+┌──────────────────────┐        ┌──────────────────────────────┐
+│ rastir_slo_error_rate │───────▸│ Recording Rules              │
+│ rastir_cost_budget_usd│  scrape│ ├─ rastir:errors:week/month  │
+│ rastir_llm_calls_total│       │ ├─ rastir:error_budget_*     │
+│ rastir_errors_total   │       │ ├─ rastir:cost:week/month    │
+│ rastir_cost_total     │       │ ├─ rastir:cost_budget_*      │
+└──────────────────────┘        │ ├─ rastir:error_burn_rate:*  │
+                                │ └─ rastir:*_days_to_exhaust* │
+                                └──────────────┬───────────────┘
+                                               │ query
+                                               ▼
+                                ┌──────────────────────────────┐
+                                │ Grafana SRE Dashboard        │
+                                └──────────────────────────────┘
+```
+
+### Why Recording Rules?
+
+- **No server-side state** — no in-memory rolling accumulators or snapshot files
+- **Survives server restarts** — Prometheus retains all history
+- **Standard PromQL** — budget calculations are transparent and auditable
+- **Alertable** — recording rules can feed Alertmanager rules directly
+
+### Deploying the Rules
+
+The recording rules file is at `grafana/prometheus/rastir-sre-rules.yml`. Mount it into Prometheus:
+
+```yaml
+# docker-compose.yml (excerpt)
+prometheus:
+  volumes:
+    - ./prometheus/rastir-sre-rules.yml:/etc/prometheus/rules/rastir-sre-rules.yaml
+```
+
+Ensure `prometheus.yml` includes the rules directory:
+
+```yaml
+rule_files:
+  - /etc/prometheus/rules/*.yaml
+```
+
+After deploying, verify rules are loaded: `http://localhost:9090/rules`
+
+### Rule Groups
+
+| Group | Interval | Description |
+|-------|----------|-------------|
+| `rastir_sre_weekly` | 15s | 7-day rolling error/cost budgets, volume, exhaustion |
+| `rastir_sre_monthly` | 15s | 30-day rolling error/cost budgets, volume, exhaustion |
+| `rastir_sre_burn_rates` | 15s | 1h and 6h error burn rate windows |
+
+### Month-Boundary Scaling
+
+All period-based rules use `day_of_month()` scaling to produce correct values early in the month. For example, on March 3 with a 7-day window:
+
+```
+increase(counter[7d]) × clamp_max(day_of_month / 7, 1)
+```
+
+This ensures that at the start of a new month (day 1–2), the `increase(7d)` value (which spans into the previous month) is scaled down proportionally.
+
+### Server Configuration
+
+Enable SRE in `rastir-server-config.yaml`:
+
+```yaml
+sre:
+  enabled: true
+  default_slo_error_rate: 0.01    # 1% error budget
+  default_cost_budget_usd: 25.0   # $25/period
+  agents:
+    my_agent:
+      slo_error_rate: 0.02        # agent-specific override
+```
+
+See [Configuration — SRE](configuration#sre) for all options.
+
+---
+
 ## Structured Logging
 
 Enable JSON-structured logs for production:

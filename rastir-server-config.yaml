@@ -28,3 +28,15 @@ logging:
   #   RASTIR_SERVER_LOGGING_LOG_FILE    (optional file path for debug log)
   level: "INFO"
   structured: true
+
+sre:
+  enabled: true
+  default_slo_error_rate: 0.01
+  default_cost_budget_usd: 25.0
+  agents:
+    langgraph_e2e_agent:
+      slo_error_rate: 0.02
+    manual_graph_agent:
+      slo_error_rate: 0.01
+    openai_agent:
+      slo_error_rate: 0.01

@@ -1,15 +1,24 @@
 {
   "uid": "rastir-sre-budgets",
-  "id": 7,
-  "title": "Rastir SRE — Budgets & Burn Rates",
+  "id": null,
+  "title": "Rastir SRE \u2014 Budgets & Burn Rates",
   "description": "SLO/SLA tracking, error & cost budgets, burn rates, exhaustion projections",
-  "tags": ["rastir", "llm-observability", "sre", "slo", "budget"],
+  "tags": [
+    "rastir",
+    "llm-observability",
+    "sre",
+    "slo",
+    "budget"
+  ],
   "schemaVersion": 39,
-  "version": 1,
+  "version": 3,
   "timezone": "browser",
   "editable": true,
   "graphTooltip": 1,
-  "time": { "from": "now-1h", "to": "now" },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
   "refresh": "30s",
   "fiscalYearStartMonth": 0,
   "liveNow": false,
@@ -18,15 +27,22 @@
     "list": [
       {
         "allValue": ".*",
-        "current": { "selected": true, "text": "All", "value": "$__all" },
-        "datasource": { "type": "prometheus", "uid": "prometheus" },
-        "definition": "label_values(rastir_expected_volume, service)",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values(rastir_llm_calls_total, service)",
         "hide": 0,
         "includeAll": true,
         "multi": true,
         "name": "service",
         "options": [],
-        "query": "label_values(rastir_expected_volume, service)",
+        "query": "label_values(rastir_llm_calls_total, service)",
         "refresh": 2,
         "regex": "",
         "sort": 1,
@@ -34,15 +50,68 @@
       },
       {
         "allValue": ".*",
-        "current": { "selected": true, "text": "All", "value": "$__all" },
-        "datasource": { "type": "prometheus", "uid": "prometheus" },
-        "definition": "label_values(rastir_expected_volume, env)",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values(rastir_llm_calls_total, env)",
         "hide": 0,
         "includeAll": true,
         "multi": true,
         "name": "env",
         "options": [],
-        "query": "label_values(rastir_expected_volume, env)",
+        "query": "label_values(rastir_llm_calls_total, env)",
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "allValue": ".+",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values(rastir_llm_calls_total, agent)",
+        "hide": 0,
+        "includeAll": true,
+        "multi": true,
+        "name": "agent",
+        "options": [],
+        "query": "label_values(rastir_llm_calls_total, agent)",
+        "refresh": 2,
+        "regex": ".+",
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values(rastir_llm_calls_total, model)",
+        "hide": 0,
+        "includeAll": true,
+        "multi": true,
+        "name": "model",
+        "options": [],
+        "query": "label_values(rastir_llm_calls_total, model)",
         "refresh": 2,
         "regex": "",
         "sort": 1,
@@ -50,29 +119,48 @@
       },
       {
         "allValue": ".*",
-        "current": { "selected": true, "text": "All", "value": "$__all" },
-        "datasource": { "type": "prometheus", "uid": "prometheus" },
-        "definition": "label_values(rastir_expected_volume, agent)",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values(rastir_llm_calls_total, provider)",
         "hide": 0,
         "includeAll": true,
         "multi": true,
-        "name": "agent",
+        "name": "provider",
         "options": [],
-        "query": "label_values(rastir_expected_volume, agent)",
+        "query": "label_values(rastir_llm_calls_total, provider)",
         "refresh": 2,
         "regex": "",
         "sort": 1,
         "type": "query"
       },
       {
-        "current": { "selected": true, "text": "week", "value": "week" },
+        "current": {
+          "selected": true,
+          "text": "week",
+          "value": "week"
+        },
         "hide": 0,
         "includeAll": false,
         "multi": false,
         "name": "period",
         "options": [
-          { "selected": true, "text": "week", "value": "week" },
-          { "selected": false, "text": "month", "value": "month" }
+          {
+            "selected": true,
+            "text": "week",
+            "value": "week"
+          },
+          {
+            "selected": false,
+            "text": "month",
+            "value": "month"
+          }
         ],
         "query": "week,month",
         "type": "custom"
@@ -83,44 +171,84 @@
     {
       "id": 100,
       "type": "row",
-      "title": "SLA Status & Overview",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "title": "Overview",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
       "collapsed": false,
       "panels": []
     },
     {
       "id": 1,
       "title": "SLA Status",
-      "description": "1 = Healthy (error budget remaining), 0 = Breached",
+      "description": "HEALTHY = all agents within budget, BREACHED = at least one agent over budget",
       "type": "stat",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 6, "w": 4, "x": 0, "y": 1 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 1
+      },
       "targets": [
         {
-          "expr": "rastir_sla_status{service=~\"$service\",env=~\"$env\",agent=~\"$agent\",period=\"$period\"}",
-          "legendFormat": "{{agent}}",
+          "expr": "min(rastir:sla_status:$period{service=~\"$service\",env=~\"$env\",agent=~\"$agent\"})",
+          "legendFormat": "SLA",
           "refId": "A"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "mappings": [
-            { "type": "value", "options": { "0": { "text": "BREACHED", "color": "red" } } },
-            { "type": "value", "options": { "1": { "text": "HEALTHY", "color": "green" } } }
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "BREACHED",
+                  "color": "red"
+                }
+              }
+            },
+            {
+              "type": "value",
+              "options": {
+                "1": {
+                  "text": "HEALTHY",
+                  "color": "green"
+                }
+              }
+            }
           ],
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "red", "value": null },
-              { "color": "green", "value": 1 }
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
             ]
           }
         }
       },
       "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
         "colorMode": "background",
-        "textMode": "value_and_name"
+        "textMode": "value",
+        "justifyMode": "center"
       }
     },
     {
@@ -128,11 +256,19 @@
       "title": "Expected Volume",
       "description": "Rolling request volume used to estimate allowed budget",
       "type": "stat",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 6, "w": 4, "x": 4, "y": 1 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 7,
+        "x": 4,
+        "y": 1
+      },
       "targets": [
         {
-          "expr": "sum(rastir_expected_volume{service=~\"$service\",env=~\"$env\",agent=~\"$agent\",period=\"$period\"})",
+          "expr": "sum(rastir:expected_volume:$period{service=~\"$service\",env=~\"$env\",agent=~\"$agent\"})",
           "legendFormat": "Expected Volume",
           "refId": "A"
         }
@@ -143,26 +279,43 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "blue", "value": null }
+              {
+                "color": "#2f575e",
+                "value": null
+              }
             ]
           }
         }
       },
       "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"] },
-        "colorMode": "background"
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "textMode": "value",
+        "justifyMode": "center"
       }
     },
     {
       "id": 3,
       "title": "Error Budget Total",
-      "description": "Total allowed errors = expected_volume × SLO error rate",
+      "description": "Total allowed errors = expected_volume \u00d7 SLO error rate",
       "type": "stat",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 6, "w": 4, "x": 8, "y": 1 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 7,
+        "x": 11,
+        "y": 1
+      },
       "targets": [
         {
-          "expr": "sum(rastir_error_budget_total{service=~\"$service\",env=~\"$env\",agent=~\"$agent\",period=\"$period\"})",
+          "expr": "sum(rastir:error_budget_total:$period{service=~\"$service\",env=~\"$env\",agent=~\"$agent\"})",
           "legendFormat": "Error Budget",
           "refId": "A"
         }
@@ -173,59 +326,257 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null }
+              {
+                "color": "#2f575e",
+                "value": null
+              }
             ]
           }
         }
       },
       "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"] },
-        "colorMode": "background"
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "textMode": "value",
+        "justifyMode": "center"
       }
     },
     {
-      "id": 4,
-      "title": "Error Budget Remaining",
-      "description": "Remaining allowed errors before SLA breach",
+      "id": 10,
+      "title": "Allocated Cost Budget",
+      "description": "Total cost budget allocated for the period",
       "type": "stat",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 6, "w": 4, "x": 12, "y": 1 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 1
+      },
       "targets": [
         {
-          "expr": "sum(rastir_error_budget_remaining{service=~\"$service\",env=~\"$env\",agent=~\"$agent\",period=\"$period\"})",
-          "legendFormat": "Remaining",
+          "expr": "scalar(rastir_cost_budget_usd{agent=\"unknown\"})",
+          "legendFormat": "Cost Budget",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#2f575e",
+                "value": null
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "textMode": "value",
+        "justifyMode": "center",
+        "graphMode": "none"
+      }
+    },
+    {
+      "id": 101,
+      "type": "row",
+      "title": "Status",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 14,
+      "title": "Total Requests",
+      "description": "Actual total requests so far in the current period (capped at month boundary)",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 0,
+        "y": 6
+      },
+      "targets": [
+        {
+          "expr": "sum(rastir:volume:$period{service=~\"$service\",env=~\"$env\",agent=~\"$agent\"})",
+          "legendFormat": "Total Requests",
           "refId": "A"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "short",
+          "decimals": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "red", "value": null },
-              { "color": "yellow", "value": 1 },
-              { "color": "green", "value": 5 }
+              {
+                "color": "#2f575e",
+                "value": null
+              }
             ]
           }
         }
       },
       "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"] },
-        "colorMode": "background"
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "textMode": "value",
+        "justifyMode": "center"
       }
     },
     {
-      "id": 5,
-      "title": "Cost Budget Remaining ($)",
-      "description": "Remaining cost budget for the current period",
+      "id": 11,
+      "title": "Total Errors",
+      "description": "Total errors in the selected period",
       "type": "stat",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 6, "w": 4, "x": 16, "y": 1 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 5,
+        "y": 6
+      },
       "targets": [
         {
-          "expr": "sum(rastir_cost_budget_remaining{service=~\"$service\",env=~\"$env\",agent=~\"$agent\",period=\"$period\"})",
-          "legendFormat": "Cost Remaining",
+          "expr": "sum(rastir:errors:$period{service=~\"$service\",env=~\"$env\",agent=~\"$agent\"})",
+          "legendFormat": "Total Errors",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#2f575e",
+                "value": null
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "textMode": "value",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "id": 4,
+      "title": "Error Budget Remaining (%)",
+      "description": "Percentage of error budget remaining before SLA breach",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 10,
+        "y": 6
+      },
+      "targets": [
+        {
+          "expr": "100 * (1 - sum(rastir:errors:$period{service=~\"$service\",env=~\"$env\",agent=~\"$agent\"}) / sum(rastir:error_budget_total:$period{service=~\"$service\",env=~\"$env\",agent=~\"$agent\"}))",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "green",
+                "value": 90
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "textMode": "value",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "id": 12,
+      "title": "Cost Incurred",
+      "description": "Total cost incurred in the selected period",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 15,
+        "y": 6
+      },
+      "targets": [
+        {
+          "expr": "sum(rastir:cost:$period)",
+          "legendFormat": "Cost Incurred",
           "refId": "A"
         }
       ],
@@ -235,28 +586,113 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "red", "value": null },
-              { "color": "yellow", "value": 10 },
-              { "color": "green", "value": 50 }
+              {
+                "color": "#2f575e",
+                "value": null
+              }
             ]
           }
         }
       },
       "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"] },
-        "colorMode": "background"
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "textMode": "value",
+        "justifyMode": "center"
       }
     },
     {
-      "id": 6,
-      "title": "Error Days to Exhaustion",
-      "description": "Estimated days until error budget runs out",
+      "id": 5,
+      "title": "Cost Budget Remaining ($)",
+      "description": "Remaining cost budget for the current period",
       "type": "stat",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 6, "w": 4, "x": 20, "y": 1 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 6
+      },
       "targets": [
         {
-          "expr": "min(rastir_error_days_to_exhaustion{service=~\"$service\",env=~\"$env\",agent=~\"$agent\",period=\"$period\"})",
+          "expr": "scalar(rastir_cost_budget_usd{agent=\"unknown\"}) - sum(rastir:cost:$period)",
+          "legendFormat": "Cost Remaining",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#f2495c",
+                "value": null
+              },
+              {
+                "color": "#ff9830",
+                "value": 5
+              },
+              {
+                "color": "#73bf69",
+                "value": 12.5
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "textMode": "value",
+        "justifyMode": "center",
+        "graphMode": "none"
+      }
+    },
+    {
+      "id": 104,
+      "type": "row",
+      "title": "Burn & Exhaustion",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 10
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 6,
+      "title": "Error Budget \u2014 Days to Exhaustion",
+      "description": "Estimated days until error budget runs out (worst-case across agents)",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 0,
+        "y": 11
+      },
+      "targets": [
+        {
+          "expr": "min(rastir:error_days_to_exhaustion:$period{service=~\"$service\",env=~\"$env\",agent=~\"$agent\"})",
           "legendFormat": "Days Left",
           "refId": "A"
         }
@@ -268,235 +704,52 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "red", "value": null },
-              { "color": "yellow", "value": 3 },
-              { "color": "green", "value": 7 }
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 3
+              },
+              {
+                "color": "green",
+                "value": 7
+              }
             ]
           }
         }
       },
       "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"] },
-        "colorMode": "background"
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "textMode": "value",
+        "justifyMode": "center"
       }
     },
-
     {
-      "id": 101,
-      "type": "row",
-      "title": "Error Budget",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 7 },
-      "collapsed": false,
-      "panels": []
-    },
-    {
-      "id": 10,
-      "title": "Error Budget Consumed (%)",
-      "description": "Percentage of error budget consumed per agent",
-      "type": "gauge",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 8 },
-      "targets": [
-        {
-          "expr": "rastir_error_budget_consumed_percent{service=~\"$service\",env=~\"$env\",agent=~\"$agent\",period=\"$period\"}",
-          "legendFormat": "{{agent}}",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "thresholds" },
-          "min": 0,
-          "max": 150,
-          "unit": "percent",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 50 },
-              { "color": "orange", "value": 80 },
-              { "color": "red", "value": 100 }
-            ]
-          }
-        }
+      "id": 15,
+      "title": "Cost Budget \u2014 Days to Exhaustion",
+      "description": "Estimated days until cost budget runs out based on current spend rate",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
       },
-      "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"] },
-        "orientation": "auto",
-        "minVizHeight": 75,
-        "minVizWidth": 75
-      }
-    },
-    {
-      "id": 11,
-      "title": "Error Budget Remaining (trend)",
-      "description": "Error budget remaining over time per agent",
-      "type": "timeseries",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 8 },
-      "targets": [
-        {
-          "expr": "rastir_error_budget_remaining{service=~\"$service\",env=~\"$env\",agent=~\"$agent\",period=\"$period\"}",
-          "legendFormat": "{{agent}}",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "spanNulls": true,
-            "lineWidth": 2,
-            "thresholdsStyle": { "mode": "line" }
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "red", "value": null },
-              { "color": "green", "value": 0 }
-            ]
-          }
-        }
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 0,
+        "y": 15
       },
-      "options": {
-        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] }
-      }
-    },
-    {
-      "id": 12,
-      "title": "Error Budget Consumed % (trend)",
-      "description": "Error budget consumed percentage over time",
-      "type": "timeseries",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 8 },
       "targets": [
         {
-          "expr": "rastir_error_budget_consumed_percent{service=~\"$service\",env=~\"$env\",agent=~\"$agent\",period=\"$period\"}",
-          "legendFormat": "{{agent}}",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percent",
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "spanNulls": true,
-            "lineWidth": 2,
-            "thresholdsStyle": { "mode": "line" }
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green", "value": null },
-              { "color": "red", "value": 100 }
-            ]
-          }
-        }
-      },
-      "options": {
-        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }
-      }
-    },
-
-    {
-      "id": 102,
-      "type": "row",
-      "title": "Burn Rates",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 16 },
-      "collapsed": false,
-      "panels": []
-    },
-    {
-      "id": 20,
-      "title": "Error Burn Rate — Short (1h)",
-      "description": "Short-window burn rate: error_rate_1h / SLO. >1 = consuming budget faster than allowed",
-      "type": "timeseries",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 17 },
-      "targets": [
-        {
-          "expr": "rastir_error_burn_rate_short{service=~\"$service\",env=~\"$env\",agent=~\"$agent\"}",
-          "legendFormat": "{{agent}}",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "decimals": 2,
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "spanNulls": true,
-            "lineWidth": 2,
-            "thresholdsStyle": { "mode": "line+area" }
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "transparent", "value": null },
-              { "color": "red", "value": 1 }
-            ]
-          }
-        }
-      },
-      "options": {
-        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }
-      }
-    },
-    {
-      "id": 21,
-      "title": "Error Burn Rate — Long (6h)",
-      "description": "Long-window burn rate: error_rate_6h / SLO. Sustained >1 = fast budget depletion",
-      "type": "timeseries",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 17 },
-      "targets": [
-        {
-          "expr": "rastir_error_burn_rate_long{service=~\"$service\",env=~\"$env\",agent=~\"$agent\"}",
-          "legendFormat": "{{agent}}",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "decimals": 2,
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "spanNulls": true,
-            "lineWidth": 2,
-            "thresholdsStyle": { "mode": "line+area" }
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "transparent", "value": null },
-              { "color": "red", "value": 1 }
-            ]
-          }
-        }
-      },
-      "options": {
-        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }
-      }
-    },
-    {
-      "id": 22,
-      "title": "Error Days to Exhaustion (trend)",
-      "description": "Projected days until error budget runs out per agent",
-      "type": "timeseries",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 25 },
-      "targets": [
-        {
-          "expr": "rastir_error_days_to_exhaustion{service=~\"$service\",env=~\"$env\",agent=~\"$agent\",period=\"$period\"} < 9999",
-          "legendFormat": "{{agent}}",
+          "expr": "min(rastir:cost_days_to_exhaustion:$period)",
+          "legendFormat": "Days Left",
           "refId": "A"
         }
       ],
@@ -504,39 +757,460 @@
         "defaults": {
           "unit": "short",
           "decimals": 1,
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 5,
-            "spanNulls": true,
-            "lineWidth": 2,
-            "thresholdsStyle": { "mode": "line+area" }
-          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "red", "value": null },
-              { "color": "yellow", "value": 3 },
-              { "color": "green", "value": 7 }
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 3
+              },
+              {
+                "color": "green",
+                "value": 7
+              }
             ]
           }
         }
       },
       "options": {
-        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "min"] }
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "textMode": "value",
+        "justifyMode": "center"
       }
     },
     {
-      "id": 23,
-      "title": "Expected Volume (trend)",
-      "description": "Rolling expected request volume used for budget estimation",
+      "id": 13,
+      "title": "Error & Cost Budget Burn Rate",
+      "description": "Error and cost budget remaining over time \u2014 starts at 100% and burns down to 0%",
       "type": "timeseries",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 25 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 11
+      },
       "targets": [
         {
-          "expr": "rastir_expected_volume{service=~\"$service\",env=~\"$env\",agent=~\"$agent\",period=\"$period\"}",
-          "legendFormat": "{{agent}}",
+          "expr": "clamp_min(100 * (1 - sum(rastir:errors:$period{service=~\"$service\",env=~\"$env\",agent=~\"$agent\"}) / sum(rastir:error_budget_total:$period{service=~\"$service\",env=~\"$env\",agent=~\"$agent\"})), 0)",
+          "legendFormat": "Error Budget Remaining %",
           "refId": "A"
+        },
+        {
+          "expr": "clamp_min(100 * (1 - sum(rastir:cost:$period) / scalar(rastir_cost_budget_usd{agent=\"unknown\"})), 0)",
+          "legendFormat": "Cost Budget Remaining %",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 1,
+          "min": 0,
+          "max": 100,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "spanNulls": true,
+            "lineWidth": 2,
+            "gradientMode": "scheme",
+            "axisSoftMin": 0,
+            "axisSoftMax": 100,
+            "thresholdsStyle": {
+              "mode": "area"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "#ff9830",
+                "value": 25
+              },
+              {
+                "color": "green",
+                "value": 75
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 106,
+      "type": "row",
+      "title": "Error Budget Breakdown",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 19
+      },
+      "panels": []
+    },
+    {
+      "id": 7,
+      "type": "piechart",
+      "title": "Error Budget Consumed \u2014 by Agent",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 20
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          },
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "right",
+          "showLegend": true,
+          "values": [
+            "value",
+            "percent"
+          ]
+        },
+        "pieType": "donut",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "rastir:errors:$period{service=~\"$service\",env=~\"$env\",agent=~\"$agent\"}",
+          "legendFormat": "{{agent}}",
+          "refId": "A",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "piechart",
+      "title": "Error Budget Consumed \u2014 by Model",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 20
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          },
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "right",
+          "showLegend": true,
+          "values": [
+            "value",
+            "percent"
+          ]
+        },
+        "pieType": "donut",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by(model)(rastir:errors_by_model:$period{service=~\"$service\",env=~\"$env\",agent=~\"$agent\"})",
+          "legendFormat": "{{model}}",
+          "refId": "A",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": 25,
+      "title": "Cumulative Volume",
+      "description": "Total LLM call volume accumulated within the current month",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 28
+      },
+      "targets": [
+        {
+          "expr": "sum(rastir:volume:$period{service=~\"$service\",env=~\"$env\",agent=~\"$agent\"})",
+          "legendFormat": "Total Volume",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "spanNulls": true,
+            "lineWidth": 2,
+            "gradientMode": "opacity",
+            "axisSoftMin": 0
+          },
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#2f575e"
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 107,
+      "type": "row",
+      "title": "Service Performance",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 36
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 40,
+      "title": "Average Latency per Service",
+      "description": "Mean span duration per service (all span types aggregated)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 37
+      },
+      "targets": [
+        {
+          "expr": "sum by(service)(rate(rastir_duration_seconds_sum{service=~\"$service\",env=~\"$env\"}[5m])) / sum by(service)(rate(rastir_duration_seconds_count{service=~\"$service\",env=~\"$env\"}[5m]))",
+          "legendFormat": "{{service}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "spanNulls": true,
+            "lineWidth": 2,
+            "gradientMode": "opacity",
+            "axisSoftMin": 0
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 41,
+      "title": "Requests per Second (RPS) per Service",
+      "description": "Request throughput per service (all span types aggregated)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 37
+      },
+      "targets": [
+        {
+          "expr": "sum by(service)(rate(rastir_duration_seconds_count{service=~\"$service\",env=~\"$env\"}[5m]))",
+          "legendFormat": "{{service}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "spanNulls": true,
+            "lineWidth": 2,
+            "gradientMode": "opacity",
+            "axisSoftMin": 0
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 42,
+      "title": "Token Consumption Rate per Service",
+      "description": "Input and output token consumption rate per service, 5-minute average",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 45
+      },
+      "targets": [
+        {
+          "expr": "sum by(service)(rate(rastir_tokens_input_total{service=~\"$service\",env=~\"$env\"}[5m]))",
+          "legendFormat": "{{service}} — input",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by(service)(rate(rastir_tokens_output_total{service=~\"$service\",env=~\"$env\"}[5m]))",
+          "legendFormat": "{{service}} — output",
+          "refId": "B"
         }
       ],
       "fieldConfig": {
@@ -546,202 +1220,133 @@
             "drawStyle": "line",
             "fillOpacity": 15,
             "spanNulls": true,
-            "lineWidth": 2
+            "lineWidth": 2,
+            "gradientMode": "opacity",
+            "axisSoftMin": 0
+          },
+          "color": {
+            "mode": "palette-classic"
           }
         }
       },
       "options": {
-        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }
-      }
-    },
-
-    {
-      "id": 103,
-      "type": "row",
-      "title": "Cost Budget",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 33 },
-      "collapsed": false,
-      "panels": []
-    },
-    {
-      "id": 30,
-      "title": "Cost Budget Consumed (%)",
-      "description": "Percentage of cost budget consumed per agent",
-      "type": "gauge",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 34 },
-      "targets": [
-        {
-          "expr": "rastir_cost_budget_consumed_percent{service=~\"$service\",env=~\"$env\",agent=~\"$agent\",period=\"$period\"}",
-          "legendFormat": "{{agent}}",
-          "refId": "A"
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
         }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "thresholds" },
-          "min": 0,
-          "max": 150,
-          "unit": "percent",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 50 },
-              { "color": "orange", "value": 80 },
-              { "color": "red", "value": 100 }
-            ]
-          }
-        }
-      },
-      "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"] },
-        "orientation": "auto",
-        "minVizHeight": 75,
-        "minVizWidth": 75
       }
     },
     {
-      "id": 31,
-      "title": "Cost Budget Remaining (trend)",
-      "description": "Remaining cost budget ($) over time",
+      "id": 43,
+      "title": "Cost Rate per Service",
+      "description": "Cost incurred per service over time",
       "type": "timeseries",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 34 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 45
+      },
       "targets": [
         {
-          "expr": "rastir_cost_budget_remaining{service=~\"$service\",env=~\"$env\",agent=~\"$agent\",period=\"$period\"}",
-          "legendFormat": "{{agent}}",
+          "expr": "sum by(service)(rate(rastir_cost_total{service=~\"$service\",env=~\"$env\"}[5m]))",
+          "legendFormat": "{{service}}",
           "refId": "A"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "currencyUSD",
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "spanNulls": true,
-            "lineWidth": 2,
-            "thresholdsStyle": { "mode": "line" }
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "red", "value": null },
-              { "color": "green", "value": 0 }
-            ]
-          }
-        }
-      },
-      "options": {
-        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] }
-      }
-    },
-    {
-      "id": 32,
-      "title": "Cost Budget Consumed % (trend)",
-      "description": "Cost budget consumed percentage over time",
-      "type": "timeseries",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 34 },
-      "targets": [
-        {
-          "expr": "rastir_cost_budget_consumed_percent{service=~\"$service\",env=~\"$env\",agent=~\"$agent\",period=\"$period\"}",
-          "legendFormat": "{{agent}}",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percent",
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "spanNulls": true,
-            "lineWidth": 2,
-            "thresholdsStyle": { "mode": "line" }
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green", "value": null },
-              { "color": "red", "value": 100 }
-            ]
-          }
-        }
-      },
-      "options": {
-        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] }
-      }
-    },
-    {
-      "id": 33,
-      "title": "Cost Burn Rate ($/day)",
-      "description": "Average daily cost burn rate per agent",
-      "type": "timeseries",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 42 },
-      "targets": [
-        {
-          "expr": "rastir_cost_burn_rate_daily{service=~\"$service\",env=~\"$env\",agent=~\"$agent\",period=\"$period\"}",
-          "legendFormat": "{{agent}}",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "currencyUSD",
-          "decimals": 2,
+          "decimals": 4,
           "custom": {
             "drawStyle": "line",
             "fillOpacity": 15,
             "spanNulls": true,
-            "lineWidth": 2
+            "lineWidth": 2,
+            "gradientMode": "opacity",
+            "axisSoftMin": 0
+          },
+          "color": {
+            "mode": "palette-classic"
           }
         }
       },
       "options": {
-        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "mean", "max"] }
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       }
     },
     {
-      "id": 34,
-      "title": "Cost Days to Exhaustion (trend)",
-      "description": "Projected days until cost budget runs out per agent",
+      "id": 44,
+      "title": "P95 / P99 Latency per Service",
+      "description": "95th and 99th percentile span duration per service (histogram quantiles)",
       "type": "timeseries",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 42 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 53
+      },
       "targets": [
         {
-          "expr": "rastir_cost_days_to_exhaustion{service=~\"$service\",env=~\"$env\",agent=~\"$agent\",period=\"$period\"} < 9999",
-          "legendFormat": "{{agent}}",
+          "expr": "histogram_quantile(0.95, sum by(service, le)(rate(rastir_duration_seconds_bucket{service=~\"$service\",env=~\"$env\"}[5m])))",
+          "legendFormat": "{{service}} — p95",
           "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by(service, le)(rate(rastir_duration_seconds_bucket{service=~\"$service\",env=~\"$env\"}[5m])))",
+          "legendFormat": "{{service}} — p99",
+          "refId": "B"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short",
-          "decimals": 1,
+          "unit": "s",
           "custom": {
             "drawStyle": "line",
-            "fillOpacity": 5,
+            "fillOpacity": 10,
             "spanNulls": true,
             "lineWidth": 2,
-            "thresholdsStyle": { "mode": "line+area" }
+            "gradientMode": "opacity",
+            "axisSoftMin": 0
           },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "red", "value": null },
-              { "color": "yellow", "value": 5 },
-              { "color": "green", "value": 14 }
-            ]
+          "color": {
+            "mode": "palette-classic"
           }
         }
       },
       "options": {
-        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "min"] }
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       }
     }
   ]

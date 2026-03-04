@@ -128,7 +128,7 @@ class TestAgent:
         assert len(spans) == 1
         s = spans[0]
         assert s.span_type == SpanType.AGENT
-        assert s.attributes["agent_name"] == "my_agent"
+        assert s.attributes["agent"] == "my_agent"
 
     def test_agent_with_name(self):
         @agent(agent_name="research_bot")
@@ -137,7 +137,7 @@ class TestAgent:
 
         my_agent()
         spans = drain_batch(10)
-        assert spans[0].attributes["agent_name"] == "research_bot"
+        assert spans[0].attributes["agent"] == "research_bot"
         assert spans[0].name == "research_bot"
 
     def test_agent_sets_context_for_children(self):

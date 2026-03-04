@@ -42,6 +42,7 @@ import functools
 import logging
 from typing import Any, Callable, TypeVar
 
+from rastir.remote import discover_mcp_client, inject_traceparent_into_mcp_clients
 from rastir.wrapper import wrap
 
 logger = logging.getLogger("rastir")
@@ -95,6 +96,19 @@ def _is_tool_node(obj: Any) -> bool:
     cls_name = type(obj).__name__
     module = getattr(type(obj), "__module__", "") or ""
     return cls_name == "ToolNode" and "langgraph" in module
+
+
+def _is_runnable(obj: Any) -> bool:
+    """True if *obj* looks like a LangChain Runnable worth walking into.
+
+    Matches ``RunnableBinding``, ``RunnableSequence``, ``RunnableCallable``,
+    etc. without importing from langchain_core.
+    """
+    cls_name = type(obj).__name__
+    module = getattr(type(obj), "__module__", "") or ""
+    if "langchain" not in module and "langgraph" not in module:
+        return False
+    return cls_name.startswith("Runnable")
 
 
 def _model_display_name(model: Any) -> str:
@@ -175,15 +189,25 @@ def _langgraph_agent_impl(
     from rastir.spans import SpanStatus, SpanType
 
     span, token = start_span(agent_name, SpanType.AGENT)
-    span.set_attribute("agent_name", agent_name)
+    span.set_attribute("agent", agent_name)
     agent_token = set_current_agent(agent_name)
 
     originals: list[tuple] = []
+    mcp_clients: list[Any] = []
 
     try:
         for obj in (*args, *kwargs.values()):
             if _is_compiled_graph(obj):
                 _wrap_graph_internals(obj, originals)
+            mc = discover_mcp_client(obj)
+            if mc is not None:
+                mcp_clients.append(mc)
+
+        # Also walk function closures/globals for MCP clients
+        _walk_func_for_mcp_clients(fn, mcp_clients)
+
+        # Inject traceparent header into discovered MCP clients
+        inject_traceparent_into_mcp_clients(mcp_clients)
 
         result = fn(*args, **kwargs)
         span.finish(SpanStatus.OK)
@@ -213,15 +237,25 @@ async def _async_langgraph_agent_impl(
     from rastir.spans import SpanStatus, SpanType
 
     span, token = start_span(agent_name, SpanType.AGENT)
-    span.set_attribute("agent_name", agent_name)
+    span.set_attribute("agent", agent_name)
     agent_token = set_current_agent(agent_name)
 
     originals: list[tuple] = []
+    mcp_clients: list[Any] = []
 
     try:
         for obj in (*args, *kwargs.values()):
             if _is_compiled_graph(obj):
                 _wrap_graph_internals(obj, originals)
+            mc = discover_mcp_client(obj)
+            if mc is not None:
+                mcp_clients.append(mc)
+
+        # Also walk function closures/globals for MCP clients
+        _walk_func_for_mcp_clients(fn, mcp_clients)
+
+        # Inject traceparent header into discovered MCP clients
+        inject_traceparent_into_mcp_clients(mcp_clients)
 
         result = await fn(*args, **kwargs)
         span.finish(SpanStatus.OK)
@@ -304,9 +338,17 @@ def _wrap_runnable(
         return
 
     # ---- RunnableCallable / plain callable --------------------------------
-    func = getattr(obj, "func", None)
-    if func is not None and callable(func):
-        _walk_func_for_wrapping(func, originals, seen)
+    # Check both .func (sync) and .afunc (async) — LangGraph stores
+    # async node functions in .afunc, not .func.
+    for func_attr in ("func", "afunc"):
+        func = getattr(obj, func_attr, None)
+        if func is not None and callable(func):
+            _walk_func_for_wrapping(func, originals, seen)
+    if getattr(obj, "func", None) is not None or getattr(obj, "afunc", None) is not None:
+        return
+
+    # ---- Check if obj itself is a chat model (direct hit) ----------------
+    if _is_chat_model(obj):
         return
 
     # ---- Generic fallback: follow .bound, .func, .first ------------------
@@ -323,7 +365,7 @@ def _walk_func_for_wrapping(
     # 1. Closure cells
     closure = getattr(func, "__closure__", None)
     if closure:
-        for cell in closure:
+        for i, cell in enumerate(closure):
             try:
                 val = cell.cell_contents
             except ValueError:
@@ -346,6 +388,44 @@ def _walk_func_for_wrapping(
                 seen.add(id(val))
                 _wrap_model_at(func_globals, varname, val, originals,
                                kind="dict")
+            elif _is_runnable(val):
+                # Walk into RunnableBinding / RunnableSequence etc.
+                # that may contain a chat model inside (e.g. llm.bind_tools())
+                _wrap_runnable(val, originals, seen)
+
+
+def _walk_func_for_mcp_clients(
+    func: Any, mcp_clients: list[Any],
+) -> None:
+    """Walk a function's closures and globals for MCP client objects."""
+    seen: set[int] = set()
+
+    # 1. Closure cells
+    closure = getattr(func, "__closure__", None)
+    if closure:
+        for cell in closure:
+            try:
+                val = cell.cell_contents
+            except ValueError:
+                continue
+            if id(val) not in seen:
+                seen.add(id(val))
+                mc = discover_mcp_client(val)
+                if mc is not None:
+                    mcp_clients.append(mc)
+
+    # 2. Global variables referenced by the function
+    code = getattr(func, "__code__", None)
+    func_globals = getattr(func, "__globals__", None)
+    if code is not None and func_globals is not None:
+        for varname in code.co_names:
+            val = func_globals.get(varname)
+            if val is None or id(val) in seen:
+                continue
+            seen.add(id(val))
+            mc = discover_mcp_client(val)
+            if mc is not None:
+                mcp_clients.append(mc)
 
 
 # ---------------------------------------------------------------------------

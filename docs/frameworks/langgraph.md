@@ -105,6 +105,22 @@ All tools inside the graph's `ToolNode` are discovered and wrapped.
 | Span type | `TOOL` |
 | Methods wrapped | `invoke`, `ainvoke`, `_run`, `_arun`, `run`, `arun` |
 
+### 4. MCP Clients → Trace Propagation
+
+The decorator auto-discovers MCP client objects (e.g. `MultiServerMCPClient`) from three locations:
+
+1. **Function arguments** — positional and keyword args
+2. **Function closures** — variables captured in the enclosing scope
+3. **Function globals** — module-level variables referenced in the function body
+
+For each discovered MCP client, the `traceparent` header is automatically injected into all connections before execution. This enables **distributed tracing** across MCP tool boundaries — the same `trace_id` links the LangGraph agent span to the MCP server spans.
+
+| Client type | Detection |
+|-------------|----------|
+| `MultiServerMCPClient` | Sets `traceparent` on each connection's headers dict |
+
+No manual `wrap(session)` call is needed when using `@langgraph_agent`.
+
 ---
 
 ## Coding Patterns
@@ -212,22 +228,32 @@ def run(graph, query):
 run(graph, "Hello")
 ```
 
-### Pattern 7: MCP tools
+### Pattern 7: MCP tools with distributed tracing
 
-LangGraph handles MCP tools natively — they're converted to LangChain tools by the framework. Rastir wraps them like any other tool.
+LangGraph handles MCP tools natively — they're converted to LangChain tools by the framework. Rastir wraps them like any other tool **and** auto-discovers MCP client objects to inject trace context.
 
 ```python
-from langchain_mcp_adapters.tools import load_mcp_tools
+from langchain_mcp_adapters.client import MultiServerMCPClient
 
-tools = await load_mcp_tools(session)
-graph = create_react_agent(model, tools)
+mcp_client = MultiServerMCPClient({
+    "math": {"url": "http://localhost:19879/sse", "transport": "sse"}
+})
 
-@langgraph_agent(agent_name="mcp_agent")
-def run(query):
-    return graph.invoke({"messages": [("user", query)]})
+async with mcp_client:
+    tools = mcp_client.get_tools()
+    graph = create_react_agent(model, tools)
+
+    @langgraph_agent(agent_name="mcp_agent")
+    async def run(mcp_client, query):
+        return await graph.ainvoke({"messages": [("user", query)]})
+
+    result = await run(mcp_client, "What is 2+2?")
 ```
 
-No special MCP handling needed.
+The decorator discovers `mcp_client` from the function arguments (it also checks closures and globals) and automatically sets the `traceparent` header on all MCP connections. The MCP server receives the trace context, enabling end-to-end distributed tracing with a single `trace_id`.
+
+{: .note }
+> The MCP client can be passed as an argument, captured in a closure, or referenced as a module global — the decorator will find it in all three cases.
 
 ---
 

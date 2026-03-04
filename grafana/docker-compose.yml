@@ -27,6 +27,7 @@ services:
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
       - ./provisioning/alerting/alerts.yaml:/etc/prometheus/rules/alerts.yaml
+      - ./prometheus/rastir-sre-rules.yml:/etc/prometheus/rules/rastir-sre-rules.yaml
       - prometheus-data:/prometheus
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"

@@ -35,6 +35,7 @@ import functools
 import logging
 from typing import Any, Callable, TypeVar
 
+from rastir.remote import discover_mcp_client, inject_traceparent_into_mcp_clients
 from rastir.wrapper import wrap
 
 logger = logging.getLogger("rastir")
@@ -169,11 +170,21 @@ def _llamaindex_agent_impl(
     agent_token = set_current_agent(agent_name)
 
     originals: dict[int, dict[str, Any]] = {}
+    mcp_clients: list[Any] = []
 
     try:
         for obj in (*args, *kwargs.values()):
             if _is_llamaindex_agent(obj):
                 _wrap_agent_internals(obj, originals)
+            mc = discover_mcp_client(obj)
+            if mc is not None:
+                mcp_clients.append(mc)
+
+        # Walk function closures/globals for MCP clients
+        _walk_func_for_mcp_clients(fn, mcp_clients)
+
+        # Inject traceparent header into discovered MCP clients
+        inject_traceparent_into_mcp_clients(mcp_clients)
 
         result = fn(*args, **kwargs)
         span.finish(SpanStatus.OK)
@@ -207,11 +218,21 @@ async def _async_llamaindex_agent_impl(
     agent_token = set_current_agent(agent_name)
 
     originals: dict[int, dict[str, Any]] = {}
+    mcp_clients: list[Any] = []
 
     try:
         for obj in (*args, *kwargs.values()):
             if _is_llamaindex_agent(obj):
                 _wrap_agent_internals(obj, originals)
+            mc = discover_mcp_client(obj)
+            if mc is not None:
+                mcp_clients.append(mc)
+
+        # Walk function closures/globals for MCP clients
+        _walk_func_for_mcp_clients(fn, mcp_clients)
+
+        # Inject traceparent header into discovered MCP clients
+        inject_traceparent_into_mcp_clients(mcp_clients)
 
         result = await fn(*args, **kwargs)
         span.finish(SpanStatus.OK)
@@ -291,3 +312,37 @@ def _restore_originals(originals: dict[int, dict[str, Any]]) -> None:
             setattr(ag, attr, saved["llm"])
         if "tools" in saved:
             _set_agent_tools(ag, saved["tools"])
+
+
+def _walk_func_for_mcp_clients(
+    func: Any, mcp_clients: list[Any],
+) -> None:
+    """Walk a function's closures and globals for MCP client objects."""
+    seen: set[int] = set()
+
+    # 1. Closure cells
+    closure = getattr(func, "__closure__", None)
+    if closure:
+        for cell in closure:
+            try:
+                val = cell.cell_contents
+            except ValueError:
+                continue
+            if id(val) not in seen:
+                seen.add(id(val))
+                mc = discover_mcp_client(val)
+                if mc is not None:
+                    mcp_clients.append(mc)
+
+    # 2. Global variables referenced by the function
+    code = getattr(func, "__code__", None)
+    func_globals = getattr(func, "__globals__", None)
+    if code is not None and func_globals is not None:
+        for varname in code.co_names:
+            val = func_globals.get(varname)
+            if val is None or id(val) in seen:
+                continue
+            seen.add(id(val))
+            mc = discover_mcp_client(val)
+            if mc is not None:
+                mcp_clients.append(mc)

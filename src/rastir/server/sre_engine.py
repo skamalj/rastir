@@ -18,12 +18,15 @@ Key design choices
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import math
+import os
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 from prometheus_client import CollectorRegistry, Gauge
@@ -204,6 +207,9 @@ class SREEngine:
         self._seen_keys: set[_AgentKey] = set()
         self._task: Optional[asyncio.Task[None]] = None
         self._stopped = False
+        self._snapshot_path: Optional[Path] = (
+            Path(cfg.snapshot_path) if cfg.snapshot_path else None
+        )
 
         # ---- Register Prometheus Gauges -----------------------------------
         _labels_with_period = ["service", "env", "agent", "period"]
@@ -355,6 +361,7 @@ class SREEngine:
 
     async def start(self) -> None:
         """Start the periodic recompute loop."""
+        self._load_snapshot()
         self._stopped = False
         self._task = asyncio.ensure_future(self._loop())
         logger.info("SRE engine recompute loop started")
@@ -368,6 +375,7 @@ class SREEngine:
                 await self._task
             except asyncio.CancelledError:
                 pass
+        self._save_snapshot()
         logger.info("SRE engine stopped")
 
     async def _loop(self) -> None:
@@ -472,6 +480,81 @@ class SREEngine:
                 self.sla_status.labels(**lbl).set(sla)
 
         logger.debug("SRE recompute done  agents=%d", len(self._accumulators))
+        self._save_snapshot()
+
+    # ---- Snapshot persistence ---------------------------------------------
+
+    def _save_snapshot(self) -> None:
+        """Persist accumulator state to disk for restart recovery."""
+        if self._snapshot_path is None:
+            return
+        try:
+            data: dict = {}
+            for key, acc in self._accumulators.items():
+                service, env, agent = key
+                k = f"{service}|{env}|{agent}"
+                data[k] = {
+                    "buckets": [
+                        {"ts": b.timestamp, "r": b.requests, "e": b.errors, "c": b.cost}
+                        for b in acc.buckets
+                    ],
+                    "week_requests": acc.week_requests,
+                    "week_errors": acc.week_errors,
+                    "week_cost": acc.week_cost,
+                    "week_start": acc.week_start,
+                    "month_requests": acc.month_requests,
+                    "month_errors": acc.month_errors,
+                    "month_cost": acc.month_cost,
+                    "month_start": acc.month_start,
+                }
+            tmp = self._snapshot_path.with_suffix(".tmp")
+            tmp.parent.mkdir(parents=True, exist_ok=True)
+            tmp.write_text(json.dumps(data), encoding="utf-8")
+            tmp.replace(self._snapshot_path)  # atomic on POSIX
+            logger.debug("SRE snapshot saved  keys=%d  path=%s", len(data), self._snapshot_path)
+        except Exception:
+            logger.warning("SRE snapshot save failed", exc_info=True)
+
+    def _load_snapshot(self) -> None:
+        """Restore accumulator state from a previous snapshot."""
+        if self._snapshot_path is None or not self._snapshot_path.exists():
+            return
+        try:
+            raw = json.loads(self._snapshot_path.read_text(encoding="utf-8"))
+            now = time.time()
+            restored = 0
+            for k, v in raw.items():
+                parts = k.split("|", 2)
+                if len(parts) != 3:
+                    continue
+                service, env, agent = parts
+                key: _AgentKey = (service, env, agent)
+                acc = _AgentAccumulator()
+                for b_data in v.get("buckets", []):
+                    b = _Bucket(
+                        timestamp=b_data["ts"],
+                        requests=b_data["r"],
+                        errors=b_data["e"],
+                        cost=b_data["c"],
+                    )
+                    acc.buckets.append(b)
+                acc.week_requests = v.get("week_requests", 0)
+                acc.week_errors = v.get("week_errors", 0)
+                acc.week_cost = v.get("week_cost", 0.0)
+                acc.week_start = v.get("week_start", 0.0)
+                acc.month_requests = v.get("month_requests", 0)
+                acc.month_errors = v.get("month_errors", 0)
+                acc.month_cost = v.get("month_cost", 0.0)
+                acc.month_start = v.get("month_start", 0.0)
+                acc.prune(now)
+                self._accumulators[key] = acc
+                self._seen_keys.add(key)
+                restored += 1
+            logger.info(
+                "SRE snapshot loaded  keys=%d  path=%s", restored, self._snapshot_path
+            )
+        except Exception:
+            logger.warning("SRE snapshot load failed — starting fresh", exc_info=True)
 
     def _compute_burn_rates(
         self,

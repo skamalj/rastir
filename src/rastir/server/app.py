@@ -44,7 +44,6 @@ from rastir.server.ingestion import IngestionWorker
 from rastir.server.metrics import MetricsRegistry
 from rastir.server.rate_limiter import RateLimiter
 from rastir.server.redaction import NoOpRedactor, RegexRedactor
-from rastir.server.sre_engine import SREEngine
 from rastir.server.structured_logging import configure_logging
 from rastir.server.trace_store import TraceStore
 
@@ -185,11 +184,21 @@ def _build_components(cfg: ServerConfig) -> dict[str, Any]:
             registry=metrics.registry,
         )
 
-    # SRE engine (V7)
-    sre_engine: Optional[SREEngine] = None
+    # SRE config gauges — expose SLO/budget targets as Prometheus metrics
+    # so that recording rules can use them for budget computations.
     if cfg.sre.enabled:
-        sre_engine = SREEngine(cfg=cfg.sre, registry=metrics.registry)
-        worker.set_sre_engine(sre_engine)
+        _sre = cfg.sre
+        # Set default SLO / cost budget for the "unknown" agent
+        # (spans with empty agent labels are mapped to "unknown" by recording rules)
+        metrics.sre_slo_error_rate.labels(agent="unknown").set(_sre.default_slo_error_rate)
+        metrics.sre_cost_budget_usd.labels(agent="unknown").set(_sre.default_cost_budget_usd)
+        # Set per-agent overrides
+        for agent_name, agent_cfg in _sre.agents.items():
+            slo = agent_cfg.slo_error_rate if agent_cfg.slo_error_rate is not None else _sre.default_slo_error_rate
+            budget = agent_cfg.cost_budget_usd if agent_cfg.cost_budget_usd is not None else _sre.default_cost_budget_usd
+            metrics.sre_slo_error_rate.labels(agent=agent_name).set(slo)
+            metrics.sre_cost_budget_usd.labels(agent=agent_name).set(budget)
+        logger.info("SRE config gauges set for %d agents", len(_sre.agents))
 
     return {
         "config": cfg,
@@ -201,7 +210,6 @@ def _build_components(cfg: ServerConfig) -> dict[str, Any]:
         "eval_queue": eval_queue,
         "eval_registry": eval_registry,
         "eval_worker": eval_worker,
-        "sre_engine": sre_engine,
     }
 
 
@@ -221,11 +229,6 @@ async def lifespan(app: FastAPI):
     if eval_worker is not None:
         eval_worker.start()
 
-    # Start SRE engine (if enabled)
-    sre_engine: Optional[SREEngine] = app.state.sre_engine
-    if sre_engine is not None:
-        await sre_engine.start()
-
     cfg: ServerConfig = app.state.config
     logger.info(
         "Rastir server started on %s:%d",
@@ -236,10 +239,6 @@ async def lifespan(app: FastAPI):
     # Graceful shutdown
     grace = cfg.shutdown.grace_period_seconds
     logger.info("Shutting down (grace_period=%ds, drain_queue=%s)", grace, cfg.shutdown.drain_queue)
-
-    # Stop SRE engine
-    if sre_engine is not None:
-        await sre_engine.stop()
 
     # Stop evaluation workers first (they emit spans back to ingestion)
     if eval_worker is not None:
@@ -487,9 +486,18 @@ def _register_routes(app: FastAPI, cfg: ServerConfig) -> None:
 
 def main() -> None:
     """Run the server via uvicorn (``rastir-server`` console script)."""
+    import argparse
     import uvicorn
 
-    cfg = load_config()
+    parser = argparse.ArgumentParser(description="Rastir Collector Server")
+    parser.add_argument(
+        "--config", "-c",
+        default=None,
+        help="Path to YAML config file (overrides RASTIR_SERVER_CONFIG env var)",
+    )
+    args = parser.parse_args()
+
+    cfg = load_config(args.config)
     app = create_app(cfg)
     # log_config=None prevents uvicorn from overriding our handlers
     uvicorn.run(

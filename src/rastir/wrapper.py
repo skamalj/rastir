@@ -28,11 +28,14 @@ import inspect
 import logging
 from typing import Any, Optional
 
-from rastir.context import end_span, start_span
+from rastir.context import end_span, get_current_agent, start_span
 from rastir.queue import enqueue_span
 from rastir.spans import SpanStatus, SpanType
 
 logger = logging.getLogger("rastir")
+
+# Attributes to probe for a model display name on wrapped LLM objects.
+_MODEL_NAME_ATTRS = ("model_name", "model", "model_id", "modelId")
 
 _WRAPPABLE_SPAN_TYPES = {
     "infra": SpanType.INFRA,
@@ -187,9 +190,13 @@ class _WrappedProxy:
         span_name = f"{prefix}.{attr}"
 
         if asyncio.iscoroutinefunction(original):
-            wrapper = _make_async_wrapper(original, span_name, span_type)
+            wrapper = _make_async_wrapper(
+                original, span_name, span_type, wrapped_obj=obj,
+            )
         else:
-            wrapper = _make_sync_wrapper(original, span_name, span_type)
+            wrapper = _make_sync_wrapper(
+                original, span_name, span_type, wrapped_obj=obj,
+            )
 
         cache[attr] = wrapper
         return wrapper
@@ -218,19 +225,36 @@ class _WrappedProxy:
 
 
 def _make_sync_wrapper(
-    method: Any, span_name: str, span_type: SpanType
+    method: Any, span_name: str, span_type: SpanType,
+    wrapped_obj: Any = None,
 ) -> Any:
     """Create a sync wrapper that emits a span."""
+
+    is_llm = span_type == SpanType.LLM
+    is_tool = span_type == SpanType.TOOL
 
     @functools.wraps(method)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         span, token = start_span(span_name, span_type)
+        # Propagate agent context from parent @agent / @langgraph_agent
+        _agent = get_current_agent()
+        if _agent:
+            span.set_attribute("agent", _agent)
         span.attributes["wrap.method"] = method.__name__
         span.attributes["wrap.args_count"] = len(args)
         if kwargs:
             span.attributes["wrap.kwargs_keys"] = sorted(kwargs.keys())
+        if is_llm:
+            _set_llm_model_provider(span, wrapped_obj)
+            _capture_llm_input(span, args, kwargs)
+        if is_tool:
+            _capture_tool_input(span, args, kwargs)
         try:
             result = method(*args, **kwargs)
+            if is_llm:
+                _enrich_llm_from_result(span, result)
+            if is_tool:
+                _capture_tool_output(span, result)
             span.finish(SpanStatus.OK)
             return result
         except BaseException as exc:
@@ -238,6 +262,8 @@ def _make_sync_wrapper(
             span.finish(SpanStatus.ERROR)
             raise
         finally:
+            if is_llm:
+                _finalize_llm(span)
             end_span(token)
             enqueue_span(span)
 
@@ -245,19 +271,36 @@ def _make_sync_wrapper(
 
 
 def _make_async_wrapper(
-    method: Any, span_name: str, span_type: SpanType
+    method: Any, span_name: str, span_type: SpanType,
+    wrapped_obj: Any = None,
 ) -> Any:
     """Create an async wrapper that emits a span."""
+
+    is_llm = span_type == SpanType.LLM
+    is_tool = span_type == SpanType.TOOL
 
     @functools.wraps(method)
     async def wrapper(*args: Any, **kwargs: Any) -> Any:
         span, token = start_span(span_name, span_type)
+        # Propagate agent context from parent @agent / @langgraph_agent
+        _agent = get_current_agent()
+        if _agent:
+            span.set_attribute("agent", _agent)
         span.attributes["wrap.method"] = method.__name__
         span.attributes["wrap.args_count"] = len(args)
         if kwargs:
             span.attributes["wrap.kwargs_keys"] = sorted(kwargs.keys())
+        if is_llm:
+            _set_llm_model_provider(span, wrapped_obj)
+            _capture_llm_input(span, args, kwargs)
+        if is_tool:
+            _capture_tool_input(span, args, kwargs)
         try:
             result = await method(*args, **kwargs)
+            if is_llm:
+                _enrich_llm_from_result(span, result)
+            if is_tool:
+                _capture_tool_output(span, result)
             span.finish(SpanStatus.OK)
             return result
         except BaseException as exc:
@@ -265,7 +308,260 @@ def _make_async_wrapper(
             span.finish(SpanStatus.ERROR)
             raise
         finally:
+            if is_llm:
+                _finalize_llm(span)
             end_span(token)
             enqueue_span(span)
 
     return wrapper
+
+
+# ---------------------------------------------------------------------------
+# LLM span enrichment helpers (used when span_type == LLM)
+# ---------------------------------------------------------------------------
+
+
+def _set_llm_model_provider(span: Any, wrapped_obj: Any) -> None:
+    """Extract model name and provider from the wrapped LLM object."""
+    if wrapped_obj is None:
+        return
+
+    # Model name from common attributes
+    for attr in _MODEL_NAME_ATTRS:
+        val = getattr(wrapped_obj, attr, None)
+        if val and isinstance(val, str):
+            span.set_attribute("model", val)
+            break
+
+    # Provider from module path
+    try:
+        from rastir.adapters.types import detect_provider_from_module
+        module = getattr(type(wrapped_obj), "__module__", "") or ""
+        provider = detect_provider_from_module(module)
+        if provider and provider != "unknown":
+            span.set_attribute("provider", provider)
+    except ImportError:
+        pass
+
+
+def _capture_llm_input(span: Any, args: tuple, kwargs: dict) -> None:
+    """Capture LLM input text from method arguments.
+
+    Handles common LangChain patterns:
+    - First positional arg as a list of messages (BaseMessage, tuples, dicts)
+    - First positional arg as a string
+    - ``messages``/``input``/``prompt`` kwargs
+    """
+    raw_input = None
+
+    # 1. Check kwargs for common names
+    for key in ("messages", "input", "prompt", "contents"):
+        val = kwargs.get(key)
+        if val is not None:
+            raw_input = val
+            break
+
+    # 2. First positional arg (LangChain model.invoke(input))
+    if raw_input is None and args:
+        raw_input = args[0]
+
+    if raw_input is None:
+        return
+
+    text = _stringify_messages(raw_input)
+    if text:
+        span.set_attribute("input", text)
+
+
+def _stringify_messages(value: Any) -> str | None:
+    """Convert messages / prompt to a string for span attributes."""
+    if isinstance(value, str):
+        return value
+
+    if isinstance(value, list):
+        parts = []
+        for item in value:
+            # LangChain BaseMessage (has .type and .content)
+            role = getattr(item, "type", None)
+            content = getattr(item, "content", None)
+            if role and isinstance(content, str):
+                parts.append(f"{role}: {content}")
+                continue
+            # Tuple (role, content)
+            if isinstance(item, tuple) and len(item) == 2:
+                parts.append(f"{item[0]}: {item[1]}")
+                continue
+            # Dict {"role": ..., "content": ...}
+            if isinstance(item, dict):
+                r = item.get("role", "")
+                c = item.get("content", "")
+                if c:
+                    parts.append(f"{r}: {c}" if r else str(c))
+                continue
+            # Fallback: stringify
+            parts.append(str(item))
+        return "\n".join(parts) if parts else None
+
+    # Fallback
+    try:
+        return str(value)
+    except Exception:
+        return None
+
+
+def _enrich_llm_from_result(span: Any, result: Any) -> None:
+    """Run adapter resolution on the LLM result to extract tokens and metadata."""
+    # Capture output text
+    output_text = _extract_output_text(result)
+    if output_text:
+        span.set_attribute("output", output_text)
+
+    # Run adapter pipeline for tokens, model, provider
+    try:
+        from rastir.adapters.registry import resolve
+        adapter_result = resolve(result)
+        if adapter_result:
+            if adapter_result.tokens_input is not None:
+                span.set_attribute("tokens_input", adapter_result.tokens_input)
+            if adapter_result.tokens_output is not None:
+                span.set_attribute("tokens_output", adapter_result.tokens_output)
+            # Response-phase model/provider upgrade
+            if adapter_result.model and adapter_result.model != "unknown":
+                span.set_attribute("model", adapter_result.model)
+            if adapter_result.provider and adapter_result.provider != "unknown":
+                span.set_attribute("provider", adapter_result.provider)
+            if adapter_result.finish_reason:
+                span.set_attribute("finish_reason", adapter_result.finish_reason)
+            for k, v in adapter_result.extra_attributes.items():
+                if k not in span.attributes:
+                    span.set_attribute(k, v)
+    except ImportError:
+        logger.debug("Adapter registry not available for LLM enrichment")
+    except Exception:
+        logger.debug("LLM adapter resolution failed", exc_info=True)
+
+
+def _extract_output_text(result: Any) -> str | None:
+    """Extract text content from an LLM response object."""
+    if isinstance(result, str):
+        return result
+
+    # LangChain AIMessage / content attribute
+    content = getattr(result, "content", None)
+    if isinstance(content, str) and content:
+        return content
+    if isinstance(content, list) and content:
+        parts = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif hasattr(item, "text"):
+                parts.append(item.text)
+        return "\n".join(parts) if parts else None
+
+    # OpenAI ChatCompletion style
+    choices = getattr(result, "choices", None)
+    if choices:
+        choice = choices[0]
+        msg = getattr(choice, "message", None)
+        if msg and hasattr(msg, "content"):
+            return msg.content
+        text = getattr(choice, "text", None)
+        if text:
+            return text
+
+    # Gemini style
+    text = getattr(result, "text", None)
+    if isinstance(text, str):
+        return text
+
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Tool span enrichment helpers (used when span_type == TOOL)
+# ---------------------------------------------------------------------------
+
+_TOOL_INPUT_MAX = 2000   # truncate long tool inputs
+_TOOL_OUTPUT_MAX = 4000  # truncate long tool outputs
+
+
+def _capture_tool_input(span: Any, args: tuple, kwargs: dict) -> None:
+    """Capture tool input arguments as a span attribute.
+
+    For LangChain tools, ``args[0]`` is typically the tool input
+    (a dict or string).  Falls back to stringifying all arguments.
+    """
+    raw_input = None
+
+    # LangChain tool.invoke(input) — first positional arg
+    if args:
+        raw_input = args[0]
+    elif kwargs:
+        # Check common kwarg names
+        for key in ("tool_input", "input", "query", "args"):
+            val = kwargs.get(key)
+            if val is not None:
+                raw_input = val
+                break
+
+    if raw_input is None:
+        return
+
+    try:
+        text = str(raw_input)
+        if len(text) > _TOOL_INPUT_MAX:
+            text = text[:_TOOL_INPUT_MAX] + "..."
+        span.set_attribute("tool.input", text)
+    except Exception:
+        pass
+
+
+def _capture_tool_output(span: Any, result: Any) -> None:
+    """Capture tool return value as a span attribute."""
+    if result is None:
+        return
+
+    try:
+        # LangChain ToolMessage — has .content
+        content = getattr(result, "content", None)
+        if isinstance(content, str):
+            text = content
+        else:
+            text = str(result)
+
+        if len(text) > _TOOL_OUTPUT_MAX:
+            text = text[:_TOOL_OUTPUT_MAX] + "..."
+        span.set_attribute("tool.output", text)
+    except Exception:
+        pass
+
+
+def _finalize_llm(span: Any) -> None:
+    """Ensure model/provider defaults and calculate cost."""
+    if "model" not in span.attributes:
+        span.set_attribute("model", "unknown")
+    if "provider" not in span.attributes:
+        span.set_attribute("provider", "unknown")
+
+    # Cost calculation
+    try:
+        from rastir.config import get_config, get_pricing_registry
+        cfg = get_config()
+        if not cfg.cost.enabled:
+            return
+        registry = get_pricing_registry()
+        if registry is None:
+            return
+        provider = span.attributes.get("provider", "unknown")
+        model = span.attributes.get("model", "unknown")
+        tokens_in = span.attributes.get("tokens_input", 0) or 0
+        tokens_out = span.attributes.get("tokens_output", 0) or 0
+        cost_usd, pricing_missing = registry.calculate_cost(
+            provider, model, tokens_in, tokens_out,
+        )
+        span.set_attribute("cost_usd", cost_usd)
+        span.set_attribute("pricing_missing", pricing_missing)
+        span.set_attribute("pricing_profile", cfg.cost.pricing_profile)
+    except Exception:
+        logger.debug("LLM cost calculation failed", exc_info=True)

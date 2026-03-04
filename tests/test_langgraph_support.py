@@ -577,7 +577,7 @@ class TestLanggraphAgentDecorator:
         mock_enqueue.assert_called_once()
         span = mock_enqueue.call_args[0][0]
         assert span.span_type == SpanType.AGENT
-        assert span.attributes.get("agent_name") == "run_graph"
+        assert span.attributes.get("agent") == "run_graph"
 
     @patch("rastir.queue.enqueue_span")
     def test_parameterised_decorator(self, mock_enqueue):
@@ -590,7 +590,7 @@ class TestLanggraphAgentDecorator:
 
         assert result == "ok"
         span = mock_enqueue.call_args[0][0]
-        assert span.attributes.get("agent_name") == "react_agent"
+        assert span.attributes.get("agent") == "react_agent"
 
     @patch("rastir.queue.enqueue_span")
     def test_wraps_and_restores_graph(self, mock_enqueue):
@@ -706,7 +706,7 @@ class TestLanggraphAgentAsync:
 
         assert result == "hi"
         span = mock_enqueue.call_args[0][0]
-        assert span.attributes.get("agent_name") == "my_async_fn"
+        assert span.attributes.get("agent") == "my_async_fn"
 
 
 class TestFullGraphWrapping:
@@ -933,7 +933,7 @@ class TestFuncNameDefault:
 
         span = mock_enqueue.call_args[0][0]
         assert span.name == "my_custom_graph"
-        assert span.attributes.get("agent_name") == "my_custom_graph"
+        assert span.attributes.get("agent") == "my_custom_graph"
 
 
 # ========================================================================

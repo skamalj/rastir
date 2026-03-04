@@ -26,7 +26,7 @@ from rastir.config import configure
 from rastir.context import get_current_span
 from rastir.decorators import agent, llm, metric, retrieval, trace
 from rastir.pricing import PricingRegistry
-from rastir.remote import mcp_endpoint, wrap_mcp
+from rastir.remote import RastirMCPMiddleware, mcp_endpoint, traceparent_headers, wrap_mcp
 from rastir.transport import get_export_stats, stop_exporter
 from rastir.wrapper import wrap
 from rastir.crewai_support import crew_kickoff
@@ -60,6 +60,8 @@ __all__ = [
     # remote tracing
     "wrap_mcp",
     "mcp_endpoint",
+    "RastirMCPMiddleware",
+    "traceparent_headers",
     # CrewAI
     "crew_kickoff",
     # LangGraph

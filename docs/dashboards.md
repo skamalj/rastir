@@ -6,7 +6,7 @@ nav_order: 9
 
 # Grafana Dashboards
 
-Rastir ships six pre-built Grafana dashboards that provide full observability across your LLM application stack. All dashboards are JSON files ready to import into Grafana.
+Rastir ships seven pre-built Grafana dashboards that provide full observability across your LLM application stack. All dashboards are JSON files ready to import into Grafana.
 
 Dashboard JSON files are located in `grafana/dashboards/` in the repository.
 
@@ -54,6 +54,7 @@ Repeat for each dashboard file.
 | Guardrail | `guardrail.json` | `rastir-guardrail` | Guardrail requests, violations by category/model |
 | System Health | `system-health.json` | `rastir-system-health` | Ingestion rate, queue, memory, backpressure |
 | Cost & TTFT | `cost-ttft.json` | `rastir-cost-ttft` | Cost per model/agent, burn rate, TTFT P95 |
+| SRE Budgets | `sre-budgets.json` | `rastir-sre-budgets` | Error & cost budgets, burn rates, SLA status, service performance |
 
 All dashboards share common template variables for filtering:
 
@@ -346,3 +347,124 @@ Provides financial observability and streaming latency insight for LLM calls.
 | `rastir_cost_per_call_usd` | Histogram | Cost distribution per LLM call (no pricing_profile label) |
 | `rastir_pricing_missing_total` | Counter | Calls where pricing entry was not found |
 | `rastir_ttft_seconds` | Histogram | Time-To-First-Token for streaming LLM calls |
+
+---
+
+## SRE Budgets & Burn Rates Dashboard
+
+**File:** `grafana/dashboards/sre-budgets.json`
+
+Provides SRE-style error budget and cost budget tracking with burn rates, exhaustion estimates, and service-level performance panels. This dashboard consumes **Prometheus recording rules** — see [Server — SRE Recording Rules](server#sre--prometheus-recording-rules) for setup.
+
+### Prerequisites
+
+1. Enable `sre.enabled: true` in server config (see [Configuration — SRE](configuration#sre))
+2. Deploy `grafana/prometheus/rastir-sre-rules.yml` to Prometheus
+3. Verify rules are loaded at `http://localhost:9090/rules`
+
+### Template Variables
+
+| Variable | Source | Description |
+|----------|--------|-------------|
+| `service` | `rastir:volume:month` | Filter by service |
+| `env` | `rastir:volume:month` | Filter by environment |
+| `agent` | `rastir:volume:month` | Filter by agent (`.+` = all) |
+| `model` | `rastir:errors_by_model:month` | Filter by model |
+| `provider` | `rastir_llm_calls_total` | Filter by provider |
+| `period` | `week` / `month` | Toggle between 7-day and 30-day windows |
+
+### Dashboard Layout
+
+#### Row 1 — Overview
+
+| Panel | Type | Description |
+|-------|------|-------------|
+| **SLA Status** | Stat | 1 = healthy, 0 = breached (green/red) |
+| **Expected Volume** | Stat | Rolling request volume used for budget estimation |
+| **Error Budget Total** | Stat | Allowed errors (volume × SLO error rate) |
+| **Allocated Cost Budget** | Stat | Configured cost budget for the period |
+
+#### Row 2 — Status
+
+| Panel | Type | Description |
+|-------|------|-------------|
+| **Total Requests** | Stat | Actual request volume in the period |
+| **Total Errors** | Stat | Error count in the period |
+| **Error Budget Remaining %** | Stat | Percentage of error budget still available |
+| **Cost Incurred** | Stat | Total cost consumed in the period |
+| **Cost Budget Remaining $** | Stat | Remaining cost budget (conditional green/amber/red) |
+
+#### Row 3 — Burn & Exhaustion
+
+| Panel | Type | Description |
+|-------|------|-------------|
+| **Error Budget — Days to Exhaustion** | Stat | Estimated days until error budget is depleted |
+| **Cost Budget — Days to Exhaustion** | Stat | Estimated days until cost budget is depleted |
+| **Error & Cost Budget Burn Rate** | Time series | Error burn rate (1h/6h) and cost burn rate on one chart |
+
+#### Row 4 — Error Budget Breakdown
+
+| Panel | Type | Description |
+|-------|------|-------------|
+| **Errors by Agent** | Pie chart | Error distribution across agents |
+| **Errors by Model** | Pie chart | Error distribution across models |
+
+#### Row 5 — Cumulative Volume
+
+| Panel | Type | Description |
+|-------|------|-------------|
+| **Cumulative Volume** | Time series | Request volume over time |
+
+#### Row 6 — Service Performance
+
+| Panel | Type | Description |
+|-------|------|-------------|
+| **Avg Latency per Service** | Time series | Average span duration per service |
+| **RPS per Service** | Time series | Requests per second per service |
+| **Token Consumption Rate per Service** | Time series | Input/output token rate per service |
+| **Cost Rate per Service** | Time series | Cost consumption rate per service |
+| **P95/P99 Latency per Service** | Time series | Tail latency percentiles per service |
+
+### Key Queries
+
+```promql
+# SLA status (1=healthy, 0=breached)
+rastir:sla_status:$period{service=~"$service",env=~"$env",agent=~"$agent"}
+
+# Error budget remaining %
+100 - rastir:error_budget_consumed_pct:$period{...}
+
+# Days to error budget exhaustion
+rastir:error_days_to_exhaustion:$period{...}
+
+# Error burn rate (1h window)
+rastir:error_burn_rate:1h{...}
+
+# Cost budget remaining
+rastir:cost_budget_remaining:$period
+
+# Service-level latency
+sum by(service)(rate(rastir_duration_seconds_sum[5m]))
+  / sum by(service)(rate(rastir_duration_seconds_count[5m]))
+```
+
+### Metrics Used
+
+This dashboard queries **recording rules** (prefixed `rastir:`) rather than raw counters:
+
+| Source | Type | Purpose |
+|--------|------|--------|
+| `rastir:sla_status:*` | Recording rule | SLA health indicator |
+| `rastir:expected_volume:*` | Recording rule | Rolling request volume |
+| `rastir:error_budget_total:*` | Recording rule | Allowed error count |
+| `rastir:error_budget_remaining:*` | Recording rule | Remaining error count |
+| `rastir:error_budget_consumed_pct:*` | Recording rule | Error budget consumed % |
+| `rastir:error_days_to_exhaustion:*` | Recording rule | Days until error budget depleted |
+| `rastir:error_burn_rate:*` | Recording rule | 1h/6h error burn rate |
+| `rastir:cost:*` | Recording rule | Cost consumed in period |
+| `rastir:cost_budget_remaining:*` | Recording rule | Remaining cost budget |
+| `rastir:cost_days_to_exhaustion:*` | Recording rule | Days until cost budget depleted |
+| `rastir_cost_budget_usd` | Config gauge | Allocated cost budget |
+| `rastir_duration_seconds` | Histogram | Latency for service performance panels |
+| `rastir_tokens_input_total` | Counter | Token consumption rate |
+| `rastir_cost_total` | Counter | Cost consumption rate |
