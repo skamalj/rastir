@@ -141,6 +141,13 @@ def _crew_kickoff_impl(
                 _wrap_crew_internals(obj, originals)
                 # Discover MCP server configs on agents
                 _discover_crew_mcp_clients(obj, mcp_clients)
+            # Also scan args for MCP clients (e.g. MultiServerMCPClient)
+            mc = discover_mcp_client(obj)
+            if mc is not None:
+                mcp_clients.append(mc)
+
+        # Walk function closures/globals for MCP clients
+        _walk_func_for_mcp_clients(fn, mcp_clients)
 
         # Inject traceparent header into discovered MCP clients
         inject_traceparent_into_mcp_clients(mcp_clients)
@@ -184,6 +191,13 @@ async def _async_crew_kickoff_impl(
             if _is_crew(obj):
                 _wrap_crew_internals(obj, originals)
                 _discover_crew_mcp_clients(obj, mcp_clients)
+            # Also scan args for MCP clients (e.g. MultiServerMCPClient)
+            mc = discover_mcp_client(obj)
+            if mc is not None:
+                mcp_clients.append(mc)
+
+        # Walk function closures/globals for MCP clients
+        _walk_func_for_mcp_clients(fn, mcp_clients)
 
         # Inject traceparent header into discovered MCP clients
         inject_traceparent_into_mcp_clients(mcp_clients)
@@ -254,12 +268,47 @@ def _restore_originals(originals: dict[int, dict[str, Any]]) -> None:
             ag.tools = saved["tools"]
 
 
+def _walk_func_for_mcp_clients(
+    func: Any, mcp_clients: list[Any],
+) -> None:
+    """Walk a function's closures and globals for MCP client objects."""
+    seen: set[int] = set()
+
+    # 1. Closure cells
+    closure = getattr(func, "__closure__", None)
+    if closure:
+        for cell in closure:
+            try:
+                val = cell.cell_contents
+            except ValueError:
+                continue
+            if id(val) not in seen:
+                seen.add(id(val))
+                mc = discover_mcp_client(val)
+                if mc is not None:
+                    mcp_clients.append(mc)
+
+    # 2. Global variables referenced by the function
+    code = getattr(func, "__code__", None)
+    func_globals = getattr(func, "__globals__", None)
+    if code is not None and func_globals is not None:
+        for varname in code.co_names:
+            val = func_globals.get(varname)
+            if val is None or id(val) in seen:
+                continue
+            seen.add(id(val))
+            mc = discover_mcp_client(val)
+            if mc is not None:
+                mcp_clients.append(mc)
+
+
 def _discover_crew_mcp_clients(
     crew: Any, mcp_clients: list[Any],
 ) -> None:
-    """Discover MCP server configs on agents' ``mcp_servers`` field."""
+    """Discover MCP server configs on agents' ``mcps`` field."""
     for ag in _get_agents(crew):
-        mcp_servers = getattr(ag, "mcp_servers", None)
+        # CrewAI 1.9+ uses 'mcps'; older versions may use 'mcp_servers'
+        mcp_servers = getattr(ag, "mcps", None) or getattr(ag, "mcp_servers", None)
         if not mcp_servers:
             continue
         for srv in mcp_servers:
