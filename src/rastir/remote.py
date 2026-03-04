@@ -186,6 +186,12 @@ def inject_traceparent_into_mcp_clients(mcp_clients: list[Any]) -> None:
                     obj.headers = {"traceparent": tp}
                 else:
                     hdrs["traceparent"] = tp
+                # Also update the httpx client headers — the AsyncClient
+                # copies headers at construction time, so mutating the
+                # dict above doesn't affect already-created clients.
+                http_client = getattr(obj, "http_client", None)
+                if http_client is not None:
+                    http_client.headers["traceparent"] = tp
 
         except Exception:
             logger.debug("Failed to inject traceparent into %r", obj,

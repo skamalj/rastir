@@ -361,7 +361,7 @@ def _capture_llm_input(span: Any, args: tuple, kwargs: dict) -> None:
     raw_input = None
 
     # 1. Check kwargs for common names
-    for key in ("messages", "input", "prompt", "contents"):
+    for key in ("messages", "input", "prompt", "contents", "user_msg", "chat_history"):
         val = kwargs.get(key)
         if val is not None:
             raw_input = val
@@ -456,6 +456,35 @@ def _extract_output_text(result: Any) -> str | None:
     content = getattr(result, "content", None)
     if isinstance(content, str) and content:
         return content
+
+    # LlamaIndex ChatResponse — .message.content
+    message = getattr(result, "message", None)
+    if message is not None:
+        msg_content = getattr(message, "content", None)
+        if isinstance(msg_content, str) and msg_content:
+            return msg_content
+        # Tool-calling responses: extract tool_calls as output text
+        blocks = getattr(message, "blocks", None)
+        if blocks:
+            tool_parts = []
+            for blk in blocks:
+                tn = getattr(blk, "tool_name", None)
+                if tn:
+                    tk = getattr(blk, "tool_kwargs", {})
+                    tool_parts.append(f"tool_call: {tn}({tk})")
+            if tool_parts:
+                return "; ".join(tool_parts)
+        ak_calls = getattr(message, "additional_kwargs", {}).get("tool_calls", [])
+        if ak_calls:
+            tool_parts = []
+            for tc in ak_calls:
+                fn = tc.get("function", {}) if isinstance(tc, dict) else getattr(tc, "function", None)
+                if fn:
+                    name = fn.get("name", "?") if isinstance(fn, dict) else getattr(fn, "name", "?")
+                    args_str = fn.get("arguments", "") if isinstance(fn, dict) else getattr(fn, "arguments", "")
+                    tool_parts.append(f"tool_call: {name}({args_str})")
+            if tool_parts:
+                return "; ".join(tool_parts)
     if isinstance(content, list) and content:
         parts = []
         for item in content:

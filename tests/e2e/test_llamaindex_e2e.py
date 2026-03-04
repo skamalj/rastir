@@ -72,6 +72,8 @@ from rastir.config import get_pricing_registry
 _pr = get_pricing_registry()
 if _pr is not None:
     _pr.register("openai", "gpt-4o-mini", input_price=0.15, output_price=0.60)
+    # OpenAI returns full model name with date suffix in responses
+    _pr.register("openai", "gpt-4o-mini-2024-07-18", input_price=0.15, output_price=0.60)
 
 captured_spans: list = []
 _orig_enqueue = None
@@ -85,9 +87,13 @@ def _capture_enqueue(span):
 
 
 import rastir.queue as _queue
+import rastir.wrapper as _wrapper
 
 _orig_enqueue = _queue.enqueue_span
 _queue.enqueue_span = _capture_enqueue
+# Also patch the wrapper module's imported reference so spans created
+# inside _make_sync_wrapper / _make_async_wrapper are captured.
+_wrapper.enqueue_span = _capture_enqueue
 
 # ---------------------------------------------------------------------------
 # MCP Server — run in background thread
@@ -167,6 +173,7 @@ async def run_test():
         llm=llm,
         tools=tools,
         verbose=True,
+        streaming=False,
         early_stopping_method="generate",
     )
 

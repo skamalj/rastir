@@ -109,12 +109,23 @@ research_crew (AGENT)
 ### LlamaIndex
 
 ```python
-llm = wrap(OpenAI(model="gpt-4o"))
-tools = [wrap(t) for t in my_tools]
+from rastir import llamaindex_agent
+from llama_index.core.agent import ReActAgent
+
+agent = ReActAgent(llm=llm, tools=tools, streaming=False)
 
 @llamaindex_agent(agent_name="qa_agent")
-def run(agent):
-    return agent.chat("Hello")
+async def run(agent, query):
+    return await agent.run(query)
+```
+
+```
+qa_agent (AGENT)
+├── llamaindex.ReActAgent.llm.achat (LLM) — model, provider, tokens, cost
+├── search.acall (TOOL)                   — tool.input, tool.output
+│   └── mcpserver:search (TOOL)           ← server span via traceparent
+├── llamaindex.ReActAgent.llm.achat (LLM)
+└── llamaindex.ReActAgent.llm.achat (LLM)
 ```
 
 → **Detailed framework documentation:** [LangGraph](https://skamalj.github.io/rastir/frameworks/langgraph) · [CrewAI](https://skamalj.github.io/rastir/frameworks/crewai) · [LlamaIndex](https://skamalj.github.io/rastir/frameworks/llamaindex)

@@ -276,7 +276,9 @@ def _wrap_agent_internals(
             span_type="llm",
             include=["chat", "complete", "achat", "acomplete",
                      "stream_chat", "stream_complete",
-                     "astream_chat", "astream_complete"],
+                     "astream_chat", "astream_complete",
+                     "chat_with_tools", "achat_with_tools",
+                     "stream_chat_with_tools", "astream_chat_with_tools"],
         )
         setattr(agent, originals[agent_id]["llm_attr"], wrapped_llm)
 
@@ -293,7 +295,7 @@ def _wrap_agent_internals(
                 tool_name = getattr(t, "name", None) or "tool"
             wrapped_tools.append(
                 wrap(t, name=tool_name, span_type="tool",
-                     include=["call", "__call__"])
+                     include=["call", "__call__", "acall"])
             )
         else:
             wrapped_tools.append(t)
