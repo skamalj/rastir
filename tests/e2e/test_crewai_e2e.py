@@ -64,6 +64,7 @@ except ImportError:
 # ---------------------------------------------------------------------------
 import rastir
 from rastir import configure, crew_kickoff
+from rastir.remote import traceparent_headers
 
 configure(
     service="crewai-e2e-test",
@@ -147,15 +148,14 @@ def _wait_for_server(url: str, timeout: float = 10):
 def get_weather(city: str) -> str:
     """Get the current weather for a city."""
     with httpx.Client(timeout=10) as c:
-        from mcp import ClientSession
-        # Use direct HTTP POST to the MCP server
         payload = {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "tools/call",
             "params": {"name": "get_weather", "arguments": {"city": city}},
         }
-        r = c.post(MCP_URL, json=payload)
+        hdrs = {"Accept": "application/json", **traceparent_headers()}
+        r = c.post(MCP_URL, json=payload, headers=hdrs)
         data = r.json()
         content = data.get("result", {}).get("content", [{}])
         return content[0].get("text", str(data)) if content else str(data)
@@ -178,7 +178,8 @@ def convert_temperature(value: float, from_unit: str, to_unit: str) -> str:
                 },
             },
         }
-        r = c.post(MCP_URL, json=payload)
+        hdrs = {"Accept": "application/json", **traceparent_headers()}
+        r = c.post(MCP_URL, json=payload, headers=hdrs)
         data = r.json()
         content = data.get("result", {}).get("content", [{}])
         return content[0].get("text", str(data)) if content else str(data)
@@ -194,7 +195,8 @@ def get_population(city: str) -> str:
             "method": "tools/call",
             "params": {"name": "get_population", "arguments": {"city": city}},
         }
-        r = c.post(MCP_URL, json=payload)
+        hdrs = {"Accept": "application/json", **traceparent_headers()}
+        r = c.post(MCP_URL, json=payload, headers=hdrs)
         data = r.json()
         content = data.get("result", {}).get("content", [{}])
         return content[0].get("text", str(data)) if content else str(data)
