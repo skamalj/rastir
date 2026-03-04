@@ -90,9 +90,13 @@ def _capture_enqueue(span):
 
 
 import rastir.queue as _queue
+import rastir.wrapper as _wrapper
 
 _orig_enqueue = _queue.enqueue_span
 _queue.enqueue_span = _capture_enqueue
+# Also patch the wrapper module's imported reference so spans created
+# inside _make_sync_wrapper / _make_async_wrapper are captured.
+_wrapper.enqueue_span = _capture_enqueue
 
 # ---------------------------------------------------------------------------
 # MCP Server — run in background thread
@@ -258,6 +262,9 @@ async def run_test():
         tasks=[task],
         verbose=True,
     )
+
+    # Debug: verify tools are wrapped before kickoff
+    print(f"   Agent tools: {[type(t).__name__ for t in agent.tools]}")
 
     # Define the instrumented function — pass mcp_server as arg
     # so @crew_kickoff discovers it and injects traceparent

@@ -67,6 +67,7 @@ def _make_tool(name: str = "search_tool"):
     tool = MagicMock()
     tool.name = name
     tool._rastir_wrapped = False
+    tool._rastir_tool_patched = False
     tool.run = MagicMock(return_value="tool result")
     return tool
 
@@ -148,27 +149,29 @@ class TestWrapCrewInternals:
 
     @patch("rastir.crewai_support.wrap")
     def test_wraps_agent_tools(self, mock_wrap):
-        """Each tool on agents gets wrapped with include=['run']."""
-        mock_wrap.side_effect = lambda obj, **kw: MagicMock(
-            _rastir_wrapped=True, name=getattr(obj, "name", "t")
-        )
+        """Each tool on agents gets its .run patched in-place."""
+        mock_wrap.side_effect = lambda obj, **kw: MagicMock(_rastir_wrapped=True)
 
         tool = _make_tool("web_search")
+        original_run = tool.run
         agent = _make_agent("researcher", tools=[tool])
         crew = _make_crew([agent])
 
         originals: dict = {}
         _wrap_crew_internals(crew, originals)
 
-        tool_wrap_calls = [c for c in mock_wrap.call_args_list if c[0][0] is tool]
-        assert len(tool_wrap_calls) == 1
-        call_kwargs = tool_wrap_calls[0][1]
-        assert call_kwargs["include"] == ["run"]
-        assert call_kwargs["span_type"] == "tool"
+        # .run is now patched in the tool's __dict__
+        assert "run" in tool.__dict__, "tool.run should be patched in instance __dict__"
+        assert tool.__dict__.get("_rastir_tool_patched") is True
+        # Original run is saved in originals for restoration
+        patched = originals[id(agent)].get("_patched_tool_runs", [])
+        assert len(patched) == 1
+        assert patched[0][0] is tool
+        assert patched[0][1] is original_run
 
     @patch("rastir.crewai_support.wrap")
     def test_stores_originals(self, mock_wrap):
-        """Originals dict stores agent ref, original LLM and tools."""
+        """Originals dict stores agent ref, original LLM and patched tool runs."""
         mock_wrap.side_effect = lambda obj, **kw: MagicMock(_rastir_wrapped=True)
 
         llm = MagicMock()
@@ -184,7 +187,10 @@ class TestWrapCrewInternals:
         assert agent_id in originals
         assert originals[agent_id]["_agent_ref"] is agent
         assert originals[agent_id]["llm"] is llm
-        assert originals[agent_id]["tools"] == [tool]
+        # Tool runs are patched in-place, stored as (tool, original_run) pairs
+        patched = originals[agent_id]["_patched_tool_runs"]
+        assert len(patched) == 1
+        assert patched[0][0] is tool  # tool ref
 
     @patch("rastir.crewai_support.wrap")
     def test_skips_already_wrapped_llm(self, mock_wrap):
@@ -203,21 +209,21 @@ class TestWrapCrewInternals:
         assert len(llm_wrap_calls) == 0
 
     @patch("rastir.crewai_support.wrap")
-    def test_skips_already_wrapped_tool(self, mock_wrap):
-        """If a tool is already wrapped, keep it as-is."""
+    def test_skips_already_patched_tool(self, mock_wrap):
+        """If a tool is already patched, don't re-patch it."""
         mock_wrap.side_effect = lambda obj, **kw: MagicMock(_rastir_wrapped=True)
 
         tool = _make_tool("search")
-        tool._rastir_wrapped = True
+        tool._rastir_tool_patched = True
         agent = _make_agent("dev", tools=[tool])
         crew = _make_crew([agent])
 
         originals: dict = {}
         _wrap_crew_internals(crew, originals)
 
-        # wrap() should NOT be called for the tool
-        tool_wrap_calls = [c for c in mock_wrap.call_args_list if c[0][0] is tool]
-        assert len(tool_wrap_calls) == 0
+        # Should have 0 patched tool runs since already patched
+        patched = originals[id(agent)].get("_patched_tool_runs", [])
+        assert len(patched) == 0
 
 
 # ========================================================================
@@ -227,23 +233,29 @@ class TestWrapCrewInternals:
 
 class TestRestoreOriginals:
     def test_restores_llm_and_tools(self):
-        """After restore, agent has its original LLM and tools."""
+        """After restore, agent has its original LLM and tool .run is unpatched."""
         original_llm = MagicMock()
-        original_tools = [_make_tool()]
-        agent = _make_agent("dev", llm=MagicMock(), tools=[MagicMock()])
+        tool = _make_tool()
+        original_run = tool.run
+        # Simulate patching
+        tool.__dict__["run"] = MagicMock()
+        tool.__dict__["_rastir_tool_patched"] = True
+        agent = _make_agent("dev", llm=MagicMock(), tools=[tool])
 
         originals = {
             id(agent): {
                 "_agent_ref": agent,
                 "llm": original_llm,
-                "tools": original_tools,
+                "_patched_tool_runs": [(tool, original_run)],
             }
         }
 
         _restore_originals(originals)
 
         assert agent.llm is original_llm
-        assert agent.tools is original_tools
+        # Tool's __dict__ entries should be removed (restoring class method)
+        assert "run" not in tool.__dict__
+        assert "_rastir_tool_patched" not in tool.__dict__
 
     def test_handles_missing_agent_ref(self):
         """No error if _agent_ref is missing."""
@@ -497,27 +509,29 @@ class TestCrewKickoffWrapping:
     @patch("rastir.queue.enqueue_span")
     @patch("rastir.crewai_support.wrap")
     def test_tools_wrapped_during_execution(self, mock_wrap, mock_enqueue):
-        """During execution, agent tools are wrapped."""
-        sentinel = MagicMock(_rastir_wrapped=True, _is_wrapped_tool=True)
-        mock_wrap.side_effect = lambda obj, **kw: sentinel
+        """During execution, agent tools have .run patched in-place."""
+        mock_wrap.side_effect = lambda obj, **kw: MagicMock(_rastir_wrapped=True)
 
         tool = _make_tool("scraper")
+        original_run = tool.run
         agent = _make_agent("dev", tools=[tool])
         crew = _make_crew([agent])
 
-        wrapped_during: list = []
+        patched_during: list = []
 
         @crew_kickoff(agent_name="tool_test")
         def run(c):
-            wrapped_during.extend(agent.tools)
+            # During execution, tool should have .run patched via __dict__
+            patched_during.append("run" in tool.__dict__)
+            patched_during.append(tool.__dict__.get("_rastir_tool_patched", False))
             return "ok"
 
         run(crew)
 
-        assert len(wrapped_during) == 1
-        assert wrapped_during[0]._is_wrapped_tool is True
+        assert patched_during[0] is True, "tool.run should be patched in __dict__"
+        assert patched_during[1] is True, "tool._rastir_tool_patched should be set"
 
         # After execution, original is restored
-        assert agent.tools == [tool]
+        assert "run" not in tool.__dict__, "tool.run should be unpatched after execution"
 
 

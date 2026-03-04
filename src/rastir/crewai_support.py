@@ -240,20 +240,30 @@ def _wrap_crew_internals(
                 include=["call"],
             )
 
-        # --- Wrap existing tools ---
+        # --- Wrap existing tools (in-place method patching) ---
+        # CrewAI's Agent is a Pydantic model whose ``tools`` field
+        # validates entries as ``BaseTool``.  Proxy wrappers are
+        # stripped by this validation, so we monkey-patch each tool's
+        # ``.run`` method directly via ``__dict__`` (instance dict),
+        # which bypasses Pydantic's ``__setattr__`` restriction.
         existing_tools = list(getattr(ag, "tools", []) or [])
-        originals[agent_id]["tools"] = existing_tools
-        wrapped_tools = []
+        patched_runs: list[tuple[Any, Any]] = []  # (tool, original_run)
+        role = getattr(ag, "role", "agent") or "agent"
         for t in existing_tools:
-            if not getattr(t, "_rastir_wrapped", False):
-                tool_name = getattr(t, "name", None) or "tool"
-                wrapped_tools.append(
-                    wrap(t, name=tool_name, span_type="tool", include=["run"])
-                )
-            else:
-                wrapped_tools.append(t)
-
-        ag.tools = wrapped_tools
+            if getattr(t, "_rastir_tool_patched", False):
+                continue
+            tool_name = getattr(t, "name", None) or "tool"
+            original_run = t.run  # bound method
+            from rastir.wrapper import _make_sync_wrapper
+            from rastir.spans import SpanType
+            span_name = f"crewai.{role}.tool.{tool_name}"
+            wrapped_run = _make_sync_wrapper(
+                original_run, span_name, SpanType.TOOL, wrapped_obj=t,
+            )
+            t.__dict__["run"] = wrapped_run
+            t.__dict__["_rastir_tool_patched"] = True
+            patched_runs.append((t, original_run))
+        originals[agent_id]["_patched_tool_runs"] = patched_runs
 
 
 def _restore_originals(originals: dict[int, dict[str, Any]]) -> None:
@@ -264,8 +274,10 @@ def _restore_originals(originals: dict[int, dict[str, Any]]) -> None:
             continue
         if "llm" in saved:
             ag.llm = saved["llm"]
-        if "tools" in saved:
-            ag.tools = saved["tools"]
+        # Restore in-place patched tool .run methods
+        for tool, original_run in saved.get("_patched_tool_runs", []):
+            tool.__dict__.pop("run", None)
+            tool.__dict__.pop("_rastir_tool_patched", None)
 
 
 def _walk_func_for_mcp_clients(

@@ -249,10 +249,13 @@ def _make_sync_wrapper(
             _capture_llm_input(span, args, kwargs)
         if is_tool:
             _capture_tool_input(span, args, kwargs)
+        # Snapshot cumulative token usage (e.g. CrewAI _token_usage)
+        usage_before = _snapshot_token_usage(wrapped_obj) if is_llm else None
         try:
             result = method(*args, **kwargs)
             if is_llm:
                 _enrich_llm_from_result(span, result)
+                _apply_token_delta(span, usage_before, wrapped_obj)
             if is_tool:
                 _capture_tool_output(span, result)
             span.finish(SpanStatus.OK)
@@ -295,10 +298,13 @@ def _make_async_wrapper(
             _capture_llm_input(span, args, kwargs)
         if is_tool:
             _capture_tool_input(span, args, kwargs)
+        # Snapshot cumulative token usage (e.g. CrewAI _token_usage)
+        usage_before = _snapshot_token_usage(wrapped_obj) if is_llm else None
         try:
             result = await method(*args, **kwargs)
             if is_llm:
                 _enrich_llm_from_result(span, result)
+                _apply_token_delta(span, usage_before, wrapped_obj)
             if is_tool:
                 _capture_tool_output(span, result)
             span.finish(SpanStatus.OK)
@@ -504,6 +510,10 @@ def _capture_tool_input(span: Any, args: tuple, kwargs: dict) -> None:
             if val is not None:
                 raw_input = val
                 break
+        # Fallback: capture all kwargs as tool input (e.g. CrewAI
+        # calls tool.run(**arguments) with the tool's parameters).
+        if raw_input is None:
+            raw_input = dict(kwargs)
 
     if raw_input is None:
         return
@@ -535,6 +545,47 @@ def _capture_tool_output(span: Any, result: Any) -> None:
         span.set_attribute("tool.output", text)
     except Exception:
         pass
+
+
+def _snapshot_token_usage(wrapped_obj: Any) -> dict | None:
+    """Snapshot cumulative ``_token_usage`` from an LLM object.
+
+    Frameworks like CrewAI track token usage internally on the LLM
+    instance (``_token_usage`` dict with ``prompt_tokens``,
+    ``completion_tokens``, etc.).  We snapshot before the call so we
+    can compute a per-call delta after.
+    """
+    if wrapped_obj is None:
+        return None
+    usage = getattr(wrapped_obj, "_token_usage", None)
+    if usage is not None and isinstance(usage, dict):
+        return dict(usage)  # shallow copy
+    return None
+
+
+def _apply_token_delta(
+    span: Any, before: dict | None, wrapped_obj: Any,
+) -> None:
+    """Compute per-call token delta from cumulative ``_token_usage``.
+
+    Only applies if the adapter pipeline did not already set token
+    attributes on the span (i.e. provider returned a rich response
+    with usage data).
+    """
+    if before is None or wrapped_obj is None:
+        return
+    # Skip if adapter already extracted tokens
+    if span.attributes.get("tokens_input") or span.attributes.get("tokens_output"):
+        return
+    after = getattr(wrapped_obj, "_token_usage", None)
+    if after is None or not isinstance(after, dict):
+        return
+    prompt_delta = (after.get("prompt_tokens", 0) or 0) - (before.get("prompt_tokens", 0) or 0)
+    completion_delta = (after.get("completion_tokens", 0) or 0) - (before.get("completion_tokens", 0) or 0)
+    if prompt_delta > 0:
+        span.set_attribute("tokens_input", prompt_delta)
+    if completion_delta > 0:
+        span.set_attribute("tokens_output", completion_delta)
 
 
 def _finalize_llm(span: Any) -> None:
