@@ -11,4 +11,5 @@ build/
 .gitignore
 tests/
 *.md
+!README.md
 rastir.png
