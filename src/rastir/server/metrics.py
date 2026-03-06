@@ -442,6 +442,10 @@ class MetricsRegistry:
         self._seen_error_types: set[str] = set()
         self._seen_pricing_profiles: set[str] = set()
 
+        # Cache epoch per trace so all child spans share the root epoch
+        # (matches the cache in otlp_exporter.py)
+        self._trace_epoch_cache: dict[str, int] = {}
+
     # ----- public API ------------------------------------------------------
 
     @staticmethod
@@ -465,9 +469,16 @@ class MetricsRegistry:
 
         # Build exemplar dict if enabled and trace_id is present.
         # Convert raw hex trace_id to X-Ray format so exemplar links resolve.
+        # ADOT replaces the first 4 bytes with int(start_epoch) before sending
+        # to X-Ray, so we must do the same transformation here.
         exemplar = None
         if self._exemplars_enabled and trace_id and len(trace_id) == 32:
-            xray_tid = f"1-{trace_id[:8]}-{trace_id[8:]}"
+            if trace_id not in self._trace_epoch_cache:
+                if len(self._trace_epoch_cache) > 10_000:
+                    self._trace_epoch_cache.clear()
+                self._trace_epoch_cache[trace_id] = int(span.get("start_time") or time.time())
+            epoch = self._trace_epoch_cache[trace_id]
+            xray_tid = f"1-{epoch:08x}-{trace_id[8:]}"
             exemplar = {"trace_id": xray_tid}
         elif self._exemplars_enabled and trace_id:
             exemplar = {"trace_id": trace_id}
