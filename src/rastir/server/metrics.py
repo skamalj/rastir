@@ -662,7 +662,7 @@ class MetricsRegistry:
                 agent=agent,
                 model=tool_model,
                 provider=tool_provider,
-            ).inc()
+            ).inc(exemplar=exemplar)
 
         # -- retrieval-specific
         elif span_type == "retrieval":

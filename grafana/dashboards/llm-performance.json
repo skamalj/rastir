@@ -492,6 +492,7 @@
       "targets": [
         {
           "refId": "A",
+          "exemplar": true,
           "expr": "histogram_quantile(0.50, sum(rate(rastir_duration_seconds_bucket{span_type=\"llm\", service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\"}[5m])) by (le, model, provider))",
           "legendFormat": "p50 {{model}} / {{provider}}",
           "datasource": {
@@ -501,6 +502,7 @@
         },
         {
           "refId": "B",
+          "exemplar": true,
           "expr": "histogram_quantile(0.95, sum(rate(rastir_duration_seconds_bucket{span_type=\"llm\", service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\"}[5m])) by (le, model, provider))",
           "legendFormat": "p95 {{model}} / {{provider}}",
           "datasource": {
@@ -510,6 +512,7 @@
         },
         {
           "refId": "C",
+          "exemplar": true,
           "expr": "histogram_quantile(0.99, sum(rate(rastir_duration_seconds_bucket{span_type=\"llm\", service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\"}[5m])) by (le, model, provider))",
           "legendFormat": "p99 {{model}} / {{provider}}",
           "datasource": {
@@ -950,6 +953,7 @@
       "targets": [
         {
           "refId": "A",
+          "exemplar": true,
           "expr": "histogram_quantile(0.95, sum(rate(rastir_tokens_per_call_bucket{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\"}[5m])) by (le, model, provider))",
           "legendFormat": "p95 {{model}} / {{provider}}",
           "datasource": {

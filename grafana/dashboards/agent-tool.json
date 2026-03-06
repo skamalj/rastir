@@ -646,6 +646,7 @@
       "targets": [
         {
           "refId": "A",
+          "exemplar": true,
           "expr": "sum(rate(rastir_tool_calls_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", agent=~\"$agent\"}[5m])) by (tool_name)",
           "legendFormat": "{{tool_name}}",
           "datasource": {

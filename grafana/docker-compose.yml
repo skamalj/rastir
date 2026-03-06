@@ -22,8 +22,9 @@ services:
   prometheus:
     image: prom/prometheus:latest
     container_name: rastir-prometheus
-    ports:
-      - "9090:9090"
+    network_mode: host
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
       - ./provisioning/alerting/alerts.yaml:/etc/prometheus/rules/alerts.yaml
@@ -34,6 +35,7 @@ services:
       - "--storage.tsdb.path=/prometheus"
       - "--storage.tsdb.retention.time=30d"
       - "--web.enable-lifecycle"
+      - "--enable-feature=exemplar-storage"
     restart: unless-stopped
 
   tempo:
