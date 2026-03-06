@@ -467,8 +467,7 @@ class MetricsRegistry:
         # Convert raw hex trace_id to X-Ray format so exemplar links resolve.
         exemplar = None
         if self._exemplars_enabled and trace_id and len(trace_id) == 32:
-            epoch = int(span.get("start_time") or time.time())
-            xray_tid = f"1-{epoch:08x}-{trace_id[8:]}"
+            xray_tid = f"1-{trace_id[:8]}-{trace_id[8:]}"
             exemplar = {"trace_id": xray_tid}
         elif self._exemplars_enabled and trace_id:
             exemplar = {"trace_id": trace_id}
