@@ -34,7 +34,7 @@ WORKDIR /app
 
 # Install the wheel + server extras
 COPY --from=builder /build/dist/*.whl /tmp/
-RUN pip install --no-cache-dir /tmp/*.whl"[server]" \
+RUN pip install --no-cache-dir "$(ls /tmp/*.whl)[server]" \
  && rm -rf /tmp/*.whl
 
 # Defaults — overridable at runtime
