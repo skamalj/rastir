@@ -1,0 +1,41 @@
+# ---------------------------------------------------------------------------
+# ADOT Collector — Sidecar Configuration for Rastir
+# ---------------------------------------------------------------------------
+# Scrapes Prometheus metrics from the Rastir server on localhost:8080
+# and pushes them to a configurable remote-write endpoint (e.g. Amazon
+# Managed Prometheus).
+#
+# Environment variables (set in the ECS task definition):
+#   AMP_REMOTE_WRITE_ENDPOINT  — full remote-write URL
+#   AMP_REGION                 — AWS region for SigV4 signing
+# ---------------------------------------------------------------------------
+
+receivers:
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: "rastir-server"
+          scrape_interval: 15s
+          static_configs:
+            - targets: ["localhost:8080"]
+          metrics_path: /metrics
+
+exporters:
+  prometheusremotewrite:
+    endpoint: "${AMP_REMOTE_WRITE_ENDPOINT}"
+    auth:
+      authenticator: sigv4auth
+
+extensions:
+  sigv4auth:
+    region: "${AMP_REGION}"
+    service: "aps"
+  health_check:
+    endpoint: "0.0.0.0:13133"
+
+service:
+  extensions: [sigv4auth, health_check]
+  pipelines:
+    metrics:
+      receivers: [prometheus]
+      exporters: [prometheusremotewrite]
