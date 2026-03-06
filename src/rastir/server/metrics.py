@@ -463,8 +463,15 @@ class MetricsRegistry:
         attrs = span.get("attributes", {})
         trace_id = span.get("trace_id", "")
 
-        # Build exemplar dict if enabled and trace_id is present
-        exemplar = {"trace_id": trace_id} if (self._exemplars_enabled and trace_id) else None
+        # Build exemplar dict if enabled and trace_id is present.
+        # Convert raw hex trace_id to X-Ray format so exemplar links resolve.
+        exemplar = None
+        if self._exemplars_enabled and trace_id and len(trace_id) == 32:
+            epoch = int(span.get("start_time") or time.time())
+            xray_tid = f"1-{epoch:08x}-{trace_id[8:]}"
+            exemplar = {"trace_id": xray_tid}
+        elif self._exemplars_enabled and trace_id:
+            exemplar = {"trace_id": trace_id}
 
         # -- universal: ingested counter + duration histogram
         self.spans_ingested.labels(
