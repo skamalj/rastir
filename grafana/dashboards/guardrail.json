@@ -2,13 +2,19 @@
   "uid": "rastir-guardrail",
   "title": "Rastir Guardrail",
   "description": "Guardrail violation tracking by category and model",
-  "tags": ["rastir", "llm-observability"],
+  "tags": [
+    "rastir",
+    "llm-observability"
+  ],
   "schemaVersion": 39,
   "version": 1,
   "timezone": "browser",
   "editable": true,
   "graphTooltip": 1,
-  "time": { "from": "now-1h", "to": "now" },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
   "refresh": "30s",
   "fiscalYearStartMonth": 0,
   "liveNow": false,
@@ -17,8 +23,15 @@
     "list": [
       {
         "allValue": ".*",
-        "current": { "selected": true, "text": "All", "value": "$__all" },
-        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
         "definition": "label_values(rastir_spans_ingested_total, service)",
         "hide": 0,
         "includeAll": true,
@@ -33,8 +46,15 @@
       },
       {
         "allValue": ".*",
-        "current": { "selected": true, "text": "All", "value": "$__all" },
-        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
         "definition": "label_values(rastir_spans_ingested_total, env)",
         "hide": 0,
         "includeAll": true,
@@ -49,8 +69,15 @@
       },
       {
         "allValue": ".*",
-        "current": { "selected": true, "text": "All", "value": "$__all" },
-        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
         "definition": "label_values(rastir_llm_calls_total, model)",
         "hide": 0,
         "includeAll": true,
@@ -65,8 +92,15 @@
       },
       {
         "allValue": ".*",
-        "current": { "selected": true, "text": "All", "value": "$__all" },
-        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
         "definition": "label_values(rastir_llm_calls_total, provider)",
         "hide": 0,
         "includeAll": true,
@@ -81,8 +115,15 @@
       },
       {
         "allValue": ".*",
-        "current": { "selected": true, "text": "All", "value": "$__all" },
-        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
         "definition": "label_values(rastir_llm_calls_total, agent)",
         "hide": 0,
         "includeAll": true,
@@ -103,31 +144,60 @@
       "type": "stat",
       "title": "Total Violations",
       "description": "Total guardrail violations in selected period",
-      "gridPos": { "h": 4, "w": 12, "x": 0, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
         {
           "refId": "A",
           "expr": "sum(increase(rastir_guardrail_violations_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", agent=~\"$agent\"}[$__range]))",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "instant": true
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "fixed", "fixedColor": "#C4162A" },
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#C4162A"
+          },
           "mappings": [],
           "unit": "none",
           "decimals": 0,
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "white", "value": null }] }
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "white",
+                "value": null
+              }
+            ]
+          },
+          "custom": {}
         },
         "overrides": []
       },
       "options": {
-        "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" },
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
         "colorMode": "value",
         "graphMode": "none",
-        "justifyMode": "auto",
+        "justifyMode": "center",
         "textMode": "auto",
         "wideLayout": true
       }
@@ -137,31 +207,60 @@
       "type": "stat",
       "title": "Total Guardrail Requests",
       "description": "Total LLM calls with guardrail configuration enabled",
-      "gridPos": { "h": 4, "w": 12, "x": 12, "y": 0 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
         {
           "refId": "A",
           "expr": "sum(increase(rastir_guardrail_requests_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", agent=~\"$agent\"}[$__range]))",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "instant": true
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "fixed", "fixedColor": "#5794F2" },
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#5794F2"
+          },
           "mappings": [],
           "unit": "none",
           "decimals": 0,
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "white", "value": null }] }
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "white",
+                "value": null
+              }
+            ]
+          },
+          "custom": {}
         },
         "overrides": []
       },
       "options": {
-        "reduceOptions": { "values": false, "calcs": ["lastNotNull"], "fields": "" },
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
         "colorMode": "value",
         "graphMode": "none",
-        "justifyMode": "auto",
+        "justifyMode": "center",
         "textMode": "auto",
         "wideLayout": true
       }
@@ -170,7 +269,12 @@
       "id": 1,
       "type": "row",
       "title": "Violations by Category",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 4 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 4
+      },
       "collapsed": false,
       "panels": []
     },
@@ -179,31 +283,62 @@
       "type": "piechart",
       "title": "Violations by Category",
       "description": "Total guardrail violations grouped by category",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
         {
           "refId": "A",
           "expr": "sum(increase(rastir_guardrail_violations_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", agent=~\"$agent\"}[$__range])) by (guardrail_category) > 0",
           "legendFormat": "{{guardrail_category}}",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "instant": true
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
+          "color": {
+            "mode": "palette-classic"
+          },
           "mappings": [],
           "unit": "short",
-          "decimals": 0
+          "decimals": 0,
+          "custom": {}
         },
         "overrides": []
       },
       "options": {
-        "reduceOptions": { "values": true, "calcs": ["lastNotNull"], "fields": "" },
+        "reduceOptions": {
+          "values": true,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
         "pieType": "donut",
-        "tooltip": { "mode": "multi", "sort": "desc" },
-        "legend": { "displayMode": "table", "placement": "right", "showLegend": true, "values": ["value", "percent"] }
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true,
+          "values": [
+            "value",
+            "percent"
+          ]
+        }
       }
     },
     {
@@ -211,53 +346,120 @@
       "type": "table",
       "title": "Violations by Category (Table)",
       "description": "Violation counts by category in tabular form",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 5 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
         {
           "refId": "A",
           "expr": "sum(increase(rastir_guardrail_violations_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", agent=~\"$agent\"}[$__range])) by (guardrail_category) > 0",
           "legendFormat": "{{guardrail_category}}",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "instant": true,
           "format": "table"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "mappings": [],
           "unit": "none",
           "decimals": 0,
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "white", "value": null }] },
-          "custom": { "align": "auto", "cellOptions": { "type": "auto" }, "inspect": false }
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "white",
+                "value": null
+              }
+            ]
+          },
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "color-text"
+            },
+            "inspect": false
+          }
         },
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "guardrail_category" },
-            "properties": [{ "id": "displayName", "value": "Category" }]
+            "matcher": {
+              "id": "byName",
+              "options": "guardrail_category"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Category"
+              }
+            ]
           },
           {
-            "matcher": { "id": "byName", "options": "Value" },
-            "properties": [{ "id": "displayName", "value": "Violations" }]
+            "matcher": {
+              "id": "byName",
+              "options": "Value"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Violations"
+              }
+            ]
           },
           {
-            "matcher": { "id": "byName", "options": "Time" },
-            "properties": [{ "id": "custom.hidden", "value": true }]
+            "matcher": {
+              "id": "byName",
+              "options": "Time"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
           }
         ]
       },
       "options": {
         "showHeader": true,
-        "sortBy": [{ "desc": true, "displayName": "Violations" }],
-        "footer": { "show": true, "reducer": ["sum"], "countRows": false }
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Violations"
+          }
+        ],
+        "footer": {
+          "show": true,
+          "reducer": [
+            "sum"
+          ],
+          "countRows": false
+        }
       }
     },
     {
       "id": 5,
       "type": "row",
       "title": "Violations by Model",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 13 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 13
+      },
       "collapsed": false,
       "panels": []
     },
@@ -266,36 +468,65 @@
       "type": "barchart",
       "title": "Violations by Model",
       "description": "Total guardrail violations grouped by model",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 14
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
         {
           "refId": "A",
           "expr": "sum(increase(rastir_guardrail_violations_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", agent=~\"$agent\"}[$__range])) by (model) > 0",
           "legendFormat": "{{model}}",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "instant": true
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
+          "color": {
+            "mode": "palette-classic"
+          },
           "mappings": [],
           "unit": "short",
           "decimals": 0,
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "white", "value": null }] },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "white",
+                "value": null
+              }
+            ]
+          },
           "custom": {
             "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "violations",
             "axisPlacement": "auto",
-            "fillOpacity": 80,
-            "gradientMode": "none",
-            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "fillOpacity": 70,
+            "gradientMode": "opacity",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
             "lineWidth": 1,
-            "scaleDistribution": { "type": "linear" },
-            "thresholdsStyle": { "mode": "off" }
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
           }
         },
         "overrides": []
@@ -307,8 +538,15 @@
         "showValue": "always",
         "stacking": "none",
         "xTickLabelRotation": 0,
-        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       }
     },
     {
@@ -316,46 +554,108 @@
       "type": "table",
       "title": "Violations by Model (Table)",
       "description": "Violation counts by model in tabular form",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 14
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
         {
           "refId": "A",
           "expr": "sum(increase(rastir_guardrail_violations_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", agent=~\"$agent\"}[$__range])) by (model) > 0",
           "legendFormat": "{{model}}",
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "instant": true,
           "format": "table"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "mappings": [],
           "unit": "none",
           "decimals": 0,
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "white", "value": null }] },
-          "custom": { "align": "auto", "cellOptions": { "type": "auto" }, "inspect": false }
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "white",
+                "value": null
+              }
+            ]
+          },
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "color-text"
+            },
+            "inspect": false
+          }
         },
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "model" },
-            "properties": [{ "id": "displayName", "value": "Model" }]
+            "matcher": {
+              "id": "byName",
+              "options": "model"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Model"
+              }
+            ]
           },
           {
-            "matcher": { "id": "byName", "options": "Value" },
-            "properties": [{ "id": "displayName", "value": "Violations" }]
+            "matcher": {
+              "id": "byName",
+              "options": "Value"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Violations"
+              }
+            ]
           },
           {
-            "matcher": { "id": "byName", "options": "Time" },
-            "properties": [{ "id": "custom.hidden", "value": true }]
+            "matcher": {
+              "id": "byName",
+              "options": "Time"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
           }
         ]
       },
       "options": {
         "showHeader": true,
-        "sortBy": [{ "desc": true, "displayName": "Violations" }],
-        "footer": { "show": true, "reducer": ["sum"], "countRows": false }
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Violations"
+          }
+        ],
+        "footer": {
+          "show": true,
+          "reducer": [
+            "sum"
+          ],
+          "countRows": false
+        }
       }
     }
   ],
@@ -363,7 +663,10 @@
     "list": [
       {
         "builtIn": 1,
-        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
         "enable": true,
         "hide": true,
         "iconColor": "rgba(0, 211, 255, 1)",

@@ -237,7 +237,8 @@
                 "value": 1
               }
             ]
-          }
+          },
+          "custom": {}
         }
       },
       "options": {
@@ -246,9 +247,10 @@
             "lastNotNull"
           ]
         },
-        "colorMode": "background",
-        "textMode": "value",
-        "justifyMode": "center"
+        "colorMode": "value",
+        "textMode": "auto",
+        "justifyMode": "center",
+        "graphMode": "none"
       }
     },
     {
@@ -284,7 +286,8 @@
                 "value": null
               }
             ]
-          }
+          },
+          "custom": {}
         }
       },
       "options": {
@@ -293,9 +296,10 @@
             "lastNotNull"
           ]
         },
-        "colorMode": "background",
-        "textMode": "value",
-        "justifyMode": "center"
+        "colorMode": "value",
+        "textMode": "auto",
+        "justifyMode": "center",
+        "graphMode": "none"
       }
     },
     {
@@ -331,7 +335,8 @@
                 "value": null
               }
             ]
-          }
+          },
+          "custom": {}
         }
       },
       "options": {
@@ -340,9 +345,10 @@
             "lastNotNull"
           ]
         },
-        "colorMode": "background",
-        "textMode": "value",
-        "justifyMode": "center"
+        "colorMode": "value",
+        "textMode": "auto",
+        "justifyMode": "center",
+        "graphMode": "none"
       }
     },
     {
@@ -379,7 +385,8 @@
                 "value": null
               }
             ]
-          }
+          },
+          "custom": {}
         }
       },
       "options": {
@@ -388,8 +395,8 @@
             "lastNotNull"
           ]
         },
-        "colorMode": "background",
-        "textMode": "value",
+        "colorMode": "value",
+        "textMode": "auto",
         "justifyMode": "center",
         "graphMode": "none"
       }
@@ -441,7 +448,8 @@
                 "value": null
               }
             ]
-          }
+          },
+          "custom": {}
         }
       },
       "options": {
@@ -450,9 +458,10 @@
             "lastNotNull"
           ]
         },
-        "colorMode": "background",
-        "textMode": "value",
-        "justifyMode": "center"
+        "colorMode": "value",
+        "textMode": "auto",
+        "justifyMode": "center",
+        "graphMode": "none"
       }
     },
     {
@@ -489,7 +498,8 @@
                 "value": null
               }
             ]
-          }
+          },
+          "custom": {}
         }
       },
       "options": {
@@ -498,9 +508,10 @@
             "lastNotNull"
           ]
         },
-        "colorMode": "background",
-        "textMode": "value",
-        "justifyMode": "center"
+        "colorMode": "value",
+        "textMode": "auto",
+        "justifyMode": "center",
+        "graphMode": "none"
       }
     },
     {
@@ -544,7 +555,8 @@
                 "value": 90
               }
             ]
-          }
+          },
+          "custom": {}
         }
       },
       "options": {
@@ -553,9 +565,10 @@
             "lastNotNull"
           ]
         },
-        "colorMode": "background",
-        "textMode": "value",
-        "justifyMode": "center"
+        "colorMode": "value",
+        "textMode": "auto",
+        "justifyMode": "center",
+        "graphMode": "none"
       }
     },
     {
@@ -591,7 +604,8 @@
                 "value": null
               }
             ]
-          }
+          },
+          "custom": {}
         }
       },
       "options": {
@@ -600,9 +614,10 @@
             "lastNotNull"
           ]
         },
-        "colorMode": "background",
-        "textMode": "value",
-        "justifyMode": "center"
+        "colorMode": "value",
+        "textMode": "auto",
+        "justifyMode": "center",
+        "graphMode": "none"
       }
     },
     {
@@ -647,7 +662,8 @@
                 "value": 12.5
               }
             ]
-          }
+          },
+          "custom": {}
         }
       },
       "options": {
@@ -656,8 +672,8 @@
             "lastNotNull"
           ]
         },
-        "colorMode": "background",
-        "textMode": "value",
+        "colorMode": "value",
+        "textMode": "auto",
         "justifyMode": "center",
         "graphMode": "none"
       }
@@ -717,7 +733,8 @@
                 "value": 7
               }
             ]
-          }
+          },
+          "custom": {}
         }
       },
       "options": {
@@ -726,9 +743,10 @@
             "lastNotNull"
           ]
         },
-        "colorMode": "background",
-        "textMode": "value",
-        "justifyMode": "center"
+        "colorMode": "value",
+        "textMode": "auto",
+        "justifyMode": "center",
+        "graphMode": "none"
       }
     },
     {
@@ -773,7 +791,8 @@
                 "value": 7
               }
             ]
-          }
+          },
+          "custom": {}
         }
       },
       "options": {
@@ -782,9 +801,10 @@
             "lastNotNull"
           ]
         },
-        "colorMode": "background",
-        "textMode": "value",
-        "justifyMode": "center"
+        "colorMode": "value",
+        "textMode": "auto",
+        "justifyMode": "center",
+        "graphMode": "none"
       }
     },
     {
@@ -822,15 +842,18 @@
           "max": 100,
           "custom": {
             "drawStyle": "line",
-            "fillOpacity": 15,
+            "fillOpacity": 8,
             "spanNulls": true,
             "lineWidth": 2,
-            "gradientMode": "scheme",
+            "gradientMode": "opacity",
             "axisSoftMin": 0,
             "axisSoftMax": 100,
             "thresholdsStyle": {
               "mode": "area"
-            }
+            },
+            "lineInterpolation": "smooth",
+            "showPoints": "never",
+            "axisBorderShow": false
           },
           "thresholds": {
             "mode": "absolute",
@@ -911,7 +934,7 @@
       },
       "options": {
         "legend": {
-          "displayMode": "list",
+          "displayMode": "table",
           "placement": "right",
           "showLegend": true,
           "values": [
@@ -978,7 +1001,7 @@
       },
       "options": {
         "legend": {
-          "displayMode": "list",
+          "displayMode": "table",
           "placement": "right",
           "showLegend": true,
           "values": [
@@ -1039,11 +1062,14 @@
           "unit": "short",
           "custom": {
             "drawStyle": "line",
-            "fillOpacity": 20,
+            "fillOpacity": 8,
             "spanNulls": true,
             "lineWidth": 2,
             "gradientMode": "opacity",
-            "axisSoftMin": 0
+            "axisSoftMin": 0,
+            "lineInterpolation": "smooth",
+            "showPoints": "never",
+            "axisBorderShow": false
           },
           "color": {
             "mode": "fixed",
@@ -1105,11 +1131,14 @@
           "unit": "s",
           "custom": {
             "drawStyle": "line",
-            "fillOpacity": 15,
+            "fillOpacity": 8,
             "spanNulls": true,
             "lineWidth": 2,
             "gradientMode": "opacity",
-            "axisSoftMin": 0
+            "axisSoftMin": 0,
+            "lineInterpolation": "smooth",
+            "showPoints": "never",
+            "axisBorderShow": false
           },
           "color": {
             "mode": "palette-classic"
@@ -1159,11 +1188,14 @@
           "unit": "reqps",
           "custom": {
             "drawStyle": "line",
-            "fillOpacity": 15,
+            "fillOpacity": 8,
             "spanNulls": true,
             "lineWidth": 2,
             "gradientMode": "opacity",
-            "axisSoftMin": 0
+            "axisSoftMin": 0,
+            "lineInterpolation": "smooth",
+            "showPoints": "never",
+            "axisBorderShow": false
           },
           "color": {
             "mode": "palette-classic"
@@ -1204,12 +1236,12 @@
       "targets": [
         {
           "expr": "sum by(service)(rate(rastir_tokens_input_total{service=~\"$service\",env=~\"$env\"}[5m]))",
-          "legendFormat": "{{service}} — input",
+          "legendFormat": "{{service}} \u2014 input",
           "refId": "A"
         },
         {
           "expr": "sum by(service)(rate(rastir_tokens_output_total{service=~\"$service\",env=~\"$env\"}[5m]))",
-          "legendFormat": "{{service}} — output",
+          "legendFormat": "{{service}} \u2014 output",
           "refId": "B"
         }
       ],
@@ -1218,11 +1250,14 @@
           "unit": "short",
           "custom": {
             "drawStyle": "line",
-            "fillOpacity": 15,
+            "fillOpacity": 8,
             "spanNulls": true,
             "lineWidth": 2,
             "gradientMode": "opacity",
-            "axisSoftMin": 0
+            "axisSoftMin": 0,
+            "lineInterpolation": "smooth",
+            "showPoints": "never",
+            "axisBorderShow": false
           },
           "color": {
             "mode": "palette-classic"
@@ -1268,11 +1303,14 @@
           "decimals": 4,
           "custom": {
             "drawStyle": "line",
-            "fillOpacity": 15,
+            "fillOpacity": 8,
             "spanNulls": true,
             "lineWidth": 2,
             "gradientMode": "opacity",
-            "axisSoftMin": 0
+            "axisSoftMin": 0,
+            "lineInterpolation": "smooth",
+            "showPoints": "never",
+            "axisBorderShow": false
           },
           "color": {
             "mode": "palette-classic"
@@ -1308,12 +1346,12 @@
       "targets": [
         {
           "expr": "histogram_quantile(0.95, sum by(service, le)(rate(rastir_duration_seconds_bucket{service=~\"$service\",env=~\"$env\"}[5m])))",
-          "legendFormat": "{{service}} — p95",
+          "legendFormat": "{{service}} \u2014 p95",
           "refId": "A"
         },
         {
           "expr": "histogram_quantile(0.99, sum by(service, le)(rate(rastir_duration_seconds_bucket{service=~\"$service\",env=~\"$env\"}[5m])))",
-          "legendFormat": "{{service}} — p99",
+          "legendFormat": "{{service}} \u2014 p99",
           "refId": "B"
         }
       ],
@@ -1322,11 +1360,14 @@
           "unit": "s",
           "custom": {
             "drawStyle": "line",
-            "fillOpacity": 10,
+            "fillOpacity": 8,
             "spanNulls": true,
             "lineWidth": 2,
             "gradientMode": "opacity",
-            "axisSoftMin": 0
+            "axisSoftMin": 0,
+            "lineInterpolation": "smooth",
+            "showPoints": "never",
+            "axisBorderShow": false
           },
           "color": {
             "mode": "palette-classic"
