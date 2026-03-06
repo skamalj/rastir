@@ -29,6 +29,9 @@ logging:
   level: "INFO"
   structured: true
 
+exemplars:
+  enabled: true
+
 sre:
   enabled: true
   default_slo_error_rate: 0.01

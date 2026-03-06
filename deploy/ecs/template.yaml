@@ -125,6 +125,17 @@ Resources:
                   - ssmmessages:OpenControlChannel
                   - ssmmessages:OpenDataChannel
                 Resource: "*"
+        - PolicyName: XRayWrite
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
+                  - xray:GetSamplingRules
+                  - xray:GetSamplingTargets
+                Resource: "*"
 
   Cluster:
     Type: AWS::ECS::Cluster
@@ -169,6 +180,10 @@ Resources:
               Value: "true"
             - Name: RASTIR_SERVER_CONFIG
               Value: "/app/rastir-server-config.yaml"
+            - Name: RASTIR_SERVER_EXPORTER_OTLP_ENDPOINT
+              Value: "http://localhost:4318"
+            - Name: RASTIR_SERVER_EXEMPLARS_ENABLED
+              Value: "true"
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -199,11 +214,19 @@ Resources:
                           static_configs:
                             - targets: ["localhost:${RastirServerPort}"]
                           metrics_path: /metrics
+                  otlp:
+                    protocols:
+                      grpc:
+                        endpoint: "0.0.0.0:4317"
+                      http:
+                        endpoint: "0.0.0.0:4318"
                 exporters:
                   prometheusremotewrite:
                     endpoint: "${AmpRemoteWriteEndpoint}"
                     auth:
                       authenticator: sigv4auth
+                  awsxray:
+                    region: "${AWS::Region}"
                 extensions:
                   sigv4auth:
                     region: "${AmpRegion}"
@@ -216,6 +239,9 @@ Resources:
                     metrics:
                       receivers: [prometheus]
                       exporters: [prometheusremotewrite]
+                    traces:
+                      receivers: [otlp]
+                      exporters: [awsxray]
           LogConfiguration:
             LogDriver: awslogs
             Options:

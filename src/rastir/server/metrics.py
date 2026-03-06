@@ -508,7 +508,7 @@ class MetricsRegistry:
                 model=model_label,
                 provider=provider_label,
                 agent=agent_label,
-            ).inc()
+            ).inc(exemplar=exemplar)
 
         # -- LLM-specific
         if span_type == "llm":
