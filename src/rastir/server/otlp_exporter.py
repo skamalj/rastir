@@ -229,9 +229,9 @@ class OTLPForwarder:
         # Attributes
         attrs = span_dict.get("attributes", {})
         otel_attrs: dict = {
-            "rastir.service": service,
-            "rastir.env": env,
-            "rastir.version": version,
+            "rastir.service": service or "unknown",
+            "rastir.env": env or "unknown",
+            "rastir.version": version or "",
             "rastir.span_type": span_dict.get("span_type", "unknown"),
         }
         for k, v in attrs.items():
