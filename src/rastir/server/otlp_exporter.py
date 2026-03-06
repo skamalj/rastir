@@ -129,6 +129,7 @@ class OTLPForwarder:
         self._Resource = Resource  # keep class ref for per-span resources
         self._default_resource = Resource.create({"service.name": "rastir-server"})
         self._resource_cache: dict[tuple, Resource] = {}
+        self._trace_epoch_cache: dict[str, float] = {}
         self._provider = TracerProvider(resource=self._default_resource)
         raw_exporter = OTLPSpanExporter(endpoint=f"{endpoint.rstrip('/')}/v1/traces")
         self._exporter = _LoggingExporterWrapper(raw_exporter)
@@ -220,7 +221,16 @@ class OTLPForwarder:
         raw_start = span_dict.get("start_time")
         start_epoch = raw_start if raw_start is not None else now
 
-        trace_id = _hex_to_trace_id(raw_trace_id, start_epoch=start_epoch)
+        # All spans in the same trace must share the same epoch prefix
+        # so X-Ray assembles them into one trace.
+        if raw_trace_id not in self._trace_epoch_cache:
+            # Bound cache size to prevent unbounded growth
+            if len(self._trace_epoch_cache) > 10_000:
+                self._trace_epoch_cache.clear()
+            self._trace_epoch_cache[raw_trace_id] = start_epoch
+        trace_epoch = self._trace_epoch_cache[raw_trace_id]
+
+        trace_id = _hex_to_trace_id(raw_trace_id, start_epoch=trace_epoch)
         span_id = _hex_to_span_id(raw_span_id)
 
         # Parent context — support both "parent_span_id" and "parent_id"
