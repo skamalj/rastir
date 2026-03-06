@@ -49,7 +49,7 @@
         },
         "datasource": {
           "type": "prometheus",
-          "uid": "prometheus"
+          "uid": "${DS_PROMETHEUS}"
         },
         "definition": "label_values(rastir_spans_ingested_total, service)",
         "hide": 0,
@@ -72,7 +72,7 @@
         },
         "datasource": {
           "type": "prometheus",
-          "uid": "prometheus"
+          "uid": "${DS_PROMETHEUS}"
         },
         "definition": "label_values(rastir_spans_ingested_total, env)",
         "hide": 0,
@@ -95,7 +95,7 @@
         },
         "datasource": {
           "type": "prometheus",
-          "uid": "prometheus"
+          "uid": "${DS_PROMETHEUS}"
         },
         "definition": "label_values(rastir_llm_calls_total, model)",
         "hide": 0,
@@ -118,7 +118,7 @@
         },
         "datasource": {
           "type": "prometheus",
-          "uid": "prometheus"
+          "uid": "${DS_PROMETHEUS}"
         },
         "definition": "label_values(rastir_llm_calls_total, provider)",
         "hide": 0,
@@ -141,7 +141,7 @@
         },
         "datasource": {
           "type": "prometheus",
-          "uid": "prometheus"
+          "uid": "${DS_PROMETHEUS}"
         },
         "definition": "label_values(rastir_llm_calls_total, agent)",
         "hide": 0,

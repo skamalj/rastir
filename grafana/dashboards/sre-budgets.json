@@ -53,7 +53,7 @@
         },
         "datasource": {
           "type": "prometheus",
-          "uid": "prometheus"
+          "uid": "${DS_PROMETHEUS}"
         },
         "definition": "label_values(rastir_llm_calls_total, service)",
         "hide": 0,
@@ -76,7 +76,7 @@
         },
         "datasource": {
           "type": "prometheus",
-          "uid": "prometheus"
+          "uid": "${DS_PROMETHEUS}"
         },
         "definition": "label_values(rastir_llm_calls_total, env)",
         "hide": 0,
@@ -99,7 +99,7 @@
         },
         "datasource": {
           "type": "prometheus",
-          "uid": "prometheus"
+          "uid": "${DS_PROMETHEUS}"
         },
         "definition": "label_values(rastir_llm_calls_total, agent)",
         "hide": 0,
@@ -122,7 +122,7 @@
         },
         "datasource": {
           "type": "prometheus",
-          "uid": "prometheus"
+          "uid": "${DS_PROMETHEUS}"
         },
         "definition": "label_values(rastir_llm_calls_total, model)",
         "hide": 0,
@@ -145,7 +145,7 @@
         },
         "datasource": {
           "type": "prometheus",
-          "uid": "prometheus"
+          "uid": "${DS_PROMETHEUS}"
         },
         "definition": "label_values(rastir_llm_calls_total, provider)",
         "hide": 0,
@@ -309,7 +309,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "#2f575e",
+                "color": "#8AB8FF",
                 "value": null
               }
             ]
@@ -362,7 +362,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "#2f575e",
+                "color": "#8AB8FF",
                 "value": null
               }
             ]
@@ -416,7 +416,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "#2f575e",
+                "color": "#8AB8FF",
                 "value": null
               }
             ]
@@ -483,7 +483,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "#2f575e",
+                "color": "#8AB8FF",
                 "value": null
               }
             ]
@@ -537,7 +537,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "#2f575e",
+                "color": "#8AB8FF",
                 "value": null
               }
             ]
@@ -651,7 +651,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "#2f575e",
+                "color": "#8AB8FF",
                 "value": null
               }
             ]
@@ -1148,7 +1148,7 @@
           },
           "color": {
             "mode": "fixed",
-            "fixedColor": "#2f575e"
+            "fixedColor": "#8AB8FF"
           }
         }
       },

@@ -34,13 +34,23 @@ def _check_otel() -> bool:
     return _otel_available
 
 
-def _hex_to_trace_id(hex_str: str) -> int:
+def _hex_to_trace_id(hex_str: str, start_epoch: float | None = None) -> int:
     """Convert a hex trace-id to a 128-bit integer.
 
     OTel trace IDs are 128-bit (32 hex chars). If the input is longer,
     it is truncated to the first 32 chars.
+
+    When *start_epoch* is provided the first 4 bytes are overwritten
+    with the unix timestamp so that AWS X-Ray (which derives its
+    trace-header timestamp from those bytes) indexes the trace
+    correctly.
     """
-    return int(hex_str[:32], 16)
+    raw = int(hex_str[:32], 16)
+    if start_epoch is not None:
+        ts = int(start_epoch) & 0xFFFFFFFF
+        # Clear first 4 bytes and set them to the timestamp
+        raw = (ts << 96) | (raw & ((1 << 96) - 1))
+    return raw
 
 
 def _hex_to_span_id(hex_str: str) -> int:
@@ -205,7 +215,12 @@ class OTLPForwarder:
             logger.warning("[OTLP] Skipping span — missing trace_id=%r span_id=%r", raw_trace_id, raw_span_id)
             return None
 
-        trace_id = _hex_to_trace_id(raw_trace_id)
+        # Compute start_epoch early — needed for X-Ray-compatible trace IDs.
+        now = time.time()
+        raw_start = span_dict.get("start_time")
+        start_epoch = raw_start if raw_start is not None else now
+
+        trace_id = _hex_to_trace_id(raw_trace_id, start_epoch=start_epoch)
         span_id = _hex_to_span_id(raw_span_id)
 
         # Parent context — support both "parent_span_id" and "parent_id"
@@ -242,8 +257,6 @@ class OTLPForwarder:
         # Handle None values explicitly (evaluation spans set start_time=None).
         # Also guard against clock drift (e.g. WSL2) where start > end;
         # prefer computing end from start + duration_ms when available.
-        now = time.time()
-        raw_start = span_dict.get("start_time")
         raw_end = span_dict.get("end_time")
         duration_ms = span_dict.get("duration_ms")
 
@@ -253,7 +266,6 @@ class OTLPForwarder:
                 raw_start, raw_end, now,
             )
 
-        start_epoch = raw_start if raw_start is not None else now
         end_epoch = raw_end if raw_end is not None else now
 
         start_ns = int(start_epoch * 1e9)

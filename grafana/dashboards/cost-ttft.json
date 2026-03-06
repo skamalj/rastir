@@ -52,7 +52,7 @@
         },
         "datasource": {
           "type": "prometheus",
-          "uid": "prometheus"
+          "uid": "${DS_PROMETHEUS}"
         },
         "definition": "label_values(rastir_cost_total, service)",
         "hide": 0,
@@ -75,7 +75,7 @@
         },
         "datasource": {
           "type": "prometheus",
-          "uid": "prometheus"
+          "uid": "${DS_PROMETHEUS}"
         },
         "definition": "label_values(rastir_cost_total, env)",
         "hide": 0,
@@ -98,7 +98,7 @@
         },
         "datasource": {
           "type": "prometheus",
-          "uid": "prometheus"
+          "uid": "${DS_PROMETHEUS}"
         },
         "definition": "label_values(rastir_cost_total, model)",
         "hide": 0,
@@ -121,7 +121,7 @@
         },
         "datasource": {
           "type": "prometheus",
-          "uid": "prometheus"
+          "uid": "${DS_PROMETHEUS}"
         },
         "definition": "label_values(rastir_cost_total, pricing_profile)",
         "hide": 0,
