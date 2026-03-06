@@ -37,9 +37,13 @@ COPY --from=builder /build/dist/*.whl /tmp/
 RUN pip install --no-cache-dir "$(ls /tmp/*.whl)[server]" \
  && rm -rf /tmp/*.whl
 
+# Bundle default config
+COPY rastir-server-config.yaml /app/rastir-server-config.yaml
+
 # Defaults — overridable at runtime
 ENV RASTIR_SERVER_HOST=0.0.0.0
 ENV RASTIR_SERVER_PORT=8080
+ENV RASTIR_SERVER_CONFIG=/app/rastir-server-config.yaml
 
 EXPOSE 8080
 
