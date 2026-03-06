@@ -184,8 +184,6 @@ Resources:
               Value: "http://localhost:4318"
             - Name: RASTIR_SERVER_EXEMPLARS_ENABLED
               Value: "true"
-            - Name: RASTIR_SERVER_LOGGING_LEVEL
-              Value: "DEBUG"
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -228,7 +226,7 @@ Resources:
                     auth:
                       authenticator: sigv4auth
                   awsxray:
-                    region: "${AWS::Region}"
+                    region: "us-east-1"
                 extensions:
                   sigv4auth:
                     region: "${AmpRegion}"
