@@ -23,6 +23,25 @@
   "templating": {
     "list": [
       {
+        "current": {
+          "selected": true,
+          "text": "default",
+          "value": "default"
+        },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Prometheus",
+        "multi": false,
+        "name": "DS_PROMETHEUS",
+        "options": [],
+        "query": "prometheus",
+        "queryValue": "",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      },
+      {
         "allValue": ".*",
         "current": {
           "selected": true,
@@ -166,7 +185,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "targets": [
         {
@@ -175,7 +194,7 @@
           "legendFormat": "{{service}} / {{env}}",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${DS_PROMETHEUS}"
           }
         }
       ],
@@ -263,7 +282,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "targets": [
         {
@@ -272,7 +291,7 @@
           "legendFormat": "Queue Size",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${DS_PROMETHEUS}"
           }
         }
       ],
@@ -331,7 +350,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "targets": [
         {
@@ -340,7 +359,7 @@
           "legendFormat": "Utilization",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${DS_PROMETHEUS}"
           }
         }
       ],
@@ -402,7 +421,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "targets": [
         {
@@ -411,7 +430,7 @@
           "legendFormat": "Rate",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${DS_PROMETHEUS}"
           }
         }
       ],
@@ -480,7 +499,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "targets": [
         {
@@ -489,7 +508,7 @@
           "legendFormat": "{{service}}",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${DS_PROMETHEUS}"
           }
         }
       ],
@@ -577,7 +596,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "targets": [
         {
@@ -586,7 +605,7 @@
           "legendFormat": "Traces",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${DS_PROMETHEUS}"
           }
         }
       ],
@@ -645,7 +664,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "targets": [
         {
@@ -654,7 +673,7 @@
           "legendFormat": "Active",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${DS_PROMETHEUS}"
           }
         }
       ],
@@ -726,7 +745,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "targets": [
         {
@@ -735,7 +754,7 @@
           "legendFormat": "Rejections/s",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${DS_PROMETHEUS}"
           }
         }
       ],
@@ -820,7 +839,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "targets": [
         {
@@ -829,7 +848,7 @@
           "legendFormat": "Dropped/s",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${DS_PROMETHEUS}"
           }
         }
       ],
@@ -914,7 +933,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "targets": [
         {
@@ -923,7 +942,7 @@
           "legendFormat": "Warnings/s",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${DS_PROMETHEUS}"
           }
         }
       ],
@@ -1021,7 +1040,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "targets": [
         {
@@ -1030,7 +1049,7 @@
           "legendFormat": "Export Failures/s",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${DS_PROMETHEUS}"
           }
         }
       ],
@@ -1132,7 +1151,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "targets": [
         {
@@ -1141,7 +1160,7 @@
           "legendFormat": "Redactions/s",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${DS_PROMETHEUS}"
           }
         }
       ],
@@ -1226,7 +1245,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "targets": [
         {
@@ -1235,7 +1254,7 @@
           "legendFormat": "Failures/s",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${DS_PROMETHEUS}"
           }
         }
       ],

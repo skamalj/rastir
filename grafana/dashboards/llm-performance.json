@@ -23,6 +23,25 @@
   "templating": {
     "list": [
       {
+        "current": {
+          "selected": true,
+          "text": "default",
+          "value": "default"
+        },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Prometheus",
+        "multi": false,
+        "name": "DS_PROMETHEUS",
+        "options": [],
+        "query": "prometheus",
+        "queryValue": "",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      },
+      {
         "allValue": ".*",
         "current": {
           "selected": true,
@@ -153,7 +172,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "targets": [
         {
@@ -161,7 +180,7 @@
           "expr": "sum(increase(rastir_llm_calls_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", agent=~\"$agent\"}[$__range]))",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${DS_PROMETHEUS}"
           },
           "instant": true
         }
@@ -216,7 +235,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "targets": [
         {
@@ -224,7 +243,7 @@
           "expr": "sum(increase(rastir_errors_total{span_type=\"llm\", service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\"}[$__range]))",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${DS_PROMETHEUS}"
           },
           "instant": true
         }
@@ -292,7 +311,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "targets": [
         {
@@ -301,7 +320,7 @@
           "legendFormat": "{{model}} / {{provider}}",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${DS_PROMETHEUS}"
           },
           "instant": true
         }
@@ -355,7 +374,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "targets": [
         {
@@ -364,7 +383,7 @@
           "legendFormat": "{{model}} / {{provider}}",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${DS_PROMETHEUS}"
           },
           "instant": true,
           "format": "table"
@@ -468,7 +487,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "targets": [
         {
@@ -477,7 +496,7 @@
           "legendFormat": "p50 {{model}} / {{provider}}",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${DS_PROMETHEUS}"
           }
         },
         {
@@ -486,7 +505,7 @@
           "legendFormat": "p95 {{model}} / {{provider}}",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${DS_PROMETHEUS}"
           }
         },
         {
@@ -495,7 +514,7 @@
           "legendFormat": "p99 {{model}} / {{provider}}",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${DS_PROMETHEUS}"
           }
         }
       ],
@@ -601,7 +620,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "targets": [
         {
@@ -609,7 +628,7 @@
           "expr": "sum(increase(rastir_tokens_input_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\"}[$__range]))",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${DS_PROMETHEUS}"
           },
           "instant": true
         }
@@ -664,7 +683,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "targets": [
         {
@@ -672,7 +691,7 @@
           "expr": "sum(increase(rastir_tokens_output_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\"}[$__range]))",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${DS_PROMETHEUS}"
           },
           "instant": true
         }
@@ -727,7 +746,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "targets": [
         {
@@ -736,7 +755,7 @@
           "legendFormat": "{{model}}",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${DS_PROMETHEUS}"
           }
         }
       ],
@@ -820,7 +839,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "targets": [
         {
@@ -829,7 +848,7 @@
           "legendFormat": "{{model}}",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${DS_PROMETHEUS}"
           }
         }
       ],
@@ -926,7 +945,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "targets": [
         {
@@ -935,7 +954,7 @@
           "legendFormat": "p95 {{model}} / {{provider}}",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${DS_PROMETHEUS}"
           }
         }
       ],
@@ -1036,7 +1055,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "targets": [
         {
@@ -1045,7 +1064,7 @@
           "legendFormat": "{{error_type}}",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${DS_PROMETHEUS}"
           },
           "instant": true
         }
@@ -1099,7 +1118,7 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "targets": [
         {
@@ -1108,7 +1127,7 @@
           "legendFormat": "{{error_type}}",
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${DS_PROMETHEUS}"
           },
           "instant": true,
           "format": "table"

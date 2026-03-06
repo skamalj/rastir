@@ -25,6 +25,25 @@
   "templating": {
     "list": [
       {
+        "current": {
+          "selected": true,
+          "text": "default",
+          "value": "default"
+        },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Prometheus",
+        "multi": false,
+        "name": "DS_PROMETHEUS",
+        "options": [],
+        "query": "prometheus",
+        "queryValue": "",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      },
+      {
         "allValue": ".*",
         "current": {
           "selected": true,
@@ -137,7 +156,7 @@
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 6,
@@ -149,7 +168,11 @@
         {
           "expr": "sum(rastir_cost_total{service=~\"$service\",env=~\"$env\",model=~\"$model\",pricing_profile=~\"$pricing_profile\"})",
           "legendFormat": "Total Cost",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
         }
       ],
       "fieldConfig": {
@@ -193,7 +216,7 @@
       "type": "piechart",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 6,
@@ -205,7 +228,11 @@
         {
           "expr": "sum by (model) (rastir_cost_total{service=~\"$service\",env=~\"$env\",model=~\"$model\",pricing_profile=~\"$pricing_profile\"})",
           "legendFormat": "{{model}}",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
         }
       ],
       "fieldConfig": {
@@ -228,7 +255,7 @@
       "type": "piechart",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 6,
@@ -240,7 +267,11 @@
         {
           "expr": "sum by (agent) (rastir_cost_total{service=~\"$service\",env=~\"$env\",model=~\"$model\",pricing_profile=~\"$pricing_profile\",agent!=\"\"})",
           "legendFormat": "{{agent}}",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
         }
       ],
       "fieldConfig": {
@@ -263,7 +294,7 @@
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 8,
@@ -275,12 +306,20 @@
         {
           "expr": "sum(rate(rastir_cost_total{service=~\"$service\",env=~\"$env\",model=~\"$model\",pricing_profile=~\"$pricing_profile\"}[5m])) * 60",
           "legendFormat": "Total",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
         },
         {
           "expr": "sum by (model) (rate(rastir_cost_total{service=~\"$service\",env=~\"$env\",model=~\"$model\",pricing_profile=~\"$pricing_profile\"}[5m])) * 60",
           "legendFormat": "{{model}}",
-          "refId": "B"
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
         }
       ],
       "fieldConfig": {
@@ -315,7 +354,7 @@
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 8,
@@ -327,12 +366,20 @@
         {
           "expr": "histogram_quantile(0.95, sum by (le, model) (rate(rastir_cost_per_call_usd_bucket{service=~\"$service\",env=~\"$env\",model=~\"$model\"}[5m])))",
           "legendFormat": "P95 {{model}}",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
         },
         {
           "expr": "histogram_quantile(0.50, sum by (le, model) (rate(rastir_cost_per_call_usd_bucket{service=~\"$service\",env=~\"$env\",model=~\"$model\"}[5m])))",
           "legendFormat": "P50 {{model}}",
-          "refId": "B"
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
         }
       ],
       "fieldConfig": {
@@ -367,7 +414,7 @@
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 8,
@@ -379,7 +426,11 @@
         {
           "expr": "sum by (pricing_profile) (rastir_cost_total{service=~\"$service\",env=~\"$env\",model=~\"$model\",pricing_profile=~\"$pricing_profile\"})",
           "legendFormat": "{{pricing_profile}}",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
         }
       ],
       "fieldConfig": {
@@ -405,7 +456,7 @@
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 8,
@@ -417,12 +468,20 @@
         {
           "expr": "sum(rate(rastir_pricing_missing_total{service=~\"$service\",env=~\"$env\"}[5m]))",
           "legendFormat": "Missing/sec",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
         },
         {
           "expr": "sum(rastir_pricing_missing_total{service=~\"$service\",env=~\"$env\"})",
           "legendFormat": "Total Missing",
-          "refId": "B"
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
         }
       ],
       "fieldConfig": {
@@ -459,7 +518,7 @@
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 8,
@@ -471,12 +530,20 @@
         {
           "expr": "histogram_quantile(0.95, sum by (le, model) (rate(rastir_ttft_seconds_bucket{service=~\"$service\",env=~\"$env\",model=~\"$model\"}[5m])))",
           "legendFormat": "P95 {{model}}",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
         },
         {
           "expr": "histogram_quantile(0.50, sum by (le, model) (rate(rastir_ttft_seconds_bucket{service=~\"$service\",env=~\"$env\",model=~\"$model\"}[5m])))",
           "legendFormat": "P50 {{model}}",
-          "refId": "B"
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
         }
       ],
       "fieldConfig": {
@@ -511,7 +578,7 @@
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 8,
@@ -523,17 +590,29 @@
         {
           "expr": "histogram_quantile(0.95, sum by (le, provider) (rate(rastir_ttft_seconds_bucket{service=~\"$service\",env=~\"$env\"}[5m])))",
           "legendFormat": "P95 {{provider}}",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
         },
         {
           "expr": "histogram_quantile(0.75, sum by (le, provider) (rate(rastir_ttft_seconds_bucket{service=~\"$service\",env=~\"$env\"}[5m])))",
           "legendFormat": "P75 {{provider}}",
-          "refId": "B"
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
         },
         {
           "expr": "histogram_quantile(0.50, sum by (le, provider) (rate(rastir_ttft_seconds_bucket{service=~\"$service\",env=~\"$env\"}[5m])))",
           "legendFormat": "P50 {{provider}}",
-          "refId": "C"
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
         }
       ],
       "fieldConfig": {
@@ -569,7 +648,7 @@
       "type": "heatmap",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 8,
@@ -582,7 +661,11 @@
           "expr": "sum(increase(rastir_ttft_seconds_bucket{service=~\"$service\",env=~\"$env\",model=~\"$model\"}[5m])) by (le)",
           "legendFormat": "{{le}}",
           "refId": "A",
-          "format": "heatmap"
+          "format": "heatmap",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
         }
       ],
       "options": {

@@ -26,6 +26,25 @@
   "templating": {
     "list": [
       {
+        "current": {
+          "selected": true,
+          "text": "default",
+          "value": "default"
+        },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Prometheus",
+        "multi": false,
+        "name": "DS_PROMETHEUS",
+        "options": [],
+        "query": "prometheus",
+        "queryValue": "",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      },
+      {
         "allValue": ".*",
         "current": {
           "selected": true,
@@ -188,7 +207,7 @@
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 4,
@@ -200,7 +219,11 @@
         {
           "expr": "min(rastir:sla_status:$period{service=~\"$service\",env=~\"$env\",agent=~\"$agent\"})",
           "legendFormat": "SLA",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
         }
       ],
       "fieldConfig": {
@@ -260,7 +283,7 @@
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 4,
@@ -272,7 +295,11 @@
         {
           "expr": "sum(rastir:expected_volume:$period{service=~\"$service\",env=~\"$env\",agent=~\"$agent\"})",
           "legendFormat": "Expected Volume",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
         }
       ],
       "fieldConfig": {
@@ -309,7 +336,7 @@
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 4,
@@ -321,7 +348,11 @@
         {
           "expr": "sum(rastir:error_budget_total:$period{service=~\"$service\",env=~\"$env\",agent=~\"$agent\"})",
           "legendFormat": "Error Budget",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
         }
       ],
       "fieldConfig": {
@@ -358,7 +389,7 @@
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 4,
@@ -371,7 +402,11 @@
           "expr": "scalar(rastir_cost_budget_usd{agent=\"unknown\"})",
           "legendFormat": "Cost Budget",
           "refId": "A",
-          "instant": true
+          "instant": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
         }
       ],
       "fieldConfig": {
@@ -421,7 +456,7 @@
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 4,
@@ -433,7 +468,11 @@
         {
           "expr": "sum(rastir:volume:$period{service=~\"$service\",env=~\"$env\",agent=~\"$agent\"})",
           "legendFormat": "Total Requests",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
         }
       ],
       "fieldConfig": {
@@ -471,7 +510,7 @@
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 4,
@@ -483,7 +522,11 @@
         {
           "expr": "sum(rastir:errors:$period{service=~\"$service\",env=~\"$env\",agent=~\"$agent\"})",
           "legendFormat": "Total Errors",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
         }
       ],
       "fieldConfig": {
@@ -521,7 +564,7 @@
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 4,
@@ -533,7 +576,11 @@
         {
           "expr": "100 * (1 - sum(rastir:errors:$period{service=~\"$service\",env=~\"$env\",agent=~\"$agent\"}) / sum(rastir:error_budget_total:$period{service=~\"$service\",env=~\"$env\",agent=~\"$agent\"}))",
           "legendFormat": "",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
         }
       ],
       "fieldConfig": {
@@ -578,7 +625,7 @@
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 4,
@@ -590,7 +637,11 @@
         {
           "expr": "sum(rastir:cost:$period)",
           "legendFormat": "Cost Incurred",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
         }
       ],
       "fieldConfig": {
@@ -627,7 +678,7 @@
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 4,
@@ -640,7 +691,11 @@
           "expr": "scalar(rastir_cost_budget_usd{agent=\"unknown\"}) - sum(rastir:cost:$period)",
           "legendFormat": "Cost Remaining",
           "refId": "A",
-          "instant": true
+          "instant": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
         }
       ],
       "fieldConfig": {
@@ -698,7 +753,7 @@
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 4,
@@ -710,7 +765,11 @@
         {
           "expr": "min(rastir:error_days_to_exhaustion:$period{service=~\"$service\",env=~\"$env\",agent=~\"$agent\"})",
           "legendFormat": "Days Left",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
         }
       ],
       "fieldConfig": {
@@ -756,7 +815,7 @@
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 4,
@@ -768,7 +827,11 @@
         {
           "expr": "min(rastir:cost_days_to_exhaustion:$period)",
           "legendFormat": "Days Left",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
         }
       ],
       "fieldConfig": {
@@ -814,7 +877,7 @@
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 8,
@@ -826,12 +889,20 @@
         {
           "expr": "clamp_min(100 * (1 - sum(rastir:errors:$period{service=~\"$service\",env=~\"$env\",agent=~\"$agent\"}) / sum(rastir:error_budget_total:$period{service=~\"$service\",env=~\"$env\",agent=~\"$agent\"})), 0)",
           "legendFormat": "Error Budget Remaining %",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
         },
         {
           "expr": "clamp_min(100 * (1 - sum(rastir:cost:$period) / scalar(rastir_cost_budget_usd{agent=\"unknown\"})), 0)",
           "legendFormat": "Cost Budget Remaining %",
-          "refId": "B"
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
         }
       ],
       "fieldConfig": {
@@ -907,7 +978,7 @@
       "title": "Error Budget Consumed \u2014 by Agent",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 8,
@@ -959,7 +1030,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${DS_PROMETHEUS}"
           },
           "expr": "rastir:errors:$period{service=~\"$service\",env=~\"$env\",agent=~\"$agent\"}",
           "legendFormat": "{{agent}}",
@@ -974,7 +1045,7 @@
       "title": "Error Budget Consumed \u2014 by Model",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 8,
@@ -1026,7 +1097,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "${DS_PROMETHEUS}"
           },
           "expr": "sum by(model)(rastir:errors_by_model:$period{service=~\"$service\",env=~\"$env\",agent=~\"$agent\"})",
           "legendFormat": "{{model}}",
@@ -1042,7 +1113,7 @@
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 8,
@@ -1054,7 +1125,11 @@
         {
           "expr": "sum(rastir:volume:$period{service=~\"$service\",env=~\"$env\",agent=~\"$agent\"})",
           "legendFormat": "Total Volume",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
         }
       ],
       "fieldConfig": {
@@ -1111,7 +1186,7 @@
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 8,
@@ -1123,7 +1198,11 @@
         {
           "expr": "sum by(service)(rate(rastir_duration_seconds_sum{service=~\"$service\",env=~\"$env\"}[5m])) / sum by(service)(rate(rastir_duration_seconds_count{service=~\"$service\",env=~\"$env\"}[5m]))",
           "legendFormat": "{{service}}",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
         }
       ],
       "fieldConfig": {
@@ -1168,7 +1247,7 @@
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 8,
@@ -1180,7 +1259,11 @@
         {
           "expr": "sum by(service)(rate(rastir_duration_seconds_count{service=~\"$service\",env=~\"$env\"}[5m]))",
           "legendFormat": "{{service}}",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
         }
       ],
       "fieldConfig": {
@@ -1225,7 +1308,7 @@
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 8,
@@ -1237,12 +1320,20 @@
         {
           "expr": "sum by(service)(rate(rastir_tokens_input_total{service=~\"$service\",env=~\"$env\"}[5m]))",
           "legendFormat": "{{service}} \u2014 input",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
         },
         {
           "expr": "sum by(service)(rate(rastir_tokens_output_total{service=~\"$service\",env=~\"$env\"}[5m]))",
           "legendFormat": "{{service}} \u2014 output",
-          "refId": "B"
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
         }
       ],
       "fieldConfig": {
@@ -1282,7 +1373,7 @@
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 8,
@@ -1294,7 +1385,11 @@
         {
           "expr": "sum by(service)(rate(rastir_cost_total{service=~\"$service\",env=~\"$env\"}[5m]))",
           "legendFormat": "{{service}}",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
         }
       ],
       "fieldConfig": {
@@ -1335,7 +1430,7 @@
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 8,
@@ -1347,12 +1442,20 @@
         {
           "expr": "histogram_quantile(0.95, sum by(service, le)(rate(rastir_duration_seconds_bucket{service=~\"$service\",env=~\"$env\"}[5m])))",
           "legendFormat": "{{service}} \u2014 p95",
-          "refId": "A"
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
         },
         {
           "expr": "histogram_quantile(0.99, sum by(service, le)(rate(rastir_duration_seconds_bucket{service=~\"$service\",env=~\"$env\"}[5m])))",
           "legendFormat": "{{service}} \u2014 p99",
-          "refId": "B"
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
         }
       ],
       "fieldConfig": {
