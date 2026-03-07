@@ -21,6 +21,12 @@ class SpanStatus(str, Enum):
     ERROR = "ERROR"
 
 
+# Per-trace time anchor: maps trace_id → (wall_time, mono_time).
+# Root spans register an anchor; child spans derive start_time from it
+# so that all spans in a trace are immune to WSL2/NTP clock drift.
+_trace_time_anchor: dict[str, tuple[float, float]] = {}
+
+
 class SpanType(str, Enum):
     """Semantic type of a span, determines metric derivation on the server."""
 
@@ -54,6 +60,24 @@ class SpanRecord:
     attributes: dict[str, Any] = field(default_factory=dict)
     events: list[dict[str, Any]] = field(default_factory=list)
     _mono_start: float = field(default_factory=time.monotonic, repr=False)
+
+    def __post_init__(self) -> None:
+        """Anchor start_time to the trace's root wall clock via monotonic offset.
+
+        Prevents WSL2/NTP clock drift from placing child spans far ahead
+        of (or behind) their parent.
+        """
+        if self.parent_id is None:
+            # Root span — register its (wall, mono) pair as the anchor
+            if len(_trace_time_anchor) > 10_000:
+                _trace_time_anchor.clear()
+            _trace_time_anchor[self.trace_id] = (self.start_time, self._mono_start)
+        else:
+            # Child span — derive start_time from the root's anchor
+            anchor = _trace_time_anchor.get(self.trace_id)
+            if anchor is not None:
+                wall_anchor, mono_anchor = anchor
+                self.start_time = wall_anchor + (self._mono_start - mono_anchor)
 
     @property
     def duration_seconds(self) -> float:
