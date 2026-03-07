@@ -286,7 +286,7 @@ def _install_adk_callbacks(
 
     # --- LLM callbacks ---
 
-    async def _before_model(ctx: Any, llm_request: Any) -> None:
+    async def _before_model(ctx: Any, llm_request: Any, **kwargs: Any) -> None:
         model_name = getattr(llm_request, "model", None) or _get_adk_model_name(agent)
         span, token = start_span(f"adk.llm.{model_name}", SpanType.LLM)
         span.set_attribute("model", str(model_name))
@@ -294,7 +294,7 @@ def _install_adk_callbacks(
         _active_llm_spans[_inv_id(ctx)] = (span, token)
         return None  # Let the LLM call proceed
 
-    async def _after_model(ctx: Any, llm_response: Any) -> None:
+    async def _after_model(ctx: Any, llm_response: Any, **kwargs: Any) -> None:
         key = _inv_id(ctx)
         entry = _active_llm_spans.pop(key, None)
         if entry is None:
@@ -317,7 +317,7 @@ def _install_adk_callbacks(
         enqueue_span(span)
         return None
 
-    async def _on_model_error(ctx: Any, llm_request: Any, exc: Exception) -> None:
+    async def _on_model_error(ctx: Any, llm_request: Any, exc: Exception, **kwargs: Any) -> None:
         key = _inv_id(ctx)
         entry = _active_llm_spans.pop(key, None)
         if entry is None:
@@ -335,14 +335,14 @@ def _install_adk_callbacks(
         fcid = getattr(ctx, "function_call_id", "") or ""
         return f"{_inv_id(ctx)}:{fcid}"
 
-    async def _before_tool(tool: Any, args: dict, ctx: Any) -> None:
+    async def _before_tool(tool: Any, args: dict, ctx: Any, **kwargs: Any) -> None:
         tool_name = getattr(tool, "name", None) or type(tool).__name__
         span, token = start_span(f"adk.tool.{tool_name}", SpanType.TOOL)
         span.set_attribute("tool_name", tool_name)
         _active_tool_spans[_tool_key(tool, ctx)] = (span, token)
         return None  # Let the tool call proceed
 
-    async def _after_tool(tool: Any, args: dict, ctx: Any, result: dict) -> None:
+    async def _after_tool(tool: Any, args: dict, ctx: Any, result: dict, **kwargs: Any) -> None:
         key = _tool_key(tool, ctx)
         entry = _active_tool_spans.pop(key, None)
         if entry is None:
@@ -353,7 +353,7 @@ def _install_adk_callbacks(
         enqueue_span(span)
         return None
 
-    async def _on_tool_error(tool: Any, args: dict, ctx: Any, exc: Exception) -> None:
+    async def _on_tool_error(tool: Any, args: dict, ctx: Any, exc: Exception, **kwargs: Any) -> None:
         key = _tool_key(tool, ctx)
         entry = _active_tool_spans.pop(key, None)
         if entry is None:
