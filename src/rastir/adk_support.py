@@ -286,16 +286,16 @@ def _install_adk_callbacks(
 
     # --- LLM callbacks ---
 
-    async def _before_model(ctx: Any, llm_request: Any, **kwargs: Any) -> None:
+    async def _before_model(*, callback_context: Any, llm_request: Any, **kwargs: Any) -> None:
         model_name = getattr(llm_request, "model", None) or _get_adk_model_name(agent)
         span, token = start_span(f"adk.llm.{model_name}", SpanType.LLM)
         span.set_attribute("model", str(model_name))
         span.set_attribute("provider", "google")
-        _active_llm_spans[_inv_id(ctx)] = (span, token)
+        _active_llm_spans[_inv_id(callback_context)] = (span, token)
         return None  # Let the LLM call proceed
 
-    async def _after_model(ctx: Any, llm_response: Any, **kwargs: Any) -> None:
-        key = _inv_id(ctx)
+    async def _after_model(*, callback_context: Any, llm_response: Any, **kwargs: Any) -> None:
+        key = _inv_id(callback_context)
         entry = _active_llm_spans.pop(key, None)
         if entry is None:
             return None
@@ -317,13 +317,13 @@ def _install_adk_callbacks(
         enqueue_span(span)
         return None
 
-    async def _on_model_error(ctx: Any, llm_request: Any, exc: Exception, **kwargs: Any) -> None:
-        key = _inv_id(ctx)
+    async def _on_model_error(*, callback_context: Any, llm_request: Any, error: Exception, **kwargs: Any) -> None:
+        key = _inv_id(callback_context)
         entry = _active_llm_spans.pop(key, None)
         if entry is None:
             return None
         span, token = entry
-        span.record_error(exc)
+        span.record_error(error)
         span.finish(SpanStatus.ERROR)
         end_span(token)
         enqueue_span(span)
@@ -331,19 +331,19 @@ def _install_adk_callbacks(
 
     # --- Tool callbacks ---
 
-    def _tool_key(tool: Any, ctx: Any) -> str:
-        fcid = getattr(ctx, "function_call_id", "") or ""
-        return f"{_inv_id(ctx)}:{fcid}"
+    def _tool_key(tool: Any, tool_ctx: Any) -> str:
+        fcid = getattr(tool_ctx, "function_call_id", "") or ""
+        return f"{_inv_id(tool_ctx)}:{fcid}"
 
-    async def _before_tool(tool: Any, args: dict, ctx: Any, **kwargs: Any) -> None:
+    async def _before_tool(*, tool: Any, args: dict, tool_context: Any, **kwargs: Any) -> None:
         tool_name = getattr(tool, "name", None) or type(tool).__name__
         span, token = start_span(f"adk.tool.{tool_name}", SpanType.TOOL)
         span.set_attribute("tool_name", tool_name)
-        _active_tool_spans[_tool_key(tool, ctx)] = (span, token)
+        _active_tool_spans[_tool_key(tool, tool_context)] = (span, token)
         return None  # Let the tool call proceed
 
-    async def _after_tool(tool: Any, args: dict, ctx: Any, result: dict, **kwargs: Any) -> None:
-        key = _tool_key(tool, ctx)
+    async def _after_tool(*, tool: Any, args: dict, tool_context: Any, tool_response: dict, **kwargs: Any) -> None:
+        key = _tool_key(tool, tool_context)
         entry = _active_tool_spans.pop(key, None)
         if entry is None:
             return None
@@ -353,13 +353,13 @@ def _install_adk_callbacks(
         enqueue_span(span)
         return None
 
-    async def _on_tool_error(tool: Any, args: dict, ctx: Any, exc: Exception, **kwargs: Any) -> None:
-        key = _tool_key(tool, ctx)
+    async def _on_tool_error(*, tool: Any, args: dict, tool_context: Any, error: Exception, **kwargs: Any) -> None:
+        key = _tool_key(tool, tool_context)
         entry = _active_tool_spans.pop(key, None)
         if entry is None:
             return None
         span, token = entry
-        span.record_error(exc)
+        span.record_error(error)
         span.finish(SpanStatus.ERROR)
         end_span(token)
         enqueue_span(span)
