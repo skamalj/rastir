@@ -29,9 +29,11 @@ from rastir.pricing import PricingRegistry
 from rastir.remote import RastirMCPMiddleware, mcp_endpoint, traceparent_headers, wrap_mcp
 from rastir.transport import get_export_stats, stop_exporter
 from rastir.wrapper import wrap
+from rastir.adk_support import adk_agent
 from rastir.crewai_support import crew_kickoff
 from rastir.langgraph_support import langgraph_agent
 from rastir.llamaindex_support import llamaindex_agent
+from rastir.strands_support import strands_agent
 
 # _span aliases — preferred when using alongside LangChain/LangGraph
 # to avoid name collisions (e.g. langchain_core names)
@@ -68,6 +70,10 @@ __all__ = [
     "langgraph_agent",
     # LlamaIndex
     "llamaindex_agent",
+    # ADK
+    "adk_agent",
+    # Strands
+    "strands_agent",
     "stop_exporter",
     "get_export_stats",
 ]

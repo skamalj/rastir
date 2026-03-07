@@ -1,9 +1,11 @@
 """Run ALL framework × agent-type × tool-type combinations.
 
-10 combinations total:
+14 combinations total:
   LangGraph  (4): React+MCP, React+Local, Manual+MCP, Manual+Local
   CrewAI     (2): Agent+MCP, Agent+Local
   LlamaIndex (4): ReAct+MCP, ReAct+Local, Function+MCP, Function+Local
+  ADK        (2): Agent+Local, Agent+MCP
+  Strands    (2): Agent+Local, Agent+MCP
 
 Run:
     conda run -n llmobserve env PYTHONPATH=src \
@@ -36,7 +38,7 @@ if not OPENAI_KEY:
 # Rastir
 # ---------------------------------------------------------------------------
 import rastir
-from rastir import configure, langgraph_agent, crew_kickoff, llamaindex_agent
+from rastir import configure, langgraph_agent, crew_kickoff, llamaindex_agent, adk_agent, strands_agent
 from rastir.remote import traceparent_headers
 
 configure(
@@ -50,6 +52,7 @@ if pr:
     pr.register("gemini", "gemini-2.5-flash", input_price=0.15, output_price=0.60)
     pr.register("openai", "gpt-4o-mini", input_price=0.15, output_price=0.60)
     pr.register("openai", "gpt-4o-mini-2024-07-18", input_price=0.15, output_price=0.60)
+    pr.register("bedrock", "apac.anthropic.claude-sonnet-4-20250514-v1:0", input_price=3.0, output_price=15.0)
 
 # ---------------------------------------------------------------------------
 # MCP server (background)
@@ -206,6 +209,95 @@ from llama_index.core.tools import FunctionTool
 from llama_index.tools.mcp import BasicMCPClient, McpToolSpec
 
 # ===================================================================
+#  ADK helpers
+# ===================================================================
+from google.adk.agents import Agent as AdkAgentCls
+from google.adk.runners import Runner
+from google.adk.sessions import InMemorySessionService
+from google.adk.tools import FunctionTool as AdkFunctionTool
+from google.genai import types
+
+
+def adk_add_numbers(a: int, b: int) -> int:
+    """Add two numbers together and return the result."""
+    return a + b
+
+
+def adk_multiply_numbers(a: int, b: int) -> int:
+    """Multiply two numbers together and return the result."""
+    return a * b
+
+
+def adk_get_weather(city: str) -> str:
+    """Get the current weather for a city."""
+    hdrs = {"Accept": "application/json", **traceparent_headers()}
+    with httpx.Client(timeout=10) as c:
+        r = c.post(MCP_URL, json={"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                                   "params": {"name": "get_weather", "arguments": {"city": city}}},
+                   headers=hdrs)
+        data = r.json()
+        content = data.get("result", {}).get("content", [{}])
+        return content[0].get("text", str(data)) if content else str(data)
+
+
+def adk_get_population(city: str) -> str:
+    """Get the approximate population of a city."""
+    hdrs = {"Accept": "application/json", **traceparent_headers()}
+    with httpx.Client(timeout=10) as c:
+        r = c.post(MCP_URL, json={"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                                   "params": {"name": "get_population", "arguments": {"city": city}}},
+                   headers=hdrs)
+        data = r.json()
+        content = data.get("result", {}).get("content", [{}])
+        return content[0].get("text", str(data)) if content else str(data)
+
+
+# ===================================================================
+#  STRANDS helpers
+# ===================================================================
+from strands import Agent as StrandsAgentCls
+from strands.models.bedrock import BedrockModel
+import strands
+
+
+@strands.tool
+def strands_add_numbers(a: int, b: int) -> str:
+    """Add two numbers together and return the result."""
+    return str(a + b)
+
+
+@strands.tool
+def strands_multiply_numbers(a: int, b: int) -> str:
+    """Multiply two numbers together and return the result."""
+    return str(a * b)
+
+
+@strands.tool
+def strands_get_weather(city: str) -> str:
+    """Get the current weather for a city."""
+    hdrs = {"Accept": "application/json", **traceparent_headers()}
+    with httpx.Client(timeout=10) as c:
+        r = c.post(MCP_URL, json={"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                                   "params": {"name": "get_weather", "arguments": {"city": city}}},
+                   headers=hdrs)
+        data = r.json()
+        content = data.get("result", {}).get("content", [{}])
+        return content[0].get("text", str(data)) if content else str(data)
+
+
+@strands.tool
+def strands_get_population(city: str) -> str:
+    """Get the approximate population of a city."""
+    hdrs = {"Accept": "application/json", **traceparent_headers()}
+    with httpx.Client(timeout=10) as c:
+        r = c.post(MCP_URL, json={"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                                   "params": {"name": "get_population", "arguments": {"city": city}}},
+                   headers=hdrs)
+        data = r.json()
+        content = data.get("result", {}).get("content", [{}])
+        return content[0].get("text", str(data)) if content else str(data)
+
+# ===================================================================
 #  RESULTS
 # ===================================================================
 results: dict[str, str] = {}
@@ -235,7 +327,7 @@ async def run_combo(label: str, coro):
 # ===================================================================
 async def main():
     print("=" * 60)
-    print("  ALL-COMBINATIONS E2E TEST (10 combos)")
+    print("  ALL-COMBINATIONS E2E TEST (14 combos)")
     print("=" * 60)
 
     # ── MCP server ───────────────────────────────────────────────
@@ -281,7 +373,7 @@ async def main():
     async def lg_react_mcp(g, mc):
         return await g.ainvoke({"messages": [("user", "What is the weather in Tokyo and the population of London?")]})
 
-    await run_combo(f"[{combo_num}/10] LangGraph React + MCP tools", lg_react_mcp(react_mcp_graph, mcp_client))
+    await run_combo(f"[{combo_num}/14] LangGraph React + MCP tools", lg_react_mcp(react_mcp_graph, mcp_client))
 
     # 2. React + Local
     combo_num += 1
@@ -291,7 +383,7 @@ async def main():
     async def lg_react_local(g, mc):
         return await g.ainvoke({"messages": [("user", "Add 15 and 27, then multiply the result by 3.")]})
 
-    await run_combo(f"[{combo_num}/10] LangGraph React + Local tools", lg_react_local(react_local_graph, mcp_client))
+    await run_combo(f"[{combo_num}/14] LangGraph React + Local tools", lg_react_local(react_local_graph, mcp_client))
 
     # 3. Manual + MCP
     combo_num += 1
@@ -301,7 +393,7 @@ async def main():
     async def lg_manual_mcp(g, mc):
         return await g.ainvoke({"messages": [HumanMessage(content="Convert 30 celsius to fahrenheit and tell me the timezone of Paris.")]})
 
-    await run_combo(f"[{combo_num}/10] LangGraph Manual + MCP tools", lg_manual_mcp(manual_mcp_graph, mcp_client))
+    await run_combo(f"[{combo_num}/14] LangGraph Manual + MCP tools", lg_manual_mcp(manual_mcp_graph, mcp_client))
 
     # 4. Manual + Local
     combo_num += 1
@@ -311,7 +403,7 @@ async def main():
     async def lg_manual_local(g, mc):
         return await g.ainvoke({"messages": [HumanMessage(content="What is 8 + 13 and what is 7 * 9?")]})
 
-    await run_combo(f"[{combo_num}/10] LangGraph Manual + Local tools", lg_manual_local(manual_local_graph, mcp_client))
+    await run_combo(f"[{combo_num}/14] LangGraph Manual + Local tools", lg_manual_local(manual_local_graph, mcp_client))
 
     # ══════════════════════════════════════════════════════════════
     #  CREWAI (2 combos)
@@ -340,7 +432,7 @@ async def main():
     def crew_local_run(crew):
         return crew.kickoff()
 
-    await run_combo(f"[{combo_num}/10] CrewAI Agent + Local tools",
+    await run_combo(f"[{combo_num}/14] CrewAI Agent + Local tools",
                     asyncio.to_thread(crew_local_run, math_crew))
 
     # 6. CrewAI + MCP tools
@@ -361,7 +453,7 @@ async def main():
     def crew_mcp_run(crew):
         return crew.kickoff()
 
-    await run_combo(f"[{combo_num}/10] CrewAI Agent + MCP tools",
+    await run_combo(f"[{combo_num}/14] CrewAI Agent + MCP tools",
                     asyncio.to_thread(crew_mcp_run, city_crew))
 
     # ══════════════════════════════════════════════════════════════
@@ -380,7 +472,7 @@ async def main():
     async def li_react_local_run(agent):
         return await agent.run(user_msg="What is 3 + 5, then multiply the result by 4?")
 
-    await run_combo(f"[{combo_num}/10] LlamaIndex ReAct + Local tools", li_react_local_run(react_local))
+    await run_combo(f"[{combo_num}/14] LlamaIndex ReAct + Local tools", li_react_local_run(react_local))
 
     # 8. ReAct + MCP
     combo_num += 1
@@ -391,7 +483,7 @@ async def main():
     async def li_react_mcp_run(agent, mc):
         return await agent.run(user_msg="What is the weather in Sydney?")
 
-    await run_combo(f"[{combo_num}/10] LlamaIndex ReAct + MCP tools", li_react_mcp_run(react_mcp, mcp_li_client))
+    await run_combo(f"[{combo_num}/14] LlamaIndex ReAct + MCP tools", li_react_mcp_run(react_mcp, mcp_li_client))
 
     # 9. Function + Local
     combo_num += 1
@@ -402,7 +494,7 @@ async def main():
     async def li_func_local_run(agent):
         return await agent.run(user_msg="What is 7 + 9, then multiply the result by 3?")
 
-    await run_combo(f"[{combo_num}/10] LlamaIndex Function + Local tools", li_func_local_run(func_local))
+    await run_combo(f"[{combo_num}/14] LlamaIndex Function + Local tools", li_func_local_run(func_local))
 
     # 10. Function + MCP
     combo_num += 1
@@ -413,7 +505,120 @@ async def main():
     async def li_func_mcp_run(agent, mc):
         return await agent.run(user_msg="What is the population of Tokyo?")
 
-    await run_combo(f"[{combo_num}/10] LlamaIndex Function + MCP tools", li_func_mcp_run(func_mcp, mcp_li_client))
+    await run_combo(f"[{combo_num}/14] LlamaIndex Function + MCP tools", li_func_mcp_run(func_mcp, mcp_li_client))
+
+    # ══════════════════════════════════════════════════════════════
+    #  ADK (2 combos)
+    # ══════════════════════════════════════════════════════════════
+    print("\n" + "═" * 60)
+    print("  ADK (Google Agent Development Kit)")
+    print("═" * 60)
+
+    # 11. ADK + Local tools
+    combo_num += 1
+    adk_local_agent = AdkAgentCls(
+        name="adk_math",
+        model="gemini-2.5-flash",
+        tools=[AdkFunctionTool(adk_add_numbers), AdkFunctionTool(adk_multiply_numbers)],
+        instruction="You are a math assistant. Use the tools to solve problems.",
+    )
+    adk_local_runner = Runner(
+        agent=adk_local_agent, app_name="adk-local-test",
+        session_service=InMemorySessionService(),
+    )
+
+    @adk_agent(agent_name="adk_local")
+    async def adk_local_run(runner):
+        session = await runner.session_service.create_session(
+            app_name="adk-local-test", user_id="user1",
+        )
+        events = []
+        async for event in runner.run_async(
+            user_id="user1", session_id=session.id,
+            new_message=types.Content(role="user", parts=[types.Part(text="Add 15 and 27, then multiply the result by 3.")]),
+        ):
+            events.append(event)
+        # Return last event with text
+        for ev in reversed(events):
+            parts = getattr(getattr(ev, "content", None), "parts", [])
+            for p in parts:
+                if hasattr(p, "text") and p.text:
+                    return p.text
+        return str(events[-1]) if events else "no result"
+
+    await run_combo(f"[{combo_num}/14] ADK Agent + Local tools", adk_local_run(adk_local_runner))
+
+    # 12. ADK + MCP tools
+    combo_num += 1
+    adk_mcp_agent = AdkAgentCls(
+        name="adk_city",
+        model="gemini-2.5-flash",
+        tools=[AdkFunctionTool(adk_get_weather), AdkFunctionTool(adk_get_population)],
+        instruction="You are a city information assistant. Use the tools to look up city data.",
+    )
+    adk_mcp_runner = Runner(
+        agent=adk_mcp_agent, app_name="adk-mcp-test",
+        session_service=InMemorySessionService(),
+    )
+
+    @adk_agent(agent_name="adk_mcp")
+    async def adk_mcp_run(runner):
+        session = await runner.session_service.create_session(
+            app_name="adk-mcp-test", user_id="user1",
+        )
+        events = []
+        async for event in runner.run_async(
+            user_id="user1", session_id=session.id,
+            new_message=types.Content(role="user", parts=[types.Part(text="What is the weather in Tokyo and the population of London?")]),
+        ):
+            events.append(event)
+        for ev in reversed(events):
+            parts = getattr(getattr(ev, "content", None), "parts", [])
+            for p in parts:
+                if hasattr(p, "text") and p.text:
+                    return p.text
+        return str(events[-1]) if events else "no result"
+
+    await run_combo(f"[{combo_num}/14] ADK Agent + MCP tools", adk_mcp_run(adk_mcp_runner))
+
+    # ══════════════════════════════════════════════════════════════
+    #  STRANDS (2 combos)
+    # ══════════════════════════════════════════════════════════════
+    print("\n" + "═" * 60)
+    print("  STRANDS (AWS Strands Agents)")
+    print("═" * 60)
+
+    strands_model = BedrockModel(model_id="apac.anthropic.claude-sonnet-4-20250514-v1:0")
+
+    # 13. Strands + Local tools
+    combo_num += 1
+    strands_local_agent = StrandsAgentCls(
+        model=strands_model,
+        tools=[strands_add_numbers, strands_multiply_numbers],
+        system_prompt="You are a math assistant. Use the tools to solve problems. Be concise.",
+    )
+
+    @strands_agent(agent_name="strands_local")
+    def strands_local_run(agent):
+        return agent("Add 12 and 18, then multiply the result by 3.")
+
+    await run_combo(f"[{combo_num}/14] Strands Agent + Local tools",
+                    asyncio.to_thread(strands_local_run, strands_local_agent))
+
+    # 14. Strands + MCP tools
+    combo_num += 1
+    strands_mcp_agent = StrandsAgentCls(
+        model=strands_model,
+        tools=[strands_get_weather, strands_get_population],
+        system_prompt="You are a city researcher. Use the tools to look up city data. Be concise.",
+    )
+
+    @strands_agent(agent_name="strands_mcp")
+    def strands_mcp_run(agent):
+        return agent("What is the weather in Paris and the population of New York?")
+
+    await run_combo(f"[{combo_num}/14] Strands Agent + MCP tools",
+                    asyncio.to_thread(strands_mcp_run, strands_mcp_agent))
 
     # ══════════════════════════════════════════════════════════════
     #  SUMMARY

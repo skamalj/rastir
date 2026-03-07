@@ -306,6 +306,11 @@ class OTLPForwarder:
 
         name = span_dict.get("name", "unknown")
 
+        # Root spans (no parent) are entry-points → SERVER kind so ADOT
+        # creates a proper X-Ray segment with full service metadata.
+        # Child spans stay INTERNAL → X-Ray subsegments.
+        kind = SpanKind.SERVER if parent_ctx is None else SpanKind.INTERNAL
+
         # Build the ReadableSpan directly — this preserves all original IDs
         span = ReadableSpan(
             name=name,
@@ -313,7 +318,7 @@ class OTLPForwarder:
             parent=parent_ctx,
             resource=self._get_resource(service, env, version),
             attributes=otel_attrs,
-            kind=SpanKind.INTERNAL,
+            kind=kind,
             status=status,
             start_time=start_ns,
             end_time=end_ns,

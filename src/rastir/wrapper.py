@@ -251,8 +251,22 @@ def _make_sync_wrapper(
             _capture_tool_input(span, args, kwargs)
         # Snapshot cumulative token usage (e.g. CrewAI _token_usage)
         usage_before = _snapshot_token_usage(wrapped_obj) if is_llm else None
+        _delegated_to_gen = False
         try:
             result = method(*args, **kwargs)
+            # Async/sync generators: defer span finish until consumed
+            if inspect.isasyncgen(result):
+                _delegated_to_gen = True
+                return _wrap_async_generator(
+                    result, span, is_llm, is_tool,
+                    wrapped_obj, usage_before,
+                )
+            if inspect.isgenerator(result):
+                _delegated_to_gen = True
+                return _wrap_generator(
+                    result, span, is_llm, is_tool,
+                    wrapped_obj, usage_before,
+                )
             if is_llm:
                 _enrich_llm_from_result(span, result)
                 _apply_token_delta(span, usage_before, wrapped_obj)
@@ -261,14 +275,18 @@ def _make_sync_wrapper(
             span.finish(SpanStatus.OK)
             return result
         except BaseException as exc:
-            span.record_error(exc)
-            span.finish(SpanStatus.ERROR)
+            if not _delegated_to_gen:
+                span.record_error(exc)
+                span.finish(SpanStatus.ERROR)
             raise
         finally:
-            if is_llm:
-                _finalize_llm(span)
+            # Always clean up the context token in the calling context;
+            # generators handle span.finish() + enqueue themselves.
             end_span(token)
-            enqueue_span(span)
+            if not _delegated_to_gen:
+                if is_llm:
+                    _finalize_llm(span)
+                enqueue_span(span)
 
     return wrapper
 
@@ -300,8 +318,22 @@ def _make_async_wrapper(
             _capture_tool_input(span, args, kwargs)
         # Snapshot cumulative token usage (e.g. CrewAI _token_usage)
         usage_before = _snapshot_token_usage(wrapped_obj) if is_llm else None
+        _delegated_to_gen = False
         try:
             result = await method(*args, **kwargs)
+            # Async/sync generators: defer span finish until consumed
+            if inspect.isasyncgen(result):
+                _delegated_to_gen = True
+                return _wrap_async_generator(
+                    result, span, is_llm, is_tool,
+                    wrapped_obj, usage_before,
+                )
+            if inspect.isgenerator(result):
+                _delegated_to_gen = True
+                return _wrap_generator(
+                    result, span, is_llm, is_tool,
+                    wrapped_obj, usage_before,
+                )
             if is_llm:
                 _enrich_llm_from_result(span, result)
                 _apply_token_delta(span, usage_before, wrapped_obj)
@@ -310,16 +342,66 @@ def _make_async_wrapper(
             span.finish(SpanStatus.OK)
             return result
         except BaseException as exc:
-            span.record_error(exc)
-            span.finish(SpanStatus.ERROR)
+            if not _delegated_to_gen:
+                span.record_error(exc)
+                span.finish(SpanStatus.ERROR)
             raise
         finally:
-            if is_llm:
-                _finalize_llm(span)
             end_span(token)
-            enqueue_span(span)
+            if not _delegated_to_gen:
+                if is_llm:
+                    _finalize_llm(span)
+                enqueue_span(span)
 
     return wrapper
+
+
+# ---------------------------------------------------------------------------
+# Generator / async-generator span-lifecycle helpers
+# ---------------------------------------------------------------------------
+
+async def _wrap_async_generator(
+    agen: Any, span: Any,
+    is_llm: bool, is_tool: bool,
+    wrapped_obj: Any, usage_before: Any,
+) -> Any:
+    """Wrap an async generator so the span stays open until exhaustion."""
+    try:
+        async for item in agen:
+            yield item
+        span.finish(SpanStatus.OK)
+    except GeneratorExit:
+        # Normal early close by consumer — not an error
+        span.finish(SpanStatus.OK)
+    except BaseException as exc:
+        span.record_error(exc)
+        span.finish(SpanStatus.ERROR)
+        raise
+    finally:
+        if is_llm:
+            _finalize_llm(span)
+        enqueue_span(span)
+
+
+def _wrap_generator(
+    gen: Any, span: Any,
+    is_llm: bool, is_tool: bool,
+    wrapped_obj: Any, usage_before: Any,
+) -> Any:
+    """Wrap a sync generator so the span stays open until exhaustion."""
+    try:
+        yield from gen
+        span.finish(SpanStatus.OK)
+    except GeneratorExit:
+        span.finish(SpanStatus.OK)
+    except BaseException as exc:
+        span.record_error(exc)
+        span.finish(SpanStatus.ERROR)
+        raise
+    finally:
+        if is_llm:
+            _finalize_llm(span)
+        enqueue_span(span)
 
 
 # ---------------------------------------------------------------------------
