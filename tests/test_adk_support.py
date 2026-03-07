@@ -25,7 +25,7 @@ from rastir.adk_support import (
     _is_adk_runner,
     _get_adk_tools,
     _get_adk_model_name,
-    _wrap_adk_agent_internals,
+    _install_adk_callbacks,
     _restore_originals,
     adk_agent,
 )
@@ -154,69 +154,123 @@ class TestAdkHelpers:
 
 
 # ========================================================================
-# _wrap_adk_agent_internals tests
+# _install_adk_callbacks tests
 # ========================================================================
 
 
-class TestWrapAdkInternals:
-    @patch("rastir.adk_support.wrap")
-    def test_wraps_tools(self, mock_wrap):
-        """Tools on agent get wrapped with include=['run_async', '__call__']."""
-        mock_wrap.side_effect = lambda obj, **kw: MagicMock(_rastir_wrapped=True, _original=obj)
-
-        tool = _make_adk_tool("search")
-        agent = _make_adk_agent(tools=[tool])
-
-        originals: dict = {}
-        _wrap_adk_agent_internals(agent, originals)
-
-        tool_wrap_calls = [c for c in mock_wrap.call_args_list if c[0][0] is tool]
-        assert len(tool_wrap_calls) == 1
-        kw = tool_wrap_calls[0][1]
-        assert kw["span_type"] == "tool"
-        assert "adk.tool.search" in kw["name"]
-
-    @patch("rastir.adk_support.wrap")
-    def test_stores_originals(self, mock_wrap):
-        mock_wrap.side_effect = lambda obj, **kw: MagicMock(_rastir_wrapped=True)
-
-        tool = _make_adk_tool()
-        agent = _make_adk_agent(tools=[tool])
+class TestInstallAdkCallbacks:
+    def test_installs_model_callbacks(self):
+        """Model callbacks get installed on the agent."""
+        agent = _make_adk_agent()
+        agent.before_model_callback = None
+        agent.after_model_callback = None
+        agent.on_model_error_callback = None
+        agent.before_tool_callback = None
+        agent.after_tool_callback = None
+        agent.on_tool_error_callback = None
 
         originals: dict = {}
-        _wrap_adk_agent_internals(agent, originals)
+        _install_adk_callbacks(agent, originals)
+
+        assert agent.before_model_callback is not None
+        assert agent.after_model_callback is not None
+        assert agent.on_model_error_callback is not None
+
+    def test_installs_tool_callbacks(self):
+        """Tool callbacks get installed on the agent."""
+        agent = _make_adk_agent()
+        agent.before_model_callback = None
+        agent.after_model_callback = None
+        agent.on_model_error_callback = None
+        agent.before_tool_callback = None
+        agent.after_tool_callback = None
+        agent.on_tool_error_callback = None
+
+        originals: dict = {}
+        _install_adk_callbacks(agent, originals)
+
+        assert agent.before_tool_callback is not None
+        assert agent.after_tool_callback is not None
+        assert agent.on_tool_error_callback is not None
+
+    def test_stores_originals(self):
+        """Original callbacks are saved in originals dict."""
+        agent = _make_adk_agent()
+        original_before = MagicMock()
+        agent.before_model_callback = original_before
+        agent.after_model_callback = None
+        agent.on_model_error_callback = None
+        agent.before_tool_callback = None
+        agent.after_tool_callback = None
+        agent.on_tool_error_callback = None
+
+        originals: dict = {}
+        _install_adk_callbacks(agent, originals)
 
         agent_id = id(agent)
         assert agent_id in originals
         assert originals[agent_id]["_agent_ref"] is agent
-        assert "tools" in originals[agent_id]
+        assert originals[agent_id]["before_model_callback"] is original_before
 
-    @patch("rastir.adk_support.wrap")
-    def test_wraps_sub_agents(self, mock_wrap):
-        """Sub-agents' tools are also wrapped."""
-        mock_wrap.side_effect = lambda obj, **kw: MagicMock(_rastir_wrapped=True)
-
-        sub_tool = _make_adk_tool("sub_search")
-        sub_agent = _make_adk_agent(name="sub", tools=[sub_tool])
-        parent_agent = _make_adk_agent(name="parent", sub_agents=[sub_agent])
+    def test_prepends_to_existing_callbacks(self):
+        """If agent already has callbacks, rastir's are prepended."""
+        agent = _make_adk_agent()
+        existing_cb = MagicMock()
+        agent.before_model_callback = existing_cb
+        agent.after_model_callback = None
+        agent.on_model_error_callback = None
+        agent.before_tool_callback = None
+        agent.after_tool_callback = None
+        agent.on_tool_error_callback = None
 
         originals: dict = {}
-        _wrap_adk_agent_internals(parent_agent, originals)
+        _install_adk_callbacks(agent, originals)
+
+        # Should be a list with rastir's cb first, then the existing one
+        assert isinstance(agent.before_model_callback, list)
+        assert len(agent.before_model_callback) == 2
+        assert agent.before_model_callback[1] is existing_cb
+
+    def test_recurses_sub_agents(self):
+        """Sub-agents' callbacks are also installed."""
+        sub_agent = _make_adk_agent(name="sub")
+        sub_agent.before_model_callback = None
+        sub_agent.after_model_callback = None
+        sub_agent.on_model_error_callback = None
+        sub_agent.before_tool_callback = None
+        sub_agent.after_tool_callback = None
+        sub_agent.on_tool_error_callback = None
+
+        parent_agent = _make_adk_agent(name="parent", sub_agents=[sub_agent])
+        parent_agent.before_model_callback = None
+        parent_agent.after_model_callback = None
+        parent_agent.on_model_error_callback = None
+        parent_agent.before_tool_callback = None
+        parent_agent.after_tool_callback = None
+        parent_agent.on_tool_error_callback = None
+
+        originals: dict = {}
+        _install_adk_callbacks(parent_agent, originals)
 
         # Both parent and sub-agent should be in originals
         assert id(parent_agent) in originals
         assert id(sub_agent) in originals
 
-    @patch("rastir.adk_support.wrap")
-    def test_skips_already_wrapped(self, mock_wrap):
-        """If agent was already wrapped (in originals), skip it."""
-        tool = _make_adk_tool()
-        agent = _make_adk_agent(tools=[tool])
+    def test_skips_already_installed(self):
+        """If agent was already processed (in originals), skip it."""
+        agent = _make_adk_agent()
+        agent.before_model_callback = None
+        agent.after_model_callback = None
+        agent.on_model_error_callback = None
+        agent.before_tool_callback = None
+        agent.after_tool_callback = None
+        agent.on_tool_error_callback = None
 
         originals: dict = {id(agent): {"_agent_ref": agent}}
-        _wrap_adk_agent_internals(agent, originals)
+        _install_adk_callbacks(agent, originals)
 
-        mock_wrap.assert_not_called()
+        # Callbacks should not have changed
+        assert agent.before_model_callback is None
 
 
 # ========================================================================
@@ -225,22 +279,28 @@ class TestWrapAdkInternals:
 
 
 class TestRestoreOriginals:
-    def test_restores_tools(self):
-        original_tools = [_make_adk_tool("t1")]
-        agent = _make_adk_agent(tools=[MagicMock()])  # wrapped tool
+    def test_restores_callbacks(self):
+        original_before = MagicMock()
+        agent = _make_adk_agent()
+        agent.before_model_callback = [MagicMock(), original_before]
 
         originals = {
             id(agent): {
                 "_agent_ref": agent,
-                "tools": original_tools,
+                "before_model_callback": original_before,
+                "after_model_callback": None,
+                "on_model_error_callback": None,
+                "before_tool_callback": None,
+                "after_tool_callback": None,
+                "on_tool_error_callback": None,
             }
         }
 
         _restore_originals(originals)
-        assert agent.tools is original_tools
+        assert agent.before_model_callback is original_before
 
     def test_handles_missing_agent_ref(self):
-        originals = {123: {"tools": []}}
+        originals = {123: {"before_model_callback": None}}
         _restore_originals(originals)  # Should not raise
 
 
@@ -315,33 +375,41 @@ class TestAdkAgent:
 
     @patch("rastir.queue.enqueue_span")
     def test_originals_restored_after_success(self, mock_enqueue):
-        original_tools = [_make_adk_tool("search")]
-        agent = _make_adk_agent(tools=list(original_tools))
+        agent = _make_adk_agent()
+        agent.before_model_callback = None
+        agent.after_model_callback = None
+        agent.on_model_error_callback = None
+        agent.before_tool_callback = None
+        agent.after_tool_callback = None
+        agent.on_tool_error_callback = None
 
         @adk_agent(agent_name="restore_test")
         def run(a):
             return "done"
 
-        with patch("rastir.adk_support.wrap") as mw:
-            mw.side_effect = lambda obj, **kw: MagicMock(_rastir_wrapped=True)
-            run(agent)
+        run(agent)
 
-        # After completion, tools should be restored
-        assert len(agent.tools) == len(original_tools)
+        # After completion, callbacks should be restored to None
+        assert agent.before_model_callback is None
+        assert agent.after_model_callback is None
 
     @patch("rastir.queue.enqueue_span")
     def test_runner_detection(self, mock_enqueue):
-        """Runner passed as arg triggers agent wrapping."""
+        """Runner passed as arg triggers callback installation."""
         agent = _make_adk_agent()
+        agent.before_model_callback = None
+        agent.after_model_callback = None
+        agent.on_model_error_callback = None
+        agent.before_tool_callback = None
+        agent.after_tool_callback = None
+        agent.on_tool_error_callback = None
         runner = _make_runner(agent=agent)
 
         @adk_agent(agent_name="runner_test")
         def run(r):
             return "done"
 
-        with patch("rastir.adk_support.wrap") as mw:
-            mw.side_effect = lambda obj, **kw: MagicMock(_rastir_wrapped=True)
-            result = run(runner)
+        result = run(runner)
 
         assert result == "done"
         assert mock_enqueue.call_count == 1

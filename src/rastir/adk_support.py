@@ -35,10 +35,10 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
+import time
 from typing import Any, Callable, TypeVar
 
 from rastir.remote import discover_mcp_client, inject_traceparent_into_mcp_clients
-from rastir.wrapper import wrap
 
 logger = logging.getLogger("rastir")
 
@@ -164,7 +164,7 @@ def _adk_agent_impl(
             if _is_adk_runner(obj):
                 _wrap_runner_internals(obj, originals)
             elif _is_adk_agent(obj):
-                _wrap_adk_agent_internals(obj, originals)
+                _install_adk_callbacks(obj, originals)
             mc = discover_mcp_client(obj)
             if mc is not None:
                 mcp_clients.append(mc)
@@ -211,7 +211,7 @@ async def _async_adk_agent_impl(
             if _is_adk_runner(obj):
                 _wrap_runner_internals(obj, originals)
             elif _is_adk_agent(obj):
-                _wrap_adk_agent_internals(obj, originals)
+                _install_adk_callbacks(obj, originals)
             mc = discover_mcp_client(obj)
             if mc is not None:
                 mcp_clients.append(mc)
@@ -245,60 +245,177 @@ def _wrap_runner_internals(
     runner_id = id(runner)
     originals[runner_id] = {"_runner_ref": runner}
 
-    # The Runner has an agent attribute — wrap it
+    # The Runner has an agent attribute — install callbacks on it
     agent = getattr(runner, "agent", None) or getattr(runner, "_agent", None)
     if agent is not None and _is_adk_agent(agent):
-        _wrap_adk_agent_internals(agent, originals)
+        _install_adk_callbacks(agent, originals)
 
 
-def _wrap_adk_agent_internals(
+def _install_adk_callbacks(
     agent: Any,
     originals: dict[int, dict[str, Any]],
 ) -> None:
-    """Wrap tools on an ADK agent for per-invocation tracing."""
+    """Install before/after model and tool callbacks on an ADK agent.
+
+    Uses ADK's official callback system to create LLM and tool spans
+    without replacing tool objects (which are Pydantic models).
+    """
+    from rastir.context import start_span, end_span
+    from rastir.queue import enqueue_span
+    from rastir.spans import SpanStatus, SpanType
+
     agent_id = id(agent)
     if agent_id in originals:
         return
-    originals[agent_id] = {"_agent_ref": agent}
+    originals[agent_id] = {
+        "_agent_ref": agent,
+        "before_model_callback": getattr(agent, "before_model_callback", None),
+        "after_model_callback": getattr(agent, "after_model_callback", None),
+        "on_model_error_callback": getattr(agent, "on_model_error_callback", None),
+        "before_tool_callback": getattr(agent, "before_tool_callback", None),
+        "after_tool_callback": getattr(agent, "after_tool_callback", None),
+        "on_tool_error_callback": getattr(agent, "on_tool_error_callback", None),
+    }
 
-    # --- Wrap tools ---
-    tools = _get_adk_tools(agent)
-    if tools:
-        originals[agent_id]["tools"] = list(tools)
-        wrapped_tools = []
-        for t in tools:
-            if callable(t) and not getattr(t, "_rastir_wrapped", False):
-                tool_name = getattr(t, "name", None) or getattr(t, "__name__", None) or "tool"
-                wrapped_tools.append(
-                    wrap(t, name=f"adk.tool.{tool_name}", span_type="tool",
-                         include=["run_async", "__call__"])
-                )
-            else:
-                wrapped_tools.append(t)
-        try:
-            agent.tools = wrapped_tools
-        except Exception:
-            pass  # Pydantic model may reject assignment
+    # Span storage keyed by ADK context invocation_id to handle concurrency
+    _active_llm_spans: dict[str, tuple] = {}   # inv_id -> (span, token)
+    _active_tool_spans: dict[str, tuple] = {}   # tool_call_key -> (span, token)
 
-    # --- Wrap sub-agents ---
+    def _inv_id(ctx: Any) -> str:
+        return getattr(ctx, "invocation_id", "") or str(id(ctx))
+
+    # --- LLM callbacks ---
+
+    async def _before_model(ctx: Any, llm_request: Any) -> None:
+        model_name = getattr(llm_request, "model", None) or _get_adk_model_name(agent)
+        span, token = start_span(f"adk.llm.{model_name}", SpanType.LLM)
+        span.set_attribute("model", str(model_name))
+        span.set_attribute("provider", "google")
+        _active_llm_spans[_inv_id(ctx)] = (span, token)
+        return None  # Let the LLM call proceed
+
+    async def _after_model(ctx: Any, llm_response: Any) -> None:
+        key = _inv_id(ctx)
+        entry = _active_llm_spans.pop(key, None)
+        if entry is None:
+            return None
+        span, token = entry
+        # Extract token usage from response
+        usage = getattr(llm_response, "usage_metadata", None)
+        if usage is not None:
+            prompt_tokens = getattr(usage, "prompt_token_count", None)
+            completion_tokens = getattr(usage, "candidates_token_count", None)
+            if prompt_tokens is not None:
+                span.set_attribute("prompt_tokens", prompt_tokens)
+            if completion_tokens is not None:
+                span.set_attribute("completion_tokens", completion_tokens)
+            total = getattr(usage, "total_token_count", None)
+            if total is not None:
+                span.set_attribute("total_tokens", total)
+        span.finish(SpanStatus.OK)
+        end_span(token)
+        enqueue_span(span)
+        return None
+
+    async def _on_model_error(ctx: Any, llm_request: Any, exc: Exception) -> None:
+        key = _inv_id(ctx)
+        entry = _active_llm_spans.pop(key, None)
+        if entry is None:
+            return None
+        span, token = entry
+        span.record_error(exc)
+        span.finish(SpanStatus.ERROR)
+        end_span(token)
+        enqueue_span(span)
+        return None
+
+    # --- Tool callbacks ---
+
+    def _tool_key(tool: Any, ctx: Any) -> str:
+        fcid = getattr(ctx, "function_call_id", "") or ""
+        return f"{_inv_id(ctx)}:{fcid}"
+
+    async def _before_tool(tool: Any, args: dict, ctx: Any) -> None:
+        tool_name = getattr(tool, "name", None) or type(tool).__name__
+        span, token = start_span(f"adk.tool.{tool_name}", SpanType.TOOL)
+        span.set_attribute("tool_name", tool_name)
+        _active_tool_spans[_tool_key(tool, ctx)] = (span, token)
+        return None  # Let the tool call proceed
+
+    async def _after_tool(tool: Any, args: dict, ctx: Any, result: dict) -> None:
+        key = _tool_key(tool, ctx)
+        entry = _active_tool_spans.pop(key, None)
+        if entry is None:
+            return None
+        span, token = entry
+        span.finish(SpanStatus.OK)
+        end_span(token)
+        enqueue_span(span)
+        return None
+
+    async def _on_tool_error(tool: Any, args: dict, ctx: Any, exc: Exception) -> None:
+        key = _tool_key(tool, ctx)
+        entry = _active_tool_spans.pop(key, None)
+        if entry is None:
+            return None
+        span, token = entry
+        span.record_error(exc)
+        span.finish(SpanStatus.ERROR)
+        end_span(token)
+        enqueue_span(span)
+        return None
+
+    # Install callbacks (ADK supports lists — prepend ours)
+    agent.before_model_callback = _prepend_callback(
+        getattr(agent, "before_model_callback", None), _before_model
+    )
+    agent.after_model_callback = _prepend_callback(
+        getattr(agent, "after_model_callback", None), _after_model
+    )
+    agent.on_model_error_callback = _prepend_callback(
+        getattr(agent, "on_model_error_callback", None), _on_model_error
+    )
+    agent.before_tool_callback = _prepend_callback(
+        getattr(agent, "before_tool_callback", None), _before_tool
+    )
+    agent.after_tool_callback = _prepend_callback(
+        getattr(agent, "after_tool_callback", None), _after_tool
+    )
+    agent.on_tool_error_callback = _prepend_callback(
+        getattr(agent, "on_tool_error_callback", None), _on_tool_error
+    )
+
+    # --- Recurse into sub-agents ---
     sub_agents = getattr(agent, "sub_agents", None)
     if sub_agents:
         for sub in sub_agents:
             if _is_adk_agent(sub):
-                _wrap_adk_agent_internals(sub, originals)
+                _install_adk_callbacks(sub, originals)
+
+
+def _prepend_callback(existing: Any, new_cb: Callable) -> list:
+    """Prepend a new callback to an existing callback (or list of callbacks)."""
+    if existing is None:
+        return new_cb
+    if isinstance(existing, list):
+        return [new_cb] + existing
+    return [new_cb, existing]
 
 
 def _restore_originals(originals: dict[int, dict[str, Any]]) -> None:
-    """Restore original tools on agents after execution."""
+    """Restore original callbacks on agents after execution."""
     for _id, saved in originals.items():
         ag = saved.get("_agent_ref")
         if ag is None:
             continue
-        if "tools" in saved:
-            try:
-                ag.tools = saved["tools"]
-            except Exception:
-                pass
+        for attr in ("before_model_callback", "after_model_callback",
+                     "on_model_error_callback", "before_tool_callback",
+                     "after_tool_callback", "on_tool_error_callback"):
+            if attr in saved:
+                try:
+                    setattr(ag, attr, saved[attr])
+                except Exception:
+                    pass
 
 
 def _walk_func_for_mcp_clients(
