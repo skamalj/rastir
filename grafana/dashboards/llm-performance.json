@@ -1053,7 +1053,7 @@
       "description": "Total LLM errors in selected period broken down by error type, model, and provider",
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 8,
         "x": 0,
         "y": 45
       },
@@ -1111,13 +1111,13 @@
     },
     {
       "id": 13,
-      "type": "table",
-      "title": "LLM Errors \u2014 Breakdown",
-      "description": "Tabular view of total LLM errors per error type",
+      "type": "timeseries",
+      "title": "LLM Error Rate",
+      "description": "LLM error rate over time by error type, with exemplar links to traces",
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 12,
+        "w": 16,
+        "x": 8,
         "y": 45
       },
       "datasource": {
@@ -1127,89 +1127,49 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(increase(rastir_errors_total{span_type=\"llm\", service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\"}[$__range])) by (error_type) > 0",
+          "exemplar": true,
+          "expr": "sum(rate(rastir_errors_total{span_type=\"llm\", service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\"}[$__rate_interval])) by (error_type)",
           "legendFormat": "{{error_type}}",
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
-          },
-          "instant": true,
-          "format": "table"
+          }
         }
       ],
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "mode": "palette-classic"
           },
           "mappings": [],
-          "unit": "short",
-          "decimals": 0,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "orange",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 5
-              }
-            ]
-          },
+          "unit": "ops",
+          "decimals": 2,
           "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "color-text"
-            },
-            "inspect": false
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "gradientMode": "scheme",
+            "spanNulls": true,
+            "showPoints": "auto",
+            "pointSize": 5,
+            "axisBorderShow": false,
+            "scaleDistribution": {
+              "type": "linear"
+            }
           }
         },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Time"
-            },
-            "properties": [
-              {
-                "id": "custom.hidden",
-                "value": true
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Value"
-            },
-            "properties": [
-              {
-                "id": "displayName",
-                "value": "Total Errors"
-              }
-            ]
-          }
-        ]
+        "overrides": []
       },
       "options": {
-        "showHeader": true,
-        "sortBy": [
-          {
-            "displayName": "Total Errors",
-            "desc": true
-          }
-        ],
-        "footer": {
-          "show": true,
-          "reducer": [
-            "sum"
-          ],
-          "countRows": false,
-          "fields": [
-            "Value"
-          ]
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
         }
       }
     }

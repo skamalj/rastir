@@ -112,16 +112,21 @@ class SpanRecord:
     def record_error(self, error: BaseException) -> None:
         """Record an exception as a span event and set ERROR status."""
         self.status = SpanStatus.ERROR
+        error_type = type(error).__qualname__
+        error_message = str(error)
         self.events.append(
             {
                 "name": "exception",
                 "attributes": {
-                    "exception.type": type(error).__qualname__,
-                    "exception.message": str(error),
+                    "exception.type": error_type,
+                    "exception.message": error_message,
                 },
                 "timestamp": time.time(),
             }
         )
+        # Also store as span attributes so trace viewers can display them
+        self.attributes["error.type"] = error_type
+        self.attributes["error.message"] = error_message
 
     def set_attribute(self, key: str, value: Any) -> None:
         """Set a single span attribute."""

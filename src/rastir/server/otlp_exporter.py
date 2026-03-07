@@ -302,7 +302,14 @@ class OTLPForwarder:
         # Status
         status_str = span_dict.get("status", "OK")
         if status_str == "ERROR":
-            error_msg = span_dict.get("error", {}).get("message", "")
+            # Read error message from span attributes or events
+            error_msg = span_dict.get("attributes", {}).get("error.message", "")
+            if not error_msg:
+                for ev in span_dict.get("events", []):
+                    if ev.get("name") == "exception":
+                        error_msg = ev.get("attributes", {}).get("exception.message", "")
+                        if error_msg:
+                            break
             status = Status(StatusCode.ERROR, error_msg)
         else:
             status = Status(StatusCode.OK)
@@ -314,6 +321,17 @@ class OTLPForwarder:
         # Child spans stay INTERNAL → X-Ray subsegments.
         kind = SpanKind.SERVER if parent_ctx is None else SpanKind.INTERNAL
 
+        # Convert events from ingested dicts → OTel Event objects
+        from opentelemetry.sdk.trace import Event
+        otel_events = []
+        for ev in span_dict.get("events", []):
+            ev_ts = ev.get("timestamp")
+            otel_events.append(Event(
+                name=ev.get("name", ""),
+                attributes=ev.get("attributes"),
+                timestamp=int(ev_ts * 1e9) if ev_ts else None,
+            ))
+
         # Build the ReadableSpan directly — this preserves all original IDs
         span = ReadableSpan(
             name=name,
@@ -321,6 +339,7 @@ class OTLPForwarder:
             parent=parent_ctx,
             resource=self._get_resource(service, env, version),
             attributes=otel_attrs,
+            events=otel_events,
             kind=kind,
             status=status,
             start_time=start_ns,
