@@ -13,6 +13,7 @@ configured.  It is safe to skip — the ingestion worker checks for
 from __future__ import annotations
 
 import logging
+import platform
 import time
 from typing import Optional, Sequence
 
@@ -154,6 +155,8 @@ class OTLPForwarder:
                 "service.name": service or "unknown",
                 "deployment.environment": env or "unknown",
                 "service.version": version or "",
+                "process.runtime.name": platform.python_implementation(),
+                "process.runtime.version": platform.python_version(),
             })
         return self._resource_cache[key]
 
