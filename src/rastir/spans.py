@@ -53,6 +53,7 @@ class SpanRecord:
     status: SpanStatus = SpanStatus.OK
     attributes: dict[str, Any] = field(default_factory=dict)
     events: list[dict[str, Any]] = field(default_factory=list)
+    _mono_start: float = field(default_factory=time.monotonic, repr=False)
 
     @property
     def duration_seconds(self) -> float:
@@ -62,8 +63,13 @@ class SpanRecord:
         return self.end_time - self.start_time
 
     def finish(self, status: SpanStatus = SpanStatus.OK) -> None:
-        """Mark the span as completed."""
-        self.end_time = time.time()
+        """Mark the span as completed.
+
+        Uses monotonic clock for duration to avoid WSL2/NTP clock drift,
+        then derives end_time from start_time + duration.
+        """
+        elapsed = time.monotonic() - self._mono_start
+        self.end_time = self.start_time + elapsed
         self.status = status
 
     def record_error(self, error: BaseException) -> None:
