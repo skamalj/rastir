@@ -397,6 +397,7 @@ def mcp_endpoint(func: F) -> F:
             if ctx:
                 span.trace_id = ctx["trace_id"]
                 span.parent_id = ctx["parent_id"]
+                span._reanchor()
             span.set_attribute("tool_name", tool_name)
             span.set_attribute("remote", "false")
 
@@ -430,6 +431,7 @@ def mcp_endpoint(func: F) -> F:
             if ctx:
                 span.trace_id = ctx["trace_id"]
                 span.parent_id = ctx["parent_id"]
+                span._reanchor()
             span.set_attribute("tool_name", tool_name)
             span.set_attribute("remote", "false")
 

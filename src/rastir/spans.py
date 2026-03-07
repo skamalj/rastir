@@ -79,6 +79,19 @@ class SpanRecord:
                 wall_anchor, mono_anchor = anchor
                 self.start_time = wall_anchor + (self._mono_start - mono_anchor)
 
+    def _reanchor(self) -> None:
+        """Re-derive start_time from the trace anchor.
+
+        Call after mutating trace_id/parent_id post-construction
+        (e.g. in @mcp_endpoint where the span is created as a root
+        then reparented to the client trace).
+        """
+        if self.parent_id is not None:
+            anchor = _trace_time_anchor.get(self.trace_id)
+            if anchor is not None:
+                wall_anchor, mono_anchor = anchor
+                self.start_time = wall_anchor + (self._mono_start - mono_anchor)
+
     @property
     def duration_seconds(self) -> float:
         """Elapsed time in seconds. Returns 0 if span is still open."""
