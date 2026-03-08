@@ -362,8 +362,8 @@ class MetricsRegistry:
         )
 
         # ---- Evaluation metrics ----
-        _eval_labels = ["service", "env", "model", "provider", "evaluation_type",
-                        "evaluator_model", "evaluator_provider"]
+        _eval_labels = ["service", "env", "model", "provider", "agent",
+                        "evaluation_type", "evaluator_model", "evaluator_provider"]
 
         self.evaluation_runs = Counter(
             "rastir_evaluation_runs_total",

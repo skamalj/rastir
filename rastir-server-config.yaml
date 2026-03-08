@@ -12,8 +12,9 @@ evaluation:
   enabled: true
   queue_size: 10000
   worker_concurrency: 4
-  judge_model: "gpt-4o-mini"
-  judge_provider: "openai"
+  default_sample_rate: 0.2
+  judge_model: "gemini-2.5-pro"
+  judge_provider: "gemini"
 
 exporter:
   otlp_endpoint: "http://localhost:4318"

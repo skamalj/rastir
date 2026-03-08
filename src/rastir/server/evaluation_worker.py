@@ -291,19 +291,31 @@ class EvaluationWorkerPool:
             "env": task.env,
             "model": task.model,
             "provider": task.provider,
+            "agent": task.agent or "",
             "evaluation_type": result.evaluation_type,
             "evaluator_model": evaluator_model,
             "evaluator_provider": evaluator_provider,
         }
 
+        # Build exemplar linking back to the original LLM span's trace.
+        exemplar = None
+        trace_id = task.trace_id
+        if trace_id and len(trace_id) == 32:
+            import time as _time
+            epoch = int(task.enqueued_at or _time.time())
+            xray_tid = f"1-{epoch:08x}-{trace_id[8:]}"
+            exemplar = {"trace_id": xray_tid}
+        elif trace_id:
+            exemplar = {"trace_id": trace_id}
+
         try:
-            self._metrics.evaluation_runs.labels(**labels).inc()
+            self._metrics.evaluation_runs.labels(**labels).inc(exemplar=exemplar)
 
             if result.error is not None:
-                self._metrics.evaluation_failures.labels(**labels).inc()
+                self._metrics.evaluation_failures.labels(**labels).inc(exemplar=exemplar)
 
             self._metrics.evaluation_latency.labels(**labels).observe(
-                duration_ms / 1000.0
+                duration_ms / 1000.0, exemplar=exemplar
             )
 
             self._metrics.evaluation_score.labels(**labels).set(result.score)

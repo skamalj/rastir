@@ -156,6 +156,29 @@
         "type": "query"
       },
       {
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "definition": "label_values(rastir_evaluation_runs_total, agent)",
+        "hide": 0,
+        "includeAll": true,
+        "multi": true,
+        "name": "agent",
+        "options": [],
+        "query": "label_values(rastir_evaluation_runs_total, agent)",
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "type": "query"
+      },
+      {
         "current": {
           "selected": true,
           "text": "Total",
@@ -207,7 +230,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(increase(rastir_evaluation_runs_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", evaluation_type=~\"$evaluation_type\"}[$__range]))",
+          "expr": "sum(increase(rastir_evaluation_runs_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", agent=~\"$agent\", evaluation_type=~\"$evaluation_type\"}[$__range]))",
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
@@ -270,7 +293,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(increase(rastir_evaluation_runs_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", evaluation_type=~\"$evaluation_type\"}[$__range])) - sum(increase(rastir_evaluation_failures_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", evaluation_type=~\"$evaluation_type\"}[$__range]))",
+          "expr": "sum(increase(rastir_evaluation_runs_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", agent=~\"$agent\", evaluation_type=~\"$evaluation_type\"}[$__range])) - sum(increase(rastir_evaluation_failures_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", agent=~\"$agent\", evaluation_type=~\"$evaluation_type\"}[$__range]))",
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
@@ -333,7 +356,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(increase(rastir_evaluation_failures_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", evaluation_type=~\"$evaluation_type\"}[$__range]))",
+          "expr": "sum(increase(rastir_evaluation_failures_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", agent=~\"$agent\", evaluation_type=~\"$evaluation_type\"}[$__range]))",
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
@@ -409,7 +432,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "(sum(increase(rastir_evaluation_runs_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", evaluation_type=~\"$evaluation_type\"}[$__range])) by (evaluation_type) * scalar(vector(1) - floor(vector($eval_status) / 2)) + sum(increase(rastir_evaluation_failures_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", evaluation_type=~\"$evaluation_type\"}[$__range])) by (evaluation_type) * scalar(sgn(vector($eval_status)) * (2 * vector($eval_status) - 3))) > 0",
+          "expr": "(sum(increase(rastir_evaluation_runs_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", agent=~\"$agent\", evaluation_type=~\"$evaluation_type\"}[$__range])) by (evaluation_type) * scalar(vector(1) - floor(vector($eval_status) / 2)) + sum(increase(rastir_evaluation_failures_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", agent=~\"$agent\", evaluation_type=~\"$evaluation_type\"}[$__range])) by (evaluation_type) * scalar(sgn(vector($eval_status)) * (2 * vector($eval_status) - 3))) > 0",
           "legendFormat": "{{evaluation_type}}",
           "datasource": {
             "type": "prometheus",
@@ -472,7 +495,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "(sum(increase(rastir_evaluation_runs_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", evaluation_type=~\"$evaluation_type\"}[$__range])) by (model) * scalar(vector(1) - floor(vector($eval_status) / 2)) + sum(increase(rastir_evaluation_failures_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", evaluation_type=~\"$evaluation_type\"}[$__range])) by (model) * scalar(sgn(vector($eval_status)) * (2 * vector($eval_status) - 3))) > 0",
+          "expr": "(sum(increase(rastir_evaluation_runs_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", agent=~\"$agent\", evaluation_type=~\"$evaluation_type\"}[$__range])) by (model) * scalar(vector(1) - floor(vector($eval_status) / 2)) + sum(increase(rastir_evaluation_failures_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", agent=~\"$agent\", evaluation_type=~\"$evaluation_type\"}[$__range])) by (model) * scalar(sgn(vector($eval_status)) * (2 * vector($eval_status) - 3))) > 0",
           "legendFormat": "{{model}}",
           "datasource": {
             "type": "prometheus",
@@ -548,21 +571,23 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "histogram_quantile(0.50, sum(rate(rastir_evaluation_latency_seconds_bucket{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", evaluation_type=~\"$evaluation_type\"}[5m])) by (le, evaluation_type))",
+          "expr": "histogram_quantile(0.50, sum(rate(rastir_evaluation_latency_seconds_bucket{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", agent=~\"$agent\", evaluation_type=~\"$evaluation_type\"}[5m])) by (le, evaluation_type))",
           "legendFormat": "p50 {{evaluation_type}}",
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
-          }
+          },
+          "exemplar": true
         },
         {
           "refId": "B",
-          "expr": "histogram_quantile(0.95, sum(rate(rastir_evaluation_latency_seconds_bucket{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", evaluation_type=~\"$evaluation_type\"}[5m])) by (le, evaluation_type))",
+          "expr": "histogram_quantile(0.95, sum(rate(rastir_evaluation_latency_seconds_bucket{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", agent=~\"$agent\", evaluation_type=~\"$evaluation_type\"}[5m])) by (le, evaluation_type))",
           "legendFormat": "p95 {{evaluation_type}}",
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
-          }
+          },
+          "exemplar": true
         }
       ],
       "fieldConfig": {
@@ -672,12 +697,13 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "avg(rastir_evaluation_score{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", evaluation_type=~\"$evaluation_type\"}) by (evaluation_type, model)",
+          "expr": "avg(rastir_evaluation_score{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", agent=~\"$agent\", evaluation_type=~\"$evaluation_type\"}) by (evaluation_type, model)",
           "legendFormat": "{{evaluation_type}} / {{model}}",
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
-          }
+          },
+          "exemplar": true
         }
       ],
       "fieldConfig": {
@@ -861,7 +887,8 @@
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
-          }
+          },
+          "exemplar": true
         }
       ],
       "fieldConfig": {
