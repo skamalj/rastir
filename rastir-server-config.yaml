@@ -12,7 +12,7 @@ evaluation:
   enabled: true
   queue_size: 10000
   worker_concurrency: 4
-  default_sample_rate: 0.2
+  default_sample_rate: 0.5
   judge_model: "gemini-2.5-pro"
   judge_provider: "gemini"
 
