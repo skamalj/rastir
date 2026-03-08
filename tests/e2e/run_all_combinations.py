@@ -45,6 +45,7 @@ configure(
     service="all-combos-e2e",
     push_url="http://localhost:8080",
     enable_cost_calculation=True,
+    evaluation_enabled=True,
 )
 from rastir.config import get_pricing_registry
 pr = get_pricing_registry()

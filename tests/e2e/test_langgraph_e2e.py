@@ -60,6 +60,7 @@ configure(
     service="langgraph-e2e-test",
     push_url="http://localhost:8080",
     enable_cost_calculation=True,
+    evaluation_enabled=True,
 )
 
 # Register Gemini pricing (USD per 1M tokens)

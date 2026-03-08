@@ -367,8 +367,16 @@ class IngestionWorker:
             self._eval_config.default_timeout_ms,
         )
 
+        # Use the trace epoch cached by the metrics layer (set from the
+        # first span in this trace) so the X-Ray trace ID built by the
+        # evaluation worker matches the one the OTLP exporter stored.
+        trace_id_raw = span.get("trace_id", "")
+        trace_epoch = self._metrics._trace_epoch_cache.get(
+            trace_id_raw, span.get("start_time")
+        )
+
         task = EvaluationTask(
-            trace_id=span.get("trace_id", ""),
+            trace_id=trace_id_raw,
             parent_span_id=span.get("span_id", ""),
             service=service,
             env=env,
@@ -379,7 +387,7 @@ class IngestionWorker:
             completion_text=attrs.get("completion_text"),
             evaluation_types=list(eval_types),
             timeout_ms=timeout_ms,
-            span_start_time=span.get("start_time"),
+            span_start_time=trace_epoch,
         )
 
         accepted = self._eval_queue.put(task)
