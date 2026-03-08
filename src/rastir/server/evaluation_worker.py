@@ -310,6 +310,9 @@ class EvaluationWorkerPool:
 
         try:
             self._metrics.evaluation_runs.labels(**labels).inc(exemplar=exemplar)
+            # Initialise failures counter for this label set so it always
+            # exists in Prometheus (avoids empty-series issues in dashboards).
+            self._metrics.evaluation_failures.labels(**labels)
 
             if result.error is not None:
                 self._metrics.evaluation_failures.labels(**labels).inc(exemplar=exemplar)

@@ -293,7 +293,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(increase(rastir_evaluation_runs_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", agent=~\"$agent\", evaluation_type=~\"$evaluation_type\"}[$__range])) - sum(increase(rastir_evaluation_failures_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", agent=~\"$agent\", evaluation_type=~\"$evaluation_type\"}[$__range]))",
+          "expr": "sum(increase(rastir_evaluation_runs_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", agent=~\"$agent\", evaluation_type=~\"$evaluation_type\"}[$__range])) - (sum(increase(rastir_evaluation_failures_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", agent=~\"$agent\", evaluation_type=~\"$evaluation_type\"}[$__range])) or vector(0))",
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
@@ -432,7 +432,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "(sum(increase(rastir_evaluation_runs_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", agent=~\"$agent\", evaluation_type=~\"$evaluation_type\"}[$__range])) by (evaluation_type) * scalar(vector(1) - floor(vector($eval_status) / 2)) + sum(increase(rastir_evaluation_failures_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", agent=~\"$agent\", evaluation_type=~\"$evaluation_type\"}[$__range])) by (evaluation_type) * scalar(sgn(vector($eval_status)) * (2 * vector($eval_status) - 3))) > 0",
+          "expr": "(sum(increase(rastir_evaluation_runs_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", agent=~\"$agent\", evaluation_type=~\"$evaluation_type\"}[$__range])) by (evaluation_type) * scalar(vector(1) - floor(vector($eval_status) / 2)) + (sum(increase(rastir_evaluation_failures_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", agent=~\"$agent\", evaluation_type=~\"$evaluation_type\"}[$__range])) by (evaluation_type) or vector(0)) * scalar(sgn(vector($eval_status)) * (2 * vector($eval_status) - 3))) > 0",
           "legendFormat": "{{evaluation_type}}",
           "datasource": {
             "type": "prometheus",
@@ -495,7 +495,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "(sum(increase(rastir_evaluation_runs_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", agent=~\"$agent\", evaluation_type=~\"$evaluation_type\"}[$__range])) by (model) * scalar(vector(1) - floor(vector($eval_status) / 2)) + sum(increase(rastir_evaluation_failures_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", agent=~\"$agent\", evaluation_type=~\"$evaluation_type\"}[$__range])) by (model) * scalar(sgn(vector($eval_status)) * (2 * vector($eval_status) - 3))) > 0",
+          "expr": "(sum(increase(rastir_evaluation_runs_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", agent=~\"$agent\", evaluation_type=~\"$evaluation_type\"}[$__range])) by (model) * scalar(vector(1) - floor(vector($eval_status) / 2)) + (sum(increase(rastir_evaluation_failures_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", agent=~\"$agent\", evaluation_type=~\"$evaluation_type\"}[$__range])) by (model) or vector(0)) * scalar(sgn(vector($eval_status)) * (2 * vector($eval_status) - 3))) > 0",
           "legendFormat": "{{model}}",
           "datasource": {
             "type": "prometheus",
