@@ -379,6 +379,7 @@ class IngestionWorker:
             completion_text=attrs.get("completion_text"),
             evaluation_types=list(eval_types),
             timeout_ms=timeout_ms,
+            span_start_time=span.get("start_time"),
         )
 
         accepted = self._eval_queue.put(task)

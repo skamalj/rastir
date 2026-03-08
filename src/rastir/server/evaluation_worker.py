@@ -302,7 +302,7 @@ class EvaluationWorkerPool:
         trace_id = task.trace_id
         if trace_id and len(trace_id) == 32:
             import time as _time
-            epoch = int(task.enqueued_at or _time.time())
+            epoch = int(task.span_start_time or task.enqueued_at or _time.time())
             xray_tid = f"1-{epoch:08x}-{trace_id[8:]}"
             exemplar = {"trace_id": xray_tid}
         elif trace_id:

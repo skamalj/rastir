@@ -468,8 +468,9 @@ def _log(msg: str):
 
 async def run_test():
     test_start = time.monotonic()
+    total_count = int(os.environ.get("TEST_COUNT", 50))
     print("=" * 70, flush=True)
-    print(f"[{_ts()}] Evaluation Pipeline E2E Test — 50 LangGraph Requests", flush=True)
+    print(f"[{_ts()}] Evaluation Pipeline E2E Test — {total_count} LangGraph Requests", flush=True)
     print("=" * 70, flush=True)
 
     # --- Build LLMs -------------------------------------------------------
@@ -491,7 +492,8 @@ async def run_test():
     }
 
     schedule = build_schedule()
-    assert len(schedule) == 50
+    max_requests = int(os.environ.get("TEST_COUNT", len(schedule)))
+    schedule = schedule[:max_requests]
 
     _log(f"Schedule: {len(schedule)} requests")
     _log(f"  Gemini prompt-only:   {sum(1 for s in schedule if s['model_key']=='gemini' and 'prompt' in s['label'] and 'context' not in s['label'])}")
@@ -516,7 +518,7 @@ async def run_test():
 
         captured_spans.clear()
         req_start = time.monotonic()
-        _log(f"  [{idx:2d}/50] → {label} ...")
+        _log(f"  [{idx:2d}/{len(schedule)}] → {label} ...")
         try:
             result = await invoke(graph, messages)
             req_elapsed = time.monotonic() - req_start
@@ -547,7 +549,7 @@ async def run_test():
             ) else "completion_text=✗"
             response_preview = final_msg[:60].replace("\n", " ")
             _log(
-                f"  [{idx:2d}/50] {status} {label:<25s} "
+                f"  [{idx:2d}/{len(schedule)}] {status} {label:<25s} "
                 f"{req_elapsed:5.1f}s  spans={len(captured_spans):2d} llm={len(llm_spans)} "
                 f"{eval_status} {prompt_status} {completion_status} "
                 f'"{ response_preview}..."'
@@ -556,7 +558,7 @@ async def run_test():
             req_elapsed = time.monotonic() - req_start
             failures += 1
             _log(
-                f"  [{idx:2d}/50] \u2717 {label:<25s} "
+                f"  [{idx:2d}/{len(schedule)}] \u2717 {label:<25s} "
                 f"{req_elapsed:5.1f}s  ERROR: {type(e).__name__}: {str(e)[:80]}"
             )
 

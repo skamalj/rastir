@@ -39,6 +39,7 @@ class EvaluationTask:
     completion_text: str | None
     evaluation_types: list[str] = field(default_factory=list)
     timeout_ms: int = 30_000
+    span_start_time: float | None = None
     enqueued_at: float = field(default_factory=time.time)
 
 
