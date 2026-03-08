@@ -230,15 +230,17 @@ class IngestionWorker:
                 idx + 1, len(spans), sorted(span.get("attributes", {}).keys()),
             )
 
-            # 1. Prometheus metrics — ALWAYS recorded
+            # Sampling decision (computed first so metrics can use it for exemplars)
+            store = self._should_store(span)
+
+            # 1. Prometheus metrics — ALWAYS recorded (sampling flag controls exemplars)
             try:
-                self._metrics.record_span(span, service=service, env=env)
+                self._metrics.record_span(span, service=service, env=env, sampled=store)
                 logger.debug("[SPAN %d] step-1 metrics OK", idx + 1)
             except Exception:
                 logger.error("[SPAN %d] step-1 metrics FAILED", idx + 1, exc_info=True)
 
-            # 2. Sampling decision (only affects storage + export)
-            store = self._should_store(span)
+            # 2. Sampling counters
             logger.debug("[SPAN %d] step-2 sampling → store=%s", idx + 1, store)
             if store:
                 self._metrics.spans_sampled.labels(service=service, env=env).inc()
@@ -315,8 +317,9 @@ class IngestionWorker:
                     idx + 1, store, self._otlp is not None,
                 )
 
-            # 6. Evaluation enqueue (if evaluation enabled + sampled)
-            if store and self._eval_queue is not None:
+            # 6. Evaluation enqueue (if evaluation enabled + sampled + non-error)
+            is_error = span.get("status") == "ERROR"
+            if store and not is_error and self._eval_queue is not None:
                 logger.debug("[SPAN %d] step-6 eval enqueue check…", idx + 1)
                 try:
                     self._maybe_enqueue_evaluation(span, service, env)
@@ -393,27 +396,16 @@ class IngestionWorker:
     def _should_store(self, span: dict) -> bool:
         """Decide whether a span should be stored/exported.
 
-        If sampling is disabled every span is retained.  When enabled:
-        - Error spans are always retained (if ``always_retain_errors``).
-        - Spans exceeding ``latency_threshold_ms`` are always retained.
-        - Otherwise, head-based probabilistic sampling at ``rate``.
+        Pure probabilistic sampling: each span is independently
+        sampled with probability ``rate``.  When ``rate >= 1.0``
+        (the default) every span is retained.
         """
-        if not self._sampling.enabled:
+        rate = self._sampling.rate
+        if rate >= 1.0:
             return True
-
-        # Always retain errors
-        if self._sampling.always_retain_errors and span.get("status") == "ERROR":
-            return True
-
-        # Always retain high-latency spans
-        threshold = self._sampling.latency_threshold_ms
-        if threshold > 0:
-            duration = span.get("duration_ms", 0) or 0
-            if duration >= threshold:
-                return True
-
-        # Head-based probabilistic sampling
-        return random.random() < self._sampling.rate
+        if rate <= 0.0:
+            return False
+        return random.random() < rate
 
     # ----- diagnostics -----------------------------------------------------
 

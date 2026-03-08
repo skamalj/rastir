@@ -459,20 +459,25 @@ class MetricsRegistry:
             return raw
         return "system"
 
-    def record_span(self, span: dict, service: str, env: str) -> None:
-        """Derive and update all Prometheus metrics from a single span dict."""
+    def record_span(self, span: dict, service: str, env: str, sampled: bool = True) -> None:
+        """Derive and update all Prometheus metrics from a single span dict.
+
+        Args:
+            sampled: When ``False``, exemplars are suppressed so that
+                exemplar trace_ids always point to traces that exist
+                in the trace backend.
+        """
         raw_type = span.get("span_type", "unknown")
         span_type = self._normalise_span_type(raw_type)
         status = span.get("status", "OK")
         attrs = span.get("attributes", {})
         trace_id = span.get("trace_id", "")
 
-        # Build exemplar dict if enabled and trace_id is present.
-        # Convert raw hex trace_id to X-Ray format so exemplar links resolve.
-        # ADOT replaces the first 4 bytes with int(start_epoch) before sending
-        # to X-Ray, so we must do the same transformation here.
+        # Build exemplar dict only when enabled AND the span is sampled.
+        # This ensures exemplar trace_ids always reference traces that
+        # actually exist in the trace backend (not dropped by sampling).
         exemplar = None
-        if self._exemplars_enabled and trace_id and len(trace_id) == 32:
+        if self._exemplars_enabled and sampled and trace_id and len(trace_id) == 32:
             if trace_id not in self._trace_epoch_cache:
                 if len(self._trace_epoch_cache) > 10_000:
                     self._trace_epoch_cache.clear()
@@ -480,7 +485,7 @@ class MetricsRegistry:
             epoch = self._trace_epoch_cache[trace_id]
             xray_tid = f"1-{epoch:08x}-{trace_id[8:]}"
             exemplar = {"trace_id": xray_tid}
-        elif self._exemplars_enabled and trace_id:
+        elif self._exemplars_enabled and sampled and trace_id:
             exemplar = {"trace_id": trace_id}
 
         # -- universal: ingested counter + duration histogram

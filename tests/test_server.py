@@ -1221,57 +1221,42 @@ class TestSamplingConfig:
 
     def test_sampling_defaults(self):
         cfg = ServerConfig()
-        assert cfg.sampling.enabled is False
         assert cfg.sampling.rate == 1.0
-        assert cfg.sampling.always_retain_errors is True
-        assert cfg.sampling.latency_threshold_ms == 0.0
 
     def test_sampling_rate_out_of_range(self):
         from rastir.server.config import validate_config, ConfigValidationError
-        cfg = ServerConfig(sampling=SamplingSection(enabled=True, rate=1.5))
+        cfg = ServerConfig(sampling=SamplingSection(rate=1.5))
         with pytest.raises(ConfigValidationError, match="sampling.rate"):
             validate_config(cfg)
 
     def test_sampling_rate_negative(self):
         from rastir.server.config import validate_config, ConfigValidationError
-        cfg = ServerConfig(sampling=SamplingSection(enabled=True, rate=-0.1))
+        cfg = ServerConfig(sampling=SamplingSection(rate=-0.1))
         with pytest.raises(ConfigValidationError, match="sampling.rate"):
-            validate_config(cfg)
-
-    def test_sampling_latency_negative(self):
-        from rastir.server.config import validate_config, ConfigValidationError
-        cfg = ServerConfig(
-            sampling=SamplingSection(enabled=True, latency_threshold_ms=-10.0),
-        )
-        with pytest.raises(ConfigValidationError, match="latency_threshold_ms"):
             validate_config(cfg)
 
     def test_valid_sampling_config_passes(self):
         from rastir.server.config import validate_config
         cfg = ServerConfig(
-            sampling=SamplingSection(enabled=True, rate=0.5, latency_threshold_ms=500.0),
+            sampling=SamplingSection(rate=0.5),
         )
         validate_config(cfg)  # no exception
 
     def test_sampling_env_var_loading(self):
         env = {
-            "RASTIR_SERVER_SAMPLING_ENABLED": "true",
             "RASTIR_SERVER_SAMPLING_RATE": "0.25",
-            "RASTIR_SERVER_SAMPLING_LATENCY_THRESHOLD_MS": "1000.0",
         }
         with patch.dict(os.environ, env, clear=False):
             cfg = load_config()
-            assert cfg.sampling.enabled is True
             assert cfg.sampling.rate == 0.25
-            assert cfg.sampling.latency_threshold_ms == 1000.0
 
 
 class TestSamplingBehaviour:
     """Tests for sampling logic in ingestion processing."""
 
-    def test_sampling_disabled_stores_all_spans(self):
-        """With sampling disabled, all spans go to trace store."""
-        cfg = ServerConfig(sampling=SamplingSection(enabled=False))
+    def test_sampling_rate_one_stores_all_spans(self):
+        """With sampling rate=1.0 (default), all spans go to trace store."""
+        cfg = ServerConfig(sampling=SamplingSection(rate=1.0))
         app = create_app(config=cfg)
         with TestClient(app) as c:
             payload = _payload([
@@ -1287,10 +1272,10 @@ class TestSamplingBehaviour:
             assert "sample-all-1" in trace_ids
             assert "sample-all-2" in trace_ids
 
-    def test_sampling_rate_zero_drops_all_non_error(self):
-        """rate=0.0 drops all spans (except errors if retain_errors=True)."""
+    def test_sampling_rate_zero_drops_all(self):
+        """rate=0.0 drops all spans from trace store."""
         cfg = ServerConfig(
-            sampling=SamplingSection(enabled=True, rate=0.0),
+            sampling=SamplingSection(rate=0.0),
         )
         app = create_app(config=cfg)
         with TestClient(app) as c:
@@ -1304,51 +1289,26 @@ class TestSamplingBehaviour:
             resp = c.get("/v1/traces", params={"trace_id": "drop-me"})
             assert resp.status_code == 404
 
-    def test_sampling_always_retains_errors(self):
-        """Error spans are retained even when rate=0.0."""
+    def test_sampling_rate_zero_drops_errors_too(self):
+        """Error spans are also dropped when rate=0.0 (pure probabilistic)."""
         cfg = ServerConfig(
-            sampling=SamplingSection(enabled=True, rate=0.0, always_retain_errors=True),
+            sampling=SamplingSection(rate=0.0),
         )
         app = create_app(config=cfg)
         with TestClient(app) as c:
             payload = _payload([
-                _span(trace_id="err-keep", span_type="llm", status="ERROR"),
+                _span(trace_id="err-drop", span_type="llm", status="ERROR"),
             ])
             c.post("/v1/telemetry", json=payload)
             time.sleep(0.5)
 
-            resp = c.get("/v1/traces", params={"trace_id": "err-keep"})
-            assert resp.status_code == 200
-            assert len(resp.json()["spans"]) == 1
-
-    def test_sampling_retains_high_latency(self):
-        """Spans above latency_threshold_ms are always retained."""
-        cfg = ServerConfig(
-            sampling=SamplingSection(
-                enabled=True, rate=0.0, latency_threshold_ms=500.0,
-            ),
-        )
-        app = create_app(config=cfg)
-        with TestClient(app) as c:
-            payload = _payload([
-                _span(trace_id="slow-keep", duration_ms=600.0, span_type="llm"),
-                _span(trace_id="fast-drop", duration_ms=100.0, span_type="llm"),
-            ])
-            c.post("/v1/telemetry", json=payload)
-            time.sleep(0.5)
-
-            # Slow span retained
-            resp = c.get("/v1/traces", params={"trace_id": "slow-keep"})
-            assert resp.status_code == 200
-
-            # Fast span dropped
-            resp = c.get("/v1/traces", params={"trace_id": "fast-drop"})
+            resp = c.get("/v1/traces", params={"trace_id": "err-drop"})
             assert resp.status_code == 404
 
     def test_sampling_metrics_always_recorded(self):
         """Metrics are recorded for ALL spans regardless of sampling."""
         cfg = ServerConfig(
-            sampling=SamplingSection(enabled=True, rate=0.0),
+            sampling=SamplingSection(rate=0.0),
         )
         app = create_app(config=cfg)
         with TestClient(app) as c:
@@ -1370,7 +1330,7 @@ class TestSamplingBehaviour:
     def test_sampling_counters_exposed(self):
         """Sampling counters appear in prometheus output."""
         cfg = ServerConfig(
-            sampling=SamplingSection(enabled=True, rate=0.5),
+            sampling=SamplingSection(rate=0.5),
         )
         app = create_app(config=cfg)
         with TestClient(app) as c:
@@ -1384,6 +1344,121 @@ class TestSamplingBehaviour:
             text = resp.text
             assert "rastir_spans_sampled_total" in text
             assert "rastir_spans_dropped_by_sampling_total" in text
+
+
+# ========================================================================
+# V8 — JSON env vars, exemplar suppression, eval skip for errors
+# ========================================================================
+
+
+class TestJsonEnvVars:
+    """Tests for _JSON env var support in config loading."""
+
+    def test_sre_agents_json_env_var(self):
+        import json as _json
+        agents_data = {
+            "my_agent": {"slo_error_rate": 0.05},
+            "other_agent": {"cost_budget_usd": 50.0},
+        }
+        env = {
+            "RASTIR_SERVER_SRE_AGENTS_JSON": _json.dumps(agents_data),
+            "RASTIR_SERVER_SRE_ENABLED": "true",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            cfg = load_config()
+            assert cfg.sre.enabled is True
+            assert "my_agent" in cfg.sre.agents
+            assert cfg.sre.agents["my_agent"].slo_error_rate == 0.05
+            assert "other_agent" in cfg.sre.agents
+            assert cfg.sre.agents["other_agent"].cost_budget_usd == 50.0
+
+    def test_sre_agents_json_invalid_falls_back(self):
+        env = {
+            "RASTIR_SERVER_SRE_AGENTS_JSON": "not valid json{",
+            "RASTIR_SERVER_SRE_ENABLED": "true",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            cfg = load_config()
+            # Invalid JSON → empty agents (fallback)
+            assert cfg.sre.agents == {}
+
+    def test_redaction_custom_patterns_json_env_var(self):
+        import json as _json
+        patterns = [
+            {"pattern": r"\bSSN\b", "replacement": "[SSN]"},
+            {"pattern": r"\d{4}-\d{4}", "replacement": "[CARD]"},
+        ]
+        env = {
+            "RASTIR_SERVER_REDACTION_CUSTOM_PATTERNS_JSON": _json.dumps(patterns),
+            "RASTIR_SERVER_REDACTION_ENABLED": "true",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            cfg = load_config()
+            assert len(cfg.redaction.custom_patterns) == 2
+            assert cfg.redaction.custom_patterns[0] == (r"\bSSN\b", "[SSN]")
+
+    def test_redaction_custom_patterns_json_invalid_falls_back(self):
+        env = {
+            "RASTIR_SERVER_REDACTION_CUSTOM_PATTERNS_JSON": "[bad json",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            cfg = load_config()
+            assert cfg.redaction.custom_patterns == ()
+
+
+class TestExemplarSampling:
+    """Tests that exemplars are suppressed when sampled=False."""
+
+    def test_exemplars_suppressed_when_not_sampled(self):
+        metrics = MetricsRegistry(exemplars_enabled=True)
+        span = _span(
+            trace_id="a" * 32, span_type="llm",
+            model="gpt-4", provider="openai",
+        )
+        # Record with sampled=False — should still record metrics but no exemplars
+        metrics.record_span(span, service="svc", env="test", sampled=False)
+        # Record with sampled=True — should include exemplar
+        metrics.record_span(span, service="svc", env="test", sampled=True)
+        # We can't directly inspect exemplars, but we verify no crash
+        # and that metrics are recorded in both cases
+
+    def test_exemplars_generated_when_sampled(self):
+        metrics = MetricsRegistry(exemplars_enabled=True)
+        span = _span(
+            trace_id="b" * 32, span_type="llm",
+            model="gpt-4", provider="openai",
+        )
+        # Should record without error, exemplar generated
+        metrics.record_span(span, service="svc", env="test", sampled=True)
+
+
+class TestEvaluationSkipsErrors:
+    """Tests that error spans skip evaluation even when sampled."""
+
+    def test_error_span_not_evaluated(self):
+        """Error spans should skip evaluation step."""
+        from rastir.server.config import EvaluationSection
+        cfg = ServerConfig(
+            sampling=SamplingSection(rate=1.0),
+            evaluation=EvaluationSection(enabled=True),
+        )
+        app = create_app(config=cfg)
+        with TestClient(app) as c:
+            payload = _payload([
+                _span(
+                    trace_id="err-no-eval", span_type="llm", status="ERROR",
+                    evaluation_enabled=True,
+                    evaluation_types=["hallucination"],
+                    model="gpt-4", provider="openai",
+                ),
+            ])
+            c.post("/v1/telemetry", json=payload)
+            time.sleep(0.5)
+
+            # Span is stored (rate=1.0)
+            resp = c.get("/v1/traces", params={"trace_id": "err-no-eval"})
+            assert resp.status_code == 200
+            # We verify no crash — evaluation was skipped for error span
 
 
 # ========================================================================

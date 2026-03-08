@@ -99,14 +99,16 @@ class MultiTenantSection:
 class SamplingSection:
     """Trace sampling controls.
 
-    Sampling affects *only* trace storage and OTLP export — metric
-    counters and histograms are always updated regardless of sampling
-    decisions.
+    Sampling affects trace storage, OTLP export, exemplars, and
+    evaluation.  Metric counters and histograms are always updated
+    regardless of sampling decisions.
+
+    When ``rate < 1.0``, each trace is independently sampled with
+    probability ``rate``.  Sampled traces are stored, exported,
+    generate exemplars, and (for non-error spans) evaluated.
+    Non-sampled traces still contribute to all Prometheus metrics.
     """
-    enabled: bool = False
-    rate: float = 1.0  # 0.0–1.0 head-based sampling percentage
-    always_retain_errors: bool = True
-    latency_threshold_ms: float = 0.0  # always retain above this (0 = disabled)
+    rate: float = 1.0  # 0.0–1.0 probabilistic sampling rate
 
 
 @dataclass(frozen=True)
@@ -389,10 +391,7 @@ def load_config(config_path: Optional[str] = None) -> ServerConfig:
         return default
 
     sampling = SamplingSection(
-        enabled=_get("sampling", "enabled", False, as_type=bool),
         rate=_get_float("sampling", "rate", 1.0),
-        always_retain_errors=_get("sampling", "always_retain_errors", True, as_type=bool),
-        latency_threshold_ms=_get_float("sampling", "latency_threshold_ms", 0.0),
     )
 
     backpressure = BackpressureSection(
@@ -423,7 +422,17 @@ def load_config(config_path: Optional[str] = None) -> ServerConfig:
     )
 
     # -- redaction --
-    custom_patterns_raw = yaml_data.get("redaction", {}).get("custom_patterns", [])
+    # Redaction custom patterns: env var JSON > YAML > default
+    import json as _json
+    custom_patterns_json = _env("RASTIR_SERVER_REDACTION_CUSTOM_PATTERNS_JSON")
+    if custom_patterns_json:
+        try:
+            custom_patterns_raw = _json.loads(custom_patterns_json)
+        except _json.JSONDecodeError:
+            logger.warning("Invalid JSON in RASTIR_SERVER_REDACTION_CUSTOM_PATTERNS_JSON")
+            custom_patterns_raw = []
+    else:
+        custom_patterns_raw = yaml_data.get("redaction", {}).get("custom_patterns", [])
     custom_patterns: list[tuple[str, str]] = []
     if isinstance(custom_patterns_raw, list):
         for item in custom_patterns_raw:
@@ -453,7 +462,16 @@ def load_config(config_path: Optional[str] = None) -> ServerConfig:
     )
 
     # -- sre --
-    sre_agents_raw = yaml_data.get("sre", {}).get("agents", {}) if isinstance(yaml_data.get("sre"), dict) else {}
+    # SRE agents: env var JSON > YAML > default
+    sre_agents_json = _env("RASTIR_SERVER_SRE_AGENTS_JSON")
+    if sre_agents_json:
+        try:
+            sre_agents_raw = _json.loads(sre_agents_json)
+        except _json.JSONDecodeError:
+            logger.warning("Invalid JSON in RASTIR_SERVER_SRE_AGENTS_JSON")
+            sre_agents_raw = {}
+    else:
+        sre_agents_raw = yaml_data.get("sre", {}).get("agents", {}) if isinstance(yaml_data.get("sre"), dict) else {}
     sre_agents: dict[str, SREAgentConfig] = {}
     if isinstance(sre_agents_raw, dict):
         for agent_key, agent_cfg in sre_agents_raw.items():
@@ -576,11 +594,6 @@ def validate_config(cfg: ServerConfig) -> None:
     if cfg.sampling.rate < 0.0 or cfg.sampling.rate > 1.0:
         errors.append(
             f"sampling.rate must be between 0.0 and 1.0 (got {cfg.sampling.rate})"
-        )
-    if cfg.sampling.latency_threshold_ms < 0.0:
-        errors.append(
-            f"sampling.latency_threshold_ms must be non-negative "
-            f"(got {cfg.sampling.latency_threshold_ms})"
         )
 
     # Backpressure validation
