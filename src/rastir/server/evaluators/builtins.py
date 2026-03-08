@@ -97,7 +97,7 @@ def _call_judge(
             {"role": "user", "content": user_content},
         ],
         "temperature": 0.0,
-        "max_tokens": 200,
+        "max_tokens": 2048,
     }
 
     with httpx.Client(timeout=config.timeout) as client:
@@ -105,7 +105,13 @@ def _call_judge(
         resp.raise_for_status()
 
     data = resp.json()
-    content = data["choices"][0]["message"]["content"].strip()
+    message = data["choices"][0]["message"]
+    content = (message.get("content") or "").strip()
+    if not content:
+        raise ValueError(
+            f"Judge returned empty content (finish_reason="
+            f"{data['choices'][0].get('finish_reason', 'unknown')})"
+        )
 
     # Parse JSON from response (handle markdown code blocks)
     if content.startswith("```"):
