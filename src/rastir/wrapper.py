@@ -700,11 +700,32 @@ def _apply_token_delta(
 
 
 def _finalize_llm(span: Any) -> None:
-    """Ensure model/provider defaults and calculate cost."""
+    """Ensure model/provider defaults, evaluation attrs, and cost."""
     if "model" not in span.attributes:
         span.set_attribute("model", "unknown")
     if "provider" not in span.attributes:
         span.set_attribute("provider", "unknown")
+
+    # Evaluation: set evaluation attrs from global config if enabled
+    try:
+        from rastir.config import get_config
+        cfg = get_config()
+        if cfg.evaluation.enabled and not span.attributes.get("evaluation_enabled"):
+            span.set_attribute("evaluation_enabled", True)
+            span.set_attribute("evaluation_types", list(cfg.evaluation.evaluation_types))
+        # Copy input → prompt_text and output → completion_text
+        # for server-side evaluation (only if evaluation is enabled)
+        if span.attributes.get("evaluation_enabled"):
+            if cfg.evaluation.capture_prompt and not span.attributes.get("prompt_text"):
+                input_text = span.attributes.get("input")
+                if input_text:
+                    span.set_attribute("prompt_text", input_text)
+            if cfg.evaluation.capture_completion and not span.attributes.get("completion_text"):
+                output_text = span.attributes.get("output")
+                if output_text:
+                    span.set_attribute("completion_text", output_text)
+    except Exception:
+        pass
 
     # Cost calculation
     try:

@@ -494,3 +494,71 @@ class TestFullHierarchy:
         spans = drain_batch(10)
         for s in spans:
             assert s.duration_seconds > 0
+
+
+# ---------------------------------------------------------------------------
+# Evaluation global config fallback
+# ---------------------------------------------------------------------------
+
+class TestEvaluationGlobalFallback:
+    """_set_evaluation_attrs falls back to global config when evaluate=False."""
+
+    def test_global_eval_enables_span(self):
+        """configure(evaluation_enabled=True) sets attrs on @llm spans."""
+        from rastir.config import configure
+        configure(service="svc", env="dev", evaluation_enabled=True)
+
+        @llm
+        def call_model():
+            return "response"
+
+        call_model()
+        spans = drain_batch(10)
+        s = [s for s in spans if s.span_type == SpanType.LLM][0]
+        assert s.attributes.get("evaluation_enabled") is True
+        assert s.attributes.get("evaluation_types") == ["hallucination", "relevance"]
+
+    def test_global_eval_disabled_no_attrs(self):
+        """When evaluation is off globally and per-decorator, no eval attrs."""
+        from rastir.config import configure
+        configure(service="svc", env="dev", evaluation_enabled=False)
+
+        @llm
+        def call_model():
+            return "response"
+
+        call_model()
+        spans = drain_batch(10)
+        s = [s for s in spans if s.span_type == SpanType.LLM][0]
+        assert "evaluation_enabled" not in s.attributes
+
+    def test_per_decorator_overrides_global(self):
+        """Per-decorator evaluate=True sets custom types, ignoring global."""
+        from rastir.config import configure
+        configure(service="svc", env="dev", evaluation_enabled=True,
+                  evaluation_types=["hallucination"])
+
+        @llm(evaluate=True, evaluation_types=["toxicity"])
+        def call_model():
+            return "response"
+
+        call_model()
+        spans = drain_batch(10)
+        s = [s for s in spans if s.span_type == SpanType.LLM][0]
+        assert s.attributes.get("evaluation_enabled") is True
+        assert s.attributes.get("evaluation_types") == ["toxicity"]
+
+    def test_global_eval_custom_types(self):
+        """Global evaluation_types are used when per-decorator types absent."""
+        from rastir.config import configure
+        configure(service="svc", env="dev", evaluation_enabled=True,
+                  evaluation_types=["bias", "toxicity"])
+
+        @llm
+        def call_model():
+            return "response"
+
+        call_model()
+        spans = drain_batch(10)
+        s = [s for s in spans if s.span_type == SpanType.LLM][0]
+        assert s.attributes.get("evaluation_types") == ["bias", "toxicity"]

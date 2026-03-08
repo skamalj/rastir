@@ -47,9 +47,14 @@ class EvaluationConfig:
 
     Controls whether evaluation metadata (prompt_text, completion_text)
     is captured and embedded into LLM spans for server-side evaluation.
+
+    When ``enabled=True``, all LLM spans (both ``@llm`` and ``wrap()``)
+    automatically carry evaluation metadata.  ``evaluation_types``
+    provides the default list; per-decorator overrides take precedence.
     """
 
     enabled: bool = False
+    evaluation_types: tuple[str, ...] = ("hallucination", "relevance")
     capture_prompt: bool = True
     capture_completion: bool = True
 
@@ -109,6 +114,7 @@ def configure(
     retry_backoff: float | None = None,
     shutdown_timeout: float | None = None,
     evaluation_enabled: bool | None = None,
+    evaluation_types: list[str] | None = None,
     capture_prompt: bool | None = None,
     capture_completion: bool | None = None,
     enable_cost_calculation: bool | None = None,
@@ -136,7 +142,12 @@ def configure(
         max_retries: Max retry attempts on transient failures (default 3).
         retry_backoff: Initial backoff seconds, doubles each retry (default 0.5).
         shutdown_timeout: Max seconds to wait for exporter thread on shutdown (default 5.0).
-        evaluation_enabled: Enable evaluation metadata capture on @llm spans.
+        evaluation_enabled: Enable evaluation metadata capture on all LLM spans.
+            When True, all LLM spans (both ``@llm`` and ``wrap()``) carry
+            evaluation metadata automatically.
+        evaluation_types: Default evaluation types for all LLM spans
+            (e.g. ["hallucination", "relevance"]). Per-decorator overrides
+            take precedence.
         capture_prompt: Capture prompt_text in LLM spans (default True).
         capture_completion: Capture completion_text in LLM spans (default True).
         enable_cost_calculation: Enable client-side cost calculation on @llm spans.
@@ -191,8 +202,19 @@ def configure(
             shutdown_timeout=resolved_shutdown_timeout,
         )
 
+        resolved_eval_types: tuple[str, ...] = EvaluationConfig.evaluation_types
+        if evaluation_types is not None:
+            resolved_eval_types = tuple(evaluation_types)
+        else:
+            env_types = os.environ.get("RASTIR_EVALUATION_TYPES")
+            if env_types:
+                resolved_eval_types = tuple(
+                    t.strip() for t in env_types.split(",") if t.strip()
+                )
+
         evaluation_cfg = EvaluationConfig(
             enabled=resolved_eval_enabled,
+            evaluation_types=resolved_eval_types,
             capture_prompt=resolved_capture_prompt,
             capture_completion=resolved_capture_completion,
         )

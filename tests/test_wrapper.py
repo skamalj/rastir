@@ -343,3 +343,121 @@ class TestWrapMCPAutoDetect:
         session = self._make_fake_session()
         wrapped = wrap(session, name="ignored", span_type="tool")
         assert getattr(wrapped, "_rastir_mcp_wrapped", False) is True
+
+
+# ========================================================================
+# Evaluation support in wrap() LLM spans
+# ========================================================================
+
+
+class TestWrapEvaluation:
+    """_finalize_llm sets evaluation attrs and copies input→prompt_text."""
+
+    def test_llm_wrap_eval_from_global_config(self):
+        """wrap(obj, span_type='llm') sets eval attrs when global eval enabled."""
+        from rastir.config import configure, reset_config
+        reset_config()
+        configure(service="svc", env="dev", evaluation_enabled=True)
+
+        class FakeModel:
+            def invoke(self, prompt):
+                return "response"
+
+        model = FakeModel()
+        wrapped = wrap(model, name="llm", span_type="llm", include=["invoke"])
+
+        with patch("rastir.wrapper.enqueue_span") as mock_enqueue:
+            wrapped.invoke("hello world")
+            span = mock_enqueue.call_args[0][0]
+            assert span.attributes.get("evaluation_enabled") is True
+            assert span.attributes.get("evaluation_types") == ["hallucination", "relevance"]
+
+        reset_config()
+
+    def test_llm_wrap_copies_input_to_prompt_text(self):
+        """wrap() copies input→prompt_text when evaluation enabled."""
+        from rastir.config import configure, reset_config
+        reset_config()
+        configure(service="svc", env="dev", evaluation_enabled=True)
+
+        class FakeModel:
+            def invoke(self, prompt):
+                return "response"
+
+        model = FakeModel()
+        wrapped = wrap(model, name="llm", span_type="llm", include=["invoke"])
+
+        with patch("rastir.wrapper.enqueue_span") as mock_enqueue:
+            wrapped.invoke("hello world")
+            span = mock_enqueue.call_args[0][0]
+            # input is captured by _capture_llm_input; then copied to prompt_text
+            if span.attributes.get("input"):
+                assert span.attributes.get("prompt_text") == span.attributes["input"]
+
+        reset_config()
+
+    def test_llm_wrap_copies_output_to_completion_text(self):
+        """wrap() copies output→completion_text when evaluation enabled."""
+        from rastir.config import configure, reset_config
+        reset_config()
+        configure(service="svc", env="dev", evaluation_enabled=True)
+
+        class FakeModel:
+            def invoke(self, prompt):
+                return "the answer"
+
+        model = FakeModel()
+        wrapped = wrap(model, name="llm", span_type="llm", include=["invoke"])
+
+        with patch("rastir.wrapper.enqueue_span") as mock_enqueue:
+            wrapped.invoke("hello")
+            span = mock_enqueue.call_args[0][0]
+            if span.attributes.get("output"):
+                assert span.attributes.get("completion_text") == span.attributes["output"]
+
+        reset_config()
+
+    def test_llm_wrap_no_eval_when_disabled(self):
+        """wrap(span_type='llm') does NOT set eval attrs when eval is off."""
+        from rastir.config import configure, reset_config
+        reset_config()
+        configure(service="svc", env="dev", evaluation_enabled=False)
+
+        class FakeModel:
+            def invoke(self, prompt):
+                return "response"
+
+        model = FakeModel()
+        wrapped = wrap(model, name="llm", span_type="llm", include=["invoke"])
+
+        with patch("rastir.wrapper.enqueue_span") as mock_enqueue:
+            wrapped.invoke("hello")
+            span = mock_enqueue.call_args[0][0]
+            assert "evaluation_enabled" not in span.attributes
+            assert "prompt_text" not in span.attributes
+
+        reset_config()
+
+    def test_llm_wrap_custom_eval_types(self):
+        """Global evaluation_types are forwarded to span attributes."""
+        from rastir.config import configure, reset_config
+        reset_config()
+        configure(
+            service="svc", env="dev",
+            evaluation_enabled=True,
+            evaluation_types=["toxicity"],
+        )
+
+        class FakeModel:
+            def invoke(self, prompt):
+                return "response"
+
+        model = FakeModel()
+        wrapped = wrap(model, name="llm", span_type="llm", include=["invoke"])
+
+        with patch("rastir.wrapper.enqueue_span") as mock_enqueue:
+            wrapped.invoke("hello")
+            span = mock_enqueue.call_args[0][0]
+            assert span.attributes.get("evaluation_types") == ["toxicity"]
+
+        reset_config()

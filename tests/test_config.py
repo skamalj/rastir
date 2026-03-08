@@ -141,3 +141,41 @@ class TestGetConfig:
         monkeypatch.setenv("RASTIR_SERVICE", "auto-svc")
         cfg = get_config()
         assert cfg.service == "auto-svc"
+
+
+class TestEvaluationConfig:
+    def test_evaluation_defaults(self):
+        cfg = configure(service="svc", env="dev")
+        assert cfg.evaluation.enabled is False
+        assert cfg.evaluation.evaluation_types == ("hallucination", "relevance")
+        assert cfg.evaluation.capture_prompt is True
+        assert cfg.evaluation.capture_completion is True
+
+    def test_evaluation_enabled(self):
+        cfg = configure(service="svc", env="dev", evaluation_enabled=True)
+        assert cfg.evaluation.enabled is True
+
+    def test_evaluation_types_explicit(self):
+        cfg = configure(
+            service="svc", env="dev",
+            evaluation_types=["toxicity", "bias"],
+        )
+        assert cfg.evaluation.evaluation_types == ("toxicity", "bias")
+
+    def test_evaluation_types_env_var(self, monkeypatch):
+        monkeypatch.setenv("RASTIR_EVALUATION_TYPES", "hallucination, custom")
+        cfg = configure(service="svc", env="dev")
+        assert cfg.evaluation.evaluation_types == ("hallucination", "custom")
+
+    def test_evaluation_types_explicit_overrides_env(self, monkeypatch):
+        monkeypatch.setenv("RASTIR_EVALUATION_TYPES", "env_type")
+        cfg = configure(
+            service="svc", env="dev",
+            evaluation_types=["explicit_type"],
+        )
+        assert cfg.evaluation.evaluation_types == ("explicit_type",)
+
+    def test_evaluation_enabled_env_var(self, monkeypatch):
+        monkeypatch.setenv("RASTIR_EVALUATION_ENABLED", "true")
+        cfg = configure(service="svc", env="dev")
+        assert cfg.evaluation.enabled is True

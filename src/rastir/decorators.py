@@ -749,16 +749,32 @@ def _set_evaluation_attrs(
     evaluation_sample_rate: float | None,
     evaluation_timeout_ms: int | None,
 ) -> None:
-    """Embed evaluation configuration into span attributes."""
-    if not evaluate:
+    """Embed evaluation configuration into span attributes.
+
+    When *evaluate* is ``True`` (per-decorator opt-in), evaluation is
+    enabled with the provided types.  When ``False``, the global config
+    ``cfg.evaluation.enabled`` is checked as a fallback so that
+    ``configure(evaluation_enabled=True)`` enables all LLM spans.
+    """
+    if evaluate:
+        span.set_attribute("evaluation_enabled", True)
+        if evaluation_types:
+            span.set_attribute("evaluation_types", evaluation_types)
+        if evaluation_sample_rate is not None:
+            span.set_attribute("evaluation_sample_rate", evaluation_sample_rate)
+        if evaluation_timeout_ms is not None:
+            span.set_attribute("evaluation_timeout_ms", evaluation_timeout_ms)
         return
-    span.set_attribute("evaluation_enabled", True)
-    if evaluation_types:
-        span.set_attribute("evaluation_types", evaluation_types)
-    if evaluation_sample_rate is not None:
-        span.set_attribute("evaluation_sample_rate", evaluation_sample_rate)
-    if evaluation_timeout_ms is not None:
-        span.set_attribute("evaluation_timeout_ms", evaluation_timeout_ms)
+
+    # Fallback: check global config
+    try:
+        from rastir.config import get_config
+        cfg = get_config()
+        if cfg.evaluation.enabled:
+            span.set_attribute("evaluation_enabled", True)
+            span.set_attribute("evaluation_types", list(cfg.evaluation.evaluation_types))
+    except Exception:
+        pass
 
 
 def _capture_prompt_text(span: SpanRecord, args: tuple, kwargs: dict) -> None:
