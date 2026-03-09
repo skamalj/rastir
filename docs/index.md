@@ -17,7 +17,7 @@ Rastir provides decorator-based instrumentation for LLM applications and AI agen
 
 Most LLM observability tools require SDK wrappers, monkey-patching, or vendor-specific clients. Rastir takes a different approach:
 
-- **One decorator per framework** — `@langgraph_agent`, `@crew_kickoff`, `@llamaindex_agent` auto-discover and wrap LLMs, tools, and nodes inside the framework
+- **One decorator per framework** — `@langgraph_agent`, `@crew_kickoff`, `@llamaindex_agent`, `@adk_agent`, `@strands_agent` auto-discover and wrap LLMs, tools, and nodes inside the framework
 - **Adapters, not patches** — 15 adapters extract model, tokens, and provider from return values. Works across SDK versions
 - **Two-phase enrichment** — metadata captured from function kwargs *before* the call, refined from the response *after*. Survives API failures
 - **Self-hosted collector** — a lightweight FastAPI server you own. Prometheus metrics, OTLP export, zero external infrastructure
@@ -53,7 +53,7 @@ react_agent (AGENT)
 
 ## Key Features
 
-- **Framework decorators** — `@langgraph_agent`, `@crew_kickoff`, `@llamaindex_agent` with automatic LLM/tool discovery
+- **Framework decorators** — `@langgraph_agent`, `@crew_kickoff`, `@llamaindex_agent`, `@adk_agent`, `@strands_agent` with automatic LLM/tool discovery
 - **15 provider adapters** — OpenAI, Azure, Anthropic, Bedrock, Gemini, Cohere, Mistral, Groq, LangChain, LangGraph, LlamaIndex, CrewAI
 - **MCP distributed tracing** — `wrap(session)` and `@mcp_endpoint` for end-to-end tracing across MCP tool boundaries
 - **Generic `wrap()`** — instrument any object (Redis, databases, MCP sessions) without decorator access
@@ -75,7 +75,8 @@ react_agent (AGENT)
 │  Your Application                               │
 │  ┌──────────────────────────────────────────┐   │
 │  │  @langgraph_agent / @crew_kickoff /      │   │
-│  │  @llamaindex_agent                       │   │
+│  │  @llamaindex_agent / @adk_agent /         │   │
+│  │  @strands_agent                           │   │
 │  │  @agent / @llm / wrap()                 │   │
 │  │  Decorators → SpanRecord → Queue         │   │
 │  └───────────────┬──────────────────────────┘   │
@@ -112,6 +113,8 @@ react_agent (AGENT)
 - [LangGraph](frameworks/langgraph.md) — `@langgraph_agent` decorator
 - [CrewAI](frameworks/crewai.md) — `@crew_kickoff` decorator
 - [LlamaIndex](frameworks/llamaindex.md) — `@llamaindex_agent` decorator
+- [ADK (Google)](frameworks/adk.md) — `@adk_agent` decorator
+- [Strands](frameworks/strands.md) — `@strands_agent` decorator
 
 ### Operations
 - [Metrics Reference](metrics.md) — All Prometheus counters, histograms, gauges
