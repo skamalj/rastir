@@ -41,6 +41,7 @@ These variables configure the Rastir client library used in your application. Th
 | `RASTIR_PRICING_DATA` | — | Inline pricing JSON string (alternative to file) |
 | `RASTIR_MAX_COST_PER_CALL_ALERT` | — | Per-call cost threshold in USD for warning logs |
 | `RASTIR_ENABLE_TTFT` | `true` | Enable Time-To-First-Token measurement on streaming spans |
+| `RASTIR_EVALUATION_TYPES` | — | Comma-separated evaluation types (e.g. `relevance,faithfulness`) |
 
 ### Example
 
@@ -123,10 +124,7 @@ These variables configure the Rastir collector server. They override values from
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `RASTIR_SERVER_SAMPLING_ENABLED` | `false` | Enable head-based trace sampling |
 | `RASTIR_SERVER_SAMPLING_RATE` | `1.0` | Sampling rate (`0.0`–`1.0`). Metrics are always recorded regardless of sampling |
-| `RASTIR_SERVER_SAMPLING_ALWAYS_RETAIN_ERRORS` | `true` | Always retain error spans regardless of sampling rate |
-| `RASTIR_SERVER_SAMPLING_LATENCY_THRESHOLD_MS` | `0` | Always retain spans above this latency in ms (`0` = disabled) |
 
 ### Backpressure
 
@@ -163,6 +161,7 @@ These variables configure the Rastir collector server. They override values from
 |----------|---------|-------------|
 | `RASTIR_SERVER_LOGGING_STRUCTURED` | `false` | Enable JSON structured logging |
 | `RASTIR_SERVER_LOGGING_LEVEL` | `INFO` | Log level: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` |
+| `RASTIR_SERVER_LOGGING_LOG_FILE` | — | Path to log file (logs to stderr if unset) |
 
 ### Redaction
 
@@ -171,6 +170,7 @@ These variables configure the Rastir collector server. They override values from
 | `RASTIR_SERVER_REDACTION_ENABLED` | `false` | Enable server-side redaction of prompt/completion text |
 | `RASTIR_SERVER_REDACTION_MAX_TEXT_LENGTH` | `50000` | Max text length before truncation (characters) |
 | `RASTIR_SERVER_REDACTION_DROP_ON_FAILURE` | `true` | Drop the span if redaction processing fails (security-first default) |
+| `RASTIR_SERVER_REDACTION_CUSTOM_PATTERNS_JSON` | — | JSON string defining custom redaction regex patterns |
 
 ### Evaluation
 
@@ -187,6 +187,15 @@ These variables configure the Rastir collector server. They override values from
 | `RASTIR_SERVER_EVALUATION_JUDGE_PROVIDER` | `openai` | LLM provider for evaluation judge |
 | `RASTIR_SERVER_EVALUATION_JUDGE_API_KEY` | — | API key for the judge LLM provider |
 | `RASTIR_SERVER_EVALUATION_JUDGE_BASE_URL` | — | Custom base URL for the judge LLM (e.g. Azure endpoint) |
+
+### SRE
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RASTIR_SERVER_SRE_ENABLED` | `false` | Enable SRE config gauges for Prometheus recording rules |
+| `RASTIR_SERVER_SRE_DEFAULT_SLO_ERROR_RATE` | `0.01` | Default SLO error rate (0.01 = 1% error budget) |
+| `RASTIR_SERVER_SRE_DEFAULT_COST_BUDGET_USD` | `0.0` | Default cost budget in USD per period (0 = disabled) |
+| `RASTIR_SERVER_SRE_AGENTS_JSON` | — | JSON object defining per-agent SLO and cost budget overrides |
 
 ---
 

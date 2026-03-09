@@ -6,7 +6,7 @@ nav_order: 3
 
 # Decorator Reference
 
-Rastir provides six **core** decorators for manual instrumentation, plus three **framework** decorators that auto-discover and wrap everything inside a framework's agent loop. All support both sync and async functions.
+Rastir provides five **core** decorators for manual instrumentation, plus five **framework** decorators that auto-discover and wrap everything inside a framework's agent loop. All support both sync and async functions.
 
 ---
 
@@ -32,10 +32,12 @@ Every span always records: **duration, status, trace_id, span_id, parent_span_id
 | `@agent` | Core | — | — | — | — | — | Function execution only |
 | `@llm` | Core | ✅ | ✅ | ✅ | ✅ | — | **Auto-discovers LLM clients** in args/closures/globals and intercepts their call methods. Also extracts from return value as fallback. |
 | `@retrieval` | Core | — | — | — | — | — | Function execution only |
-| `@metric` | Core | — | — | — | — | — | Counters/histograms only, no spans |
+| `@metric` | Core | — | — | — | — | — | Creates a metric span with counters and histograms |
 | `@langgraph_agent` | Framework | ✅ | ✅ | ✅ | ✅ | ✅ | **Wraps model/tool objects directly** — always captures full data |
 | `@crew_kickoff` | Framework | ✅ | ✅ | ✅ | ✅ | ✅ | **Wraps model/tool objects directly** — always captures full data |
 | `@llamaindex_agent` | Framework | ✅ | ✅ | ✅ | ✅ | ✅ | Uses `wrap()` on objects — same reliability as framework wrapping |
+| `@adk_agent` | Framework | ✅ | ✅ | ✅ | ✅ | ✅ | **Wraps ADK Runner/Agent objects** — intercepts events for LLM/tool spans |
+| `@strands_agent` | Framework | ✅ | ✅ | ✅ | ✅ | ✅ | **Wraps Strands Agent objects** — intercepts model/tool streams |
 
 _`@llm` auto-discovers client objects from: OpenAI, Azure OpenAI, Anthropic, Google GenAI, Cohere, Mistral, Groq, LangChain chat models, and Bedrock. If the client is in function arguments, closure variables, or module globals, the interceptor captures full metadata automatically._
 
@@ -63,11 +65,13 @@ The interceptor works with clients passed as arguments, stored in closures, or d
 | Building with **LangGraph** | `@langgraph_agent` | Auto-discovers LLMs, tools, and nodes inside the compiled graph. **No manual wrapping needed.** |
 | Building with **CrewAI** | `@crew_kickoff` | Auto-discovers LLMs and tools on every agent in the Crew. MCP tools are handled natively by CrewAI via `mcps=[]`. |
 | Building with **LlamaIndex** | `@llamaindex_agent` | Creates the agent span; you pre-wrap LLMs/tools with `wrap()`. |
+| Building with **Google ADK** | `@adk_agent` | Auto-discovers ADK Runner/Agent objects and intercepts events for LLM and tool spans. |
+| Building with **Strands** | `@strands_agent` | Auto-discovers Strands Agent objects and intercepts model/tool streams. |
 | Building your **own agent loop** | `@agent` + `@llm` | Full manual control — you decorate each function yourself. Use `@trace` for non-LLM functions. |
 | **Simple tracing** (no agent) | `@trace` | General-purpose span for any function. |
-| **Standalone metrics** only | `@metric` | Prometheus counters/histograms, no tracing. |
+| **Standalone metrics** only | `@metric` | Creates metric spans with Prometheus counters/histograms. |
 
-**Rule of thumb:** If you're using LangGraph, CrewAI, or LlamaIndex — use the corresponding framework decorator. It does all the heavy lifting and always captures full metadata. Use `@agent` / `@llm` only when you're calling LLM APIs directly without a framework.
+**Rule of thumb:** If you're using LangGraph, CrewAI, LlamaIndex, ADK, or Strands — use the corresponding framework decorator. It does all the heavy lifting and always captures full metadata. Use `@agent` / `@llm` only when you're calling LLM APIs directly without a framework.
 
 ---
 
@@ -160,6 +164,70 @@ def run(agent, query):
 **Note:** Unlike `@langgraph_agent` and `@crew_kickoff`, LlamaIndex requires explicit `wrap()` calls on LLMs and tools. The decorator provides the outer agent span and restore-after-execution.
 
 → Full details: [LlamaIndex framework page](frameworks/llamaindex)
+
+---
+
+### @adk_agent
+
+**Purpose:** Instrument a Google ADK (Agent Development Kit) agent. Auto-discovers ADK `Runner` or `BaseAgent` objects in function arguments or closures, wraps `run_async` to intercept events, and creates LLM and tool spans automatically.
+
+```python
+from rastir import adk_agent
+
+@adk_agent(agent_name="my_adk_agent")
+async def run(runner, query):
+    async for event in runner.run_async(user_id="u1", session_id="s1",
+                                         new_message=Content(parts=[Part(text=query)])):
+        pass
+```
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `agent_name` | `str` | Function name | Agent identity label |
+
+**What gets auto-discovered:**
+- ADK `Runner` or `BaseAgent` objects in function args/closures
+- LLM call events → `LLM` spans with token/latency metrics
+- Tool call events → `TOOL` spans
+
+**MCP support:** Automatically discovers MCP clients on ADK agents and injects `traceparent` for distributed tracing.
+
+**Supports:** bare `@adk_agent` or `@adk_agent(...)`, async only (ADK is async-first).
+
+→ Full details: [ADK framework page](frameworks/adk)
+
+---
+
+### @strands_agent
+
+**Purpose:** Instrument a Strands agent. Auto-discovers Strands `Agent` objects in function arguments or closures, wraps the model's `stream` method and each tool's `stream` method to create LLM and tool spans.
+
+```python
+from rastir import strands_agent
+
+@strands_agent(agent_name="my_strands_agent")
+def run(agent, query):
+    return agent(query)
+```
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `agent_name` | `str` | Function name | Agent identity label |
+
+**What gets auto-discovered:**
+- Strands `Agent` objects in function args/closures
+- Model `stream` calls → `LLM` spans with token/latency metrics
+- Tool `stream` calls → `TOOL` spans
+
+**MCP support:** Automatically discovers MCP clients on Strands agents and injects `traceparent` for distributed tracing.
+
+**Supports:** bare `@strands_agent` or `@strands_agent(...)`, sync/async.
+
+→ Full details: [Strands framework page](frameworks/strands)
 
 ---
 
@@ -269,9 +337,13 @@ def ask_with_hints(query: str) -> str:
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `name` | `str` | Function name | Custom span name |
 | `model` | `str` | Auto-detected | LLM model name |
 | `provider` | `str` | Auto-detected | Provider name |
+| `streaming` | `bool` | Auto-detected | Whether the call is a streaming call (auto-detected from return type if not set) |
+| `evaluate` | `bool` | `False` | Enable server-side evaluation for this span |
+| `evaluation_types` | `list[str]` | `None` | Evaluation types to request (e.g. `["relevance", "faithfulness"]`) |
+| `evaluation_sample_rate` | `float` | `None` | Per-decorator evaluation sampling rate (overrides server default) |
+| `evaluation_timeout_ms` | `int` | `None` | Per-decorator evaluation timeout (overrides server default) |
 
 **Span type:** `llm`
 
@@ -303,18 +375,19 @@ def vector_search(query: str, top_k: int = 5) -> list[str]:
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `name` | `str` | Function name | Span name |
+| `doc_count_extractor` | `Callable[[Any], int]` | `None` | Optional callable that extracts document count from the function's return value |
 
 **Span type:** `retrieval`
 
 **Metrics emitted:**
-- `rastir_retrieval_calls_total{service, env, agent}`
-- `rastir_duration_seconds{service, env, span_type="retrieval"}`
+- `rastir_retrieval_calls_total{service, env, agent, model, provider}`
+- `rastir_duration_seconds{service, env, span_type="retrieval", model, provider}`
 
 ---
 
 ### @metric
 
-**Purpose:** Emit generic function-level Prometheus metrics. Independent of tracing — does not create spans.
+**Purpose:** Emit generic function-level Prometheus metrics. Creates a `metric` span and records timing and call counts.
 
 ```python
 from rastir import metric

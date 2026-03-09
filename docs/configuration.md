@@ -45,6 +45,10 @@ configure(
 | `max_retries` | `int` | `3` | Retries on transient failures (5xx, 429, connection errors) |
 | `retry_backoff` | `float` | `0.5` | Initial backoff in seconds (doubles each retry) |
 | `shutdown_timeout` | `float` | `5.0` | Max seconds to wait for exporter thread on shutdown |
+| `evaluation_enabled` | `bool` | `False` | Enable evaluation metadata capture on `@llm` spans |
+| `evaluation_types` | `list[str]` | `None` | Evaluation types to request (e.g. `["relevance", "faithfulness"]`) |
+| `capture_prompt` | `bool` | `True` | Capture `prompt_text` attribute in LLM spans |
+| `capture_completion` | `bool` | `True` | Capture `completion_text` attribute in LLM spans |
 | `enable_cost_calculation` | `bool` | `False` | Enable client-side cost calculation on `@llm` spans |
 | `pricing_profile` | `str` | `"default"` | Label identifying the pricing configuration used |
 | `pricing_source` | `str` | `None` | Path to pricing JSON file |
@@ -79,6 +83,7 @@ All client settings can be set via environment variables with the `RASTIR_` pref
 | `RASTIR_PRICING_DATA` | — | Inline pricing JSON string (alternative to file) |
 | `RASTIR_MAX_COST_PER_CALL_ALERT` | — | Per-call cost threshold in USD for warning logs |
 | `RASTIR_ENABLE_TTFT` | `true` | Enable Time-To-First-Token measurement on streaming spans |
+| `RASTIR_EVALUATION_TYPES` | — | Comma-separated evaluation types (e.g. `relevance,faithfulness`) |
 
 ### Example
 
@@ -147,10 +152,7 @@ multi_tenant:
   header_name: X-Tenant-ID
 
 sampling:
-  enabled: false
-  rate: 1.0
-  always_retain_errors: true
-  latency_threshold_ms: 0
+  rate: 1.0                    # 0.0–1.0 probabilistic sampling rate
 
 backpressure:
   soft_limit_pct: 80.0
@@ -263,10 +265,7 @@ All server settings can be overridden via `RASTIR_SERVER_*` environment variable
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `RASTIR_SERVER_SAMPLING_ENABLED` | `false` | Enable head-based trace sampling |
-| `RASTIR_SERVER_SAMPLING_RATE` | `1.0` | Sampling rate (`0.0`–`1.0`). Metrics always recorded regardless of sampling |
-| `RASTIR_SERVER_SAMPLING_ALWAYS_RETAIN_ERRORS` | `true` | Always retain error spans regardless of sampling rate |
-| `RASTIR_SERVER_SAMPLING_LATENCY_THRESHOLD_MS` | `0` | Always retain spans above this latency in ms (`0` = disabled) |
+| `RASTIR_SERVER_SAMPLING_RATE` | `1.0` | Sampling rate (`0.0`–`1.0`). Metrics are always recorded regardless of sampling |
 
 #### Backpressure
 
@@ -297,6 +296,7 @@ All server settings can be overridden via `RASTIR_SERVER_*` environment variable
 | `RASTIR_SERVER_REDACTION_ENABLED` | `false` | Enable server-side redaction of prompt/completion text |
 | `RASTIR_SERVER_REDACTION_MAX_TEXT_LENGTH` | `50000` | Max text length before truncation (characters) |
 | `RASTIR_SERVER_REDACTION_DROP_ON_FAILURE` | `true` | Drop the span if redaction processing fails (security-first default) |
+| `RASTIR_SERVER_REDACTION_CUSTOM_PATTERNS_JSON` | — | JSON string defining custom redaction regex patterns |
 
 #### Evaluation
 
@@ -327,6 +327,7 @@ All server settings can be overridden via `RASTIR_SERVER_*` environment variable
 |----------|---------|-------------|
 | `RASTIR_SERVER_LOGGING_STRUCTURED` | `false` | Enable JSON structured logging |
 | `RASTIR_SERVER_LOGGING_LEVEL` | `INFO` | Log level: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` |
+| `RASTIR_SERVER_LOGGING_LOG_FILE` | — | Path to log file (logs to stderr if unset) |
 
 #### SRE
 
@@ -336,7 +337,7 @@ All server settings can be overridden via `RASTIR_SERVER_*` environment variable
 | `RASTIR_SERVER_SRE_DEFAULT_SLO_ERROR_RATE` | `0.01` | Default SLO error rate (0.01 = 1% error budget) |
 | `RASTIR_SERVER_SRE_DEFAULT_COST_BUDGET_USD` | `0.0` | Default cost budget in USD per period (0 = disabled) |
 
-Per-agent SLO and cost budget overrides are configured in the YAML file under `sre.agents` (see YAML example above). They cannot be set via environment variables.
+Per-agent SLO and cost budget overrides are configured in the YAML file under `sre.agents` (see YAML example above), or via the `RASTIR_SERVER_SRE_AGENTS_JSON` environment variable (a JSON object with the same structure).
 
 When enabled, the server exposes two Prometheus **Gauge** metrics at startup:
 

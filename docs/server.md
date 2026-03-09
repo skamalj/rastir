@@ -115,10 +115,7 @@ Control which spans are stored/exported (metrics are always recorded):
 
 ```yaml
 sampling:
-  enabled: true
-  rate: 0.1              # Keep 10% of spans
-  always_retain_errors: true
-  latency_threshold_ms: 5000  # Always keep spans > 5s
+  rate: 0.1               # Keep 10% of spans
 ```
 
 ---

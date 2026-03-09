@@ -23,8 +23,8 @@ Core counters tracking span ingestion and call volumes.
 | `rastir_tokens_input_total` | Counter | service, env, model, provider, agent | Input (prompt) tokens |
 | `rastir_tokens_output_total` | Counter | service, env, model, provider, agent | Output (completion) tokens |
 | `rastir_tool_calls_total` | Counter | service, env, tool_name, agent, model, provider | Tool invocations |
-| `rastir_retrieval_calls_total` | Counter | service, env, agent | Retrieval operations |
-| `rastir_errors_total` | Counter | service, env, span_type, error_type | Error spans by normalised category |
+| `rastir_retrieval_calls_total` | Counter | service, env, agent, model, provider | Retrieval operations |
+| `rastir_errors_total` | Counter | service, env, span_type, error_type, model, provider, agent | Error spans by normalised category |
 
 ---
 
@@ -34,7 +34,7 @@ Histograms track the **distribution** of values, enabling percentile calculation
 
 | Metric | Type | Labels | Default Buckets | Unit |
 |--------|------|--------|-----------------|------|
-| `rastir_duration_seconds` | Histogram | service, env, span_type | 0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0 | seconds |
+| `rastir_duration_seconds` | Histogram | service, env, span_type, model, provider | 0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0 | seconds |
 | `rastir_tokens_per_call` | Histogram | service, env, model, provider | 10, 50, 100, 250, 500, 1000, 2000, 4000, 8000, 16000, 32000 | tokens |
 | `rastir_cost_per_call_usd` | Histogram | service, env, model | 0.0001, 0.0005, 0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100 | USD |
 | `rastir_ttft_seconds` | Histogram | service, env, model, provider | 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10 | seconds |
@@ -151,11 +151,13 @@ Unknown values are replaced with `__cardinality_overflow__`. Validation runs on 
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `rastir_eval_runs_total` | Counter | service, env, model, provider, evaluation_type, evaluator_model, evaluator_provider | Evaluation runs |
-| `rastir_eval_failures_total` | Counter | service, env, model, provider, evaluation_type, evaluator_model, evaluator_provider | Failed evaluations |
-| `rastir_eval_latency_seconds` | Histogram | service, env, model, provider, evaluation_type, evaluator_model, evaluator_provider | Evaluation execution time |
-| `rastir_eval_score` | Gauge | service, env, model, provider, evaluation_type, evaluator_model, evaluator_provider | Evaluation score |
-| `rastir_eval_queue_size` | Gauge | — | Evaluation queue depth |
+| `rastir_evaluation_runs_total` | Counter | service, env, model, provider, agent, evaluation_type, evaluator_model, evaluator_provider | Evaluation runs |
+| `rastir_evaluation_failures_total` | Counter | service, env, model, provider, agent, evaluation_type, evaluator_model, evaluator_provider | Failed evaluations |
+| `rastir_evaluation_latency_seconds` | Histogram | service, env, model, provider, agent, evaluation_type, evaluator_model, evaluator_provider | Evaluation execution time |
+| `rastir_evaluation_score` | Gauge | service, env, model, provider, agent, evaluation_type, evaluator_model, evaluator_provider | Evaluation score |
+| `rastir_evaluation_queue_size` | Gauge | — | Evaluation queue depth |
+| `rastir_evaluation_queue_utilization_percent` | Gauge | — | Evaluation queue fill percentage |
+| `rastir_evaluation_dropped_total` | Counter | service, env | Evaluations dropped due to full queue |
 
 ---
 
@@ -173,6 +175,8 @@ Server health and performance metrics.
 | `rastir_ingestion_rate` | Gauge | Spans ingested per second |
 | `rastir_ingestion_rejections_total` | Counter | Rejected spans (backpressure) |
 | `rastir_export_failures_total` | Counter | OTLP export failures |
+| `rastir_redaction_applied_total` | Counter | Redaction rules applied (labels: service, env) |
+| `rastir_redaction_failures_total` | Counter | Redaction processing failures (labels: service, env) |
 
 ---
 
@@ -194,10 +198,10 @@ The `rastir_errors_total` counter uses normalised error categories instead of ra
 
 | Normalised category | Matched exception patterns |
 |---------------------|---------------------------|
-| `timeout` | `TimeoutError`, `asyncio.TimeoutError`, `httpx.TimeoutException`, `httpx.ReadTimeout`, `httpx.ConnectTimeout`, `openai.APITimeoutError` |
+| `timeout` | `TimeoutError`, `asyncio.TimeoutError`, `httpx.TimeoutException`, `httpx.ReadTimeout`, `httpx.ConnectTimeout`, `requests.exceptions.Timeout`, `openai.APITimeoutError` |
 | `rate_limit` | `RateLimitError`, `openai.RateLimitError`, `anthropic.RateLimitError` |
 | `validation_error` | `ValueError`, `TypeError`, `ValidationError`, `pydantic.ValidationError` |
-| `provider_error` | `openai.APIError`, `openai.APIConnectionError`, `anthropic.APIError`, `botocore.exceptions.ClientError` |
+| `provider_error` | `openai.APIError`, `openai.APIConnectionError`, `openai.APIStatusError`, `anthropic.APIError`, `anthropic.APIConnectionError`, `anthropic.APIStatusError`, `botocore.exceptions.ClientError` |
 | `internal_error` | `RuntimeError`, `Exception` |
 | `unknown` | Any unrecognised exception type |
 
@@ -211,7 +215,7 @@ All high-cardinality labels are subject to per-dimension caps. Values exceeding 
 
 | Label | Default Cap | Applies To |
 |-------|------------|------------|
-| `model` | 50 | `llm_calls`, `tokens_*`, `cost_*`, `guardrail_*`, `eval_*` |
+| `model` | 50 | `llm_calls`, `tokens_*`, `cost_*`, `guardrail_*`, `evaluation_*` |
 | `provider` | 10 | Same as model |
 | `tool_name` | 200 | `tool_calls` |
 | `agent` | 200 | `llm_calls`, `tokens_*`, `tool_calls`, `guardrail_*` |

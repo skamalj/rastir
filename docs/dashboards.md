@@ -181,16 +181,16 @@ In addition to the standard filters, this dashboard includes:
 
 ```promql
 # Total eval runs
-sum(increase(rastir_eval_runs_total{service=~"$service", env=~"$env"}[$__range]))
+sum(increase(rastir_evaluation_runs_total{service=~"$service", env=~"$env"}[$__range]))
 
 # Dynamic pie chart with status filter (coefficient math)
 # When eval_status=0 (Total): shows runs
 # When eval_status=1 (Success): shows runs - failures
 # When eval_status=2 (Failed): shows failures
 sum by (eval_type) (
-  increase(rastir_eval_runs_total{...}[$__range])
+  increase(rastir_evaluation_runs_total{...}[$__range])
     * (1 - floor($eval_status / 2))
-  + increase(rastir_eval_failures_total{...}[$__range])
+  + increase(rastir_evaluation_failures_total{...}[$__range])
     * (sgn($eval_status) * (2 * $eval_status - 3))
 )
 ```
