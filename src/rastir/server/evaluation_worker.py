@@ -205,18 +205,19 @@ class EvaluationWorkerPool:
         timeout_s = task.timeout_ms / 1000.0
 
         # Submit all evaluation types to the pool concurrently
-        futures: list[tuple[str, Future, float, str, str]] = []
+        futures: list[tuple[str, Future, float, float, str, str]] = []
         for et, evaluator in to_run:
             t0 = time.monotonic()
+            wall_start = time.time()
             future = self._pool.submit(evaluator.evaluate, task)
             ev_model = getattr(evaluator, "evaluator_model", "")
             ev_provider = getattr(evaluator, "evaluator_provider", "")
-            futures.append((et, future, t0, ev_model, ev_provider))
+            futures.append((et, future, t0, wall_start, ev_model, ev_provider))
 
         # Collect results with overall timeout
         spans_to_emit: list[dict] = []
 
-        for et, future, t0, ev_model, ev_provider in futures:
+        for et, future, t0, wall_start, ev_model, ev_provider in futures:
             try:
                 result: EvaluationResult = await asyncio.wait_for(
                     loop.run_in_executor(None, future.result, timeout_s),
@@ -227,8 +228,10 @@ class EvaluationWorkerPool:
                 # Record metrics
                 self._record_eval_metrics(task, result, duration_ms, ev_model, ev_provider)
 
-                # Build evaluation span
+                # Build evaluation span with proper wall-clock timestamps
                 span = _eval_span_dict(task, result, duration_ms, ev_model, ev_provider)
+                span["start_time"] = wall_start
+                span["end_time"] = wall_start + duration_ms / 1000.0
                 spans_to_emit.append(span)
 
             except (asyncio.TimeoutError, FuturesTimeout):
@@ -246,6 +249,8 @@ class EvaluationWorkerPool:
                 )
                 self._record_eval_metrics(task, timeout_result, duration_ms, ev_model, ev_provider)
                 span = _eval_span_dict(task, timeout_result, duration_ms, ev_model, ev_provider)
+                span["start_time"] = wall_start
+                span["end_time"] = wall_start + duration_ms / 1000.0
                 spans_to_emit.append(span)
                 # Cancel the future if still running
                 future.cancel()
@@ -261,6 +266,8 @@ class EvaluationWorkerPool:
                 )
                 self._record_eval_metrics(task, error_result, duration_ms, ev_model, ev_provider)
                 span = _eval_span_dict(task, error_result, duration_ms, ev_model, ev_provider)
+                span["start_time"] = wall_start
+                span["end_time"] = wall_start + duration_ms / 1000.0
                 spans_to_emit.append(span)
 
         # Emit all evaluation spans via the ingestion pipeline

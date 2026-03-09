@@ -1,0 +1,306 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Rastir Prometheus — ECS Fargate deployment with EFS persistent storage.
+  Deploys Prometheus with 180-day retention, exemplar support, and WAL
+  compression. Scrapes the Rastir server via Service Connect.
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC to deploy into.
+
+  VpcCidr:
+    Type: String
+    Default: "172.31.0.0/16"
+    Description: VPC CIDR block for security group ingress.
+
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Subnet IDs (comma-separated). Must match the rastir-server subnets.
+
+  AssignPublicIp:
+    Type: String
+    Default: DISABLED
+    AllowedValues: [ENABLED, DISABLED]
+    Description: Set to ENABLED when using public subnets without a NAT gateway.
+
+  FargateCpu:
+    Type: String
+    Default: "512"
+    AllowedValues: ["256", "512", "1024", "2048", "4096"]
+
+  FargateMemory:
+    Type: String
+    Default: "2048"
+    AllowedValues: ["512", "1024", "2048", "4096", "8192"]
+
+  DesiredCount:
+    Type: Number
+    Default: 1
+    MinValue: 0
+
+  RastirClusterName:
+    Type: String
+    Default: rastir-server
+    Description: >
+      Name of the existing ECS cluster running the Rastir server.
+      Prometheus will join this cluster to use Service Connect.
+
+  RastirServiceConnectNamespaceArn:
+    Type: String
+    Description: >
+      ARN of the Service Connect namespace from the Rastir server stack.
+      Obtain from the rastir-server CloudFormation stack outputs or
+      from `aws servicediscovery list-namespaces`.
+
+  RastirServerEndpoint:
+    Type: String
+    Default: "rastir-server:8080"
+    Description: >
+      Host:port of the Rastir server (Service Connect alias or IP:port).
+
+  S3ConfigUri:
+    Type: String
+    Default: ""
+    Description: >
+      S3 URI containing Prometheus config files (e.g. s3://my-bucket/prometheus/).
+      Files are synced to /etc/prometheus/ at startup. Must contain
+      prometheus.yml and optionally a rules/ subdirectory.
+
+  PrometheusImage:
+    Type: String
+    Default: prom/prometheus:latest
+    Description: Prometheus container image with entrypoint.sh for S3 config sync.
+
+  PrometheusPort:
+    Type: Number
+    Default: 9090
+
+Resources:
+  # ── Logging ───────────────────────────────────────────────────────────
+  PrometheusLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/ecs/${RastirClusterName}/prometheus"
+      RetentionInDays: 30
+
+  # ── EFS Filesystem ────────────────────────────────────────────────────
+  EfsFileSystem:
+    Type: AWS::EFS::FileSystem
+    Properties:
+      Encrypted: true
+      PerformanceMode: generalPurpose
+      ThroughputMode: bursting
+      FileSystemTags:
+        - Key: Name
+          Value: !Sub "${RastirClusterName}-prometheus"
+
+  EfsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow NFS from VPC for Prometheus EFS
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 2049
+          ToPort: 2049
+          CidrIp: !Ref VpcCidr
+      Tags:
+        - Key: Name
+          Value: !Sub "${RastirClusterName}-prometheus-efs-sg"
+
+  # Mount targets — one per subnet
+  EfsMountTarget0:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref EfsFileSystem
+      SubnetId: !Select [0, !Ref SubnetIds]
+      SecurityGroups:
+        - !GetAtt EfsSecurityGroup.GroupId
+
+  EfsMountTarget1:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref EfsFileSystem
+      SubnetId: !Select [1, !Ref SubnetIds]
+      SecurityGroups:
+        - !GetAtt EfsSecurityGroup.GroupId
+
+  EfsAccessPoint:
+    Type: AWS::EFS::AccessPoint
+    Properties:
+      FileSystemId: !Ref EfsFileSystem
+      PosixUser:
+        Uid: "65534"
+        Gid: "65534"
+      RootDirectory:
+        Path: /prometheus-data
+        CreationInfo:
+          OwnerUid: "65534"
+          OwnerGid: "65534"
+          Permissions: "0755"
+
+  # ── Security Group ───────────────────────────────────────────────────
+  PrometheusSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Prometheus — allow inbound from VPC only
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: !Ref PrometheusPort
+          ToPort: !Ref PrometheusPort
+          CidrIp: !Ref VpcCidr
+      Tags:
+        - Key: Name
+          Value: !Sub "${RastirClusterName}-prometheus-sg"
+
+  # ── IAM ──────────────────────────────────────────────────────────────
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: SsmExec
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                Resource: "*"
+        - PolicyName: S3ConfigRead
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource: "*"
+
+  # ── Task Definition ──────────────────────────────────────────────────
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub "${RastirClusterName}-prometheus"
+      Cpu: !Ref FargateCpu
+      Memory: !Ref FargateMemory
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      Volumes:
+        - Name: prometheus-data
+          EFSVolumeConfiguration:
+            FilesystemId: !Ref EfsFileSystem
+            TransitEncryption: ENABLED
+            AuthorizationConfig:
+              AccessPointId: !Ref EfsAccessPoint
+              IAM: DISABLED
+      ContainerDefinitions:
+        - Name: prometheus
+          Image: !Ref PrometheusImage
+          Essential: true
+          PortMappings:
+            - ContainerPort: !Ref PrometheusPort
+              Protocol: tcp
+              Name: prometheus-http
+          Command:
+            - "--config.file=/etc/prometheus/prometheus.yml"
+            - "--storage.tsdb.path=/prometheus"
+            - "--storage.tsdb.retention.time=180d"
+            - !Sub "--web.listen-address=0.0.0.0:${PrometheusPort}"
+            - "--storage.tsdb.wal-compression"
+            - "--enable-feature=exemplar-storage"
+            - "--storage.exemplars.max-per-series=128"
+          Environment:
+            - Name: S3_CONFIG_URI
+              Value: !Ref S3ConfigUri
+          MountPoints:
+            - SourceVolume: prometheus-data
+              ContainerPath: /prometheus
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref PrometheusLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: prometheus
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - !Sub "wget -qO- http://localhost:${PrometheusPort}/-/healthy || exit 1"
+            Interval: 15
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 30
+
+  # ── Service ──────────────────────────────────────────────────────────
+  Service:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - EfsMountTarget0
+      - EfsMountTarget1
+    Properties:
+      Cluster: !Ref RastirClusterName
+      ServiceName: prometheus
+      TaskDefinition: !Ref TaskDefinition
+      DesiredCount: !Ref DesiredCount
+      LaunchType: FARGATE
+      EnableExecuteCommand: true
+      PlatformVersion: "1.4.0"
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: !Ref AssignPublicIp
+          Subnets: !Ref SubnetIds
+          SecurityGroups:
+            - !GetAtt PrometheusSG.GroupId
+            - !GetAtt EfsSecurityGroup.GroupId
+      ServiceConnectConfiguration:
+        Enabled: true
+        Namespace: !Ref RastirServiceConnectNamespaceArn
+        Services:
+          - PortName: prometheus-http
+            ClientAliases:
+              - Port: !Ref PrometheusPort
+                DnsName: prometheus
+      DeploymentConfiguration:
+        MaximumPercent: 100
+        MinimumHealthyPercent: 0
+
+Outputs:
+  FileSystemId:
+    Value: !Ref EfsFileSystem
+
+  ServiceName:
+    Value: !GetAtt Service.Name
+
+  ServiceConnectEndpoint:
+    Value: !Sub "http://prometheus:${PrometheusPort}"
+    Description: Internal endpoint for services in the same Service Connect namespace.
+
+  PortForwardCommand:
+    Description: Run this to port-forward from your laptop.
+    Value: !Sub "./port-forward.sh ${RastirClusterName} prometheus ${PrometheusPort}"

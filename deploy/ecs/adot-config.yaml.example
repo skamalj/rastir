@@ -1,9 +1,9 @@
 # ---------------------------------------------------------------------------
-# ADOT Collector — Sidecar Configuration for Rastir
+# ADOT Collector — Sidecar Configuration for Rastir (reference copy)
 # ---------------------------------------------------------------------------
-# Scrapes Prometheus metrics from the Rastir server on localhost:8080
-# and pushes them to a configurable remote-write endpoint (e.g. Amazon
-# Managed Prometheus).
+# This file is a readable reference of the ADOT config that is embedded
+# inline in template.yaml via the AOT_CONFIG_CONTENT environment variable.
+# It is NOT read at runtime. Edit the inline config in template.yaml.
 #
 # Environment variables (set in the ECS task definition):
 #   AMP_REMOTE_WRITE_ENDPOINT  — full remote-write URL
@@ -19,12 +19,20 @@ receivers:
           static_configs:
             - targets: ["localhost:8080"]
           metrics_path: /metrics
+  otlp:
+    protocols:
+      grpc:
+        endpoint: "0.0.0.0:4317"
+      http:
+        endpoint: "0.0.0.0:4318"
 
 exporters:
   prometheusremotewrite:
     endpoint: "${AMP_REMOTE_WRITE_ENDPOINT}"
     auth:
       authenticator: sigv4auth
+  awsxray:
+    region: "us-east-1"
 
 extensions:
   sigv4auth:
@@ -39,3 +47,6 @@ service:
     metrics:
       receivers: [prometheus]
       exporters: [prometheusremotewrite]
+    traces:
+      receivers: [otlp]
+      exporters: [awsxray]
