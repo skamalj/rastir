@@ -405,15 +405,26 @@ class IngestionWorker:
     def _should_store(self, span: dict) -> bool:
         """Decide whether a span should be stored/exported.
 
-        Pure probabilistic sampling: each span is independently
-        sampled with probability ``rate``.  When ``rate >= 1.0``
-        (the default) every span is retained.
+        Deterministic trace-level sampling: the decision is derived from
+        a hash of the trace_id, so the same trace_id always produces the
+        same result — across restarts, across multiple server instances,
+        without any cache or shared state.  This follows the same
+        approach as OpenTelemetry's ``TraceIdRatioBased`` sampler.
         """
         rate = self._sampling.rate
         if rate >= 1.0:
             return True
         if rate <= 0.0:
             return False
+
+        trace_id = span.get("trace_id")
+        if trace_id:
+            # Use last 8 hex chars (32 bits) for uniform distribution
+            Hash = int(trace_id[-8:], 16)
+            threshold = int(rate * 0xFFFFFFFF)
+            return Hash <= threshold
+
+        # No trace_id — fall back to per-span random sampling
         return random.random() < rate
 
     # ----- diagnostics -----------------------------------------------------
