@@ -25,6 +25,7 @@ Usage:
 from rastir.config import configure
 from rastir.context import get_current_span
 from rastir.decorators import agent, llm, metric, retrieval, trace
+from rastir.framework_base import framework_agent
 from rastir.pricing import PricingRegistry
 from rastir.remote import RastirMCPMiddleware, mcp_endpoint, traceparent_headers, wrap_mcp
 from rastir.transport import get_export_stats, stop_exporter
@@ -74,6 +75,8 @@ __all__ = [
     "adk_agent",
     # Strands
     "strands_agent",
+    # Auto-detecting
+    "framework_agent",
     "stop_exporter",
     "get_export_stats",
 ]

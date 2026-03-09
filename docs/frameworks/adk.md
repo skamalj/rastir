@@ -9,6 +9,8 @@ nav_order: 4
 
 Rastir provides `@adk_agent` — a single decorator that instruments [Google ADK](https://google.github.io/adk-docs/) (Agent Development Kit) workflows. It **auto-discovers and wraps** ADK `Runner` or `BaseAgent` objects, intercepting events from `run_async` to create LLM and tool spans automatically — tokens, cost, model, provider, latency — with no code changes inside your agents.
 
+> **Tip:** You can also use `@framework_agent` which auto-detects ADK objects from function arguments. The dedicated `@adk_agent` decorator is still available for explicit control.
+
 ---
 
 ## Quick Start

@@ -32,13 +32,16 @@ class-name / module inspection only.
 
 from __future__ import annotations
 
-import asyncio
-import functools
 import logging
 import time
 from typing import Any, Callable, TypeVar
 
-from rastir.remote import discover_mcp_client, inject_traceparent_into_mcp_clients
+from rastir.framework_base import (
+    FrameworkInstrumentor,
+    make_framework_decorator,
+    register_instrumentor,
+)
+from rastir.remote import discover_mcp_client
 
 logger = logging.getLogger("rastir")
 
@@ -88,149 +91,47 @@ def _get_adk_model_name(agent: Any) -> str:
 
 
 # ---------------------------------------------------------------------------
-# adk_agent decorator
+# ADKInstrumentor — FrameworkInstrumentor subclass
 # ---------------------------------------------------------------------------
 
-def adk_agent(
-    func: F | None = None,
-    *,
-    agent_name: str | None = None,
-) -> F | Callable[[F], F]:
-    """Decorator that instruments a Google ADK agent call.
+class ADKInstrumentor(FrameworkInstrumentor):
+    """Instrumentor for Google ADK agent workflows."""
 
-    Wraps the Runner or agent execution in an ``@agent`` span, and
-    intercepts events to create LLM and tool spans.
+    def detect(self, obj: Any) -> bool:
+        return _is_adk_runner(obj) or _is_adk_agent(obj)
 
-    Args:
-        agent_name: Name for the outer agent span.  Defaults to the
-            function name.
+    def wrap(self, obj: Any, originals: Any) -> None:
+        if _is_adk_runner(obj):
+            _wrap_runner_internals(obj, originals)
+        elif _is_adk_agent(obj):
+            _install_adk_callbacks(obj, originals)
 
-    Usage::
-
-        @adk_agent(agent_name="researcher")
-        async def run(runner, user_id, session_id, prompt):
-            events = []
-            async for event in runner.run_async(...):
-                events.append(event)
-            return events
-    """
-
-    def decorator(fn: F) -> F:
-        resolved_name = agent_name or fn.__name__
-
-        @functools.wraps(fn)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            return _adk_agent_impl(fn, resolved_name, args, kwargs)
-
-        @functools.wraps(fn)
-        async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
-            return await _async_adk_agent_impl(fn, resolved_name, args, kwargs)
-
-        if asyncio.iscoroutinefunction(fn):
-            return async_wrapper  # type: ignore[return-value]
-        return wrapper  # type: ignore[return-value]
-
-    if func is not None:
-        return decorator(func)
-    return decorator  # type: ignore[return-value]
-
-
-# ---------------------------------------------------------------------------
-# Implementation
-# ---------------------------------------------------------------------------
-
-def _adk_agent_impl(
-    fn: Callable,
-    agent_name: str,
-    args: tuple,
-    kwargs: dict,
-) -> Any:
-    """Sync implementation of adk_agent."""
-    from rastir.context import (
-        end_span, start_span, set_current_agent, reset_current_agent,
-    )
-    from rastir.queue import enqueue_span
-    from rastir.spans import SpanStatus, SpanType
-
-    span, token = start_span(agent_name, SpanType.AGENT)
-    span.set_attribute("agent_name", agent_name)
-    agent_token = set_current_agent(agent_name)
-
-    originals: dict[int, dict[str, Any]] = {}
-    mcp_clients: list[Any] = []
-
-    try:
-        for obj in (*args, *kwargs.values()):
-            if _is_adk_runner(obj):
-                _wrap_runner_internals(obj, originals)
-            elif _is_adk_agent(obj):
-                _install_adk_callbacks(obj, originals)
-            mc = discover_mcp_client(obj)
-            if mc is not None:
-                mcp_clients.append(mc)
-
-        _walk_func_for_mcp_clients(fn, mcp_clients)
-        inject_traceparent_into_mcp_clients(mcp_clients)
-
-        result = fn(*args, **kwargs)
-        span.finish(SpanStatus.OK)
-        return result
-    except BaseException as exc:
-        span.record_error(exc)
-        span.finish(SpanStatus.ERROR)
-        raise
-    finally:
+    def restore(self, originals: Any) -> None:
         _restore_originals(originals)
-        reset_current_agent(agent_token)
-        end_span(token)
-        enqueue_span(span)
 
 
-async def _async_adk_agent_impl(
-    fn: Callable,
-    agent_name: str,
-    args: tuple,
-    kwargs: dict,
-) -> Any:
-    """Async implementation of adk_agent."""
-    from rastir.context import (
-        end_span, start_span, set_current_agent, reset_current_agent,
-    )
-    from rastir.queue import enqueue_span
-    from rastir.spans import SpanStatus, SpanType
+_adk_instrumentor = ADKInstrumentor()
+register_instrumentor(_adk_instrumentor)
 
-    span, token = start_span(agent_name, SpanType.AGENT)
-    span.set_attribute("agent_name", agent_name)
-    agent_token = set_current_agent(agent_name)
+adk_agent = make_framework_decorator(_adk_instrumentor)
+adk_agent.__doc__ = """Decorator that instruments a Google ADK agent call.
 
-    originals: dict[int, dict[str, Any]] = {}
-    mcp_clients: list[Any] = []
+Wraps the Runner or agent execution in an ``@agent`` span, and
+intercepts events to create LLM and tool spans.
 
-    try:
-        for obj in (*args, *kwargs.values()):
-            if _is_adk_runner(obj):
-                _wrap_runner_internals(obj, originals)
-            elif _is_adk_agent(obj):
-                _install_adk_callbacks(obj, originals)
-            mc = discover_mcp_client(obj)
-            if mc is not None:
-                mcp_clients.append(mc)
+Args:
+    agent_name: Name for the outer agent span.  Defaults to the
+        function name.
 
-        _walk_func_for_mcp_clients(fn, mcp_clients)
-        inject_traceparent_into_mcp_clients(mcp_clients)
+Usage::
 
-        result = await fn(*args, **kwargs)
-        span.finish(SpanStatus.OK)
-        return result
-    except BaseException as exc:
-        span.record_error(exc)
-        span.finish(SpanStatus.ERROR)
-        raise
-    finally:
-        _restore_originals(originals)
-        reset_current_agent(agent_token)
-        end_span(token)
-        enqueue_span(span)
+    @adk_agent(agent_name="researcher")
+    async def run(runner, user_id, session_id, prompt):
+        events = []
+        async for event in runner.run_async(...):
+            events.append(event)
+        return events
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -417,34 +318,3 @@ def _restore_originals(originals: dict[int, dict[str, Any]]) -> None:
                 except Exception:
                     pass
 
-
-def _walk_func_for_mcp_clients(
-    func: Any, mcp_clients: list[Any],
-) -> None:
-    """Walk a function's closures and globals for MCP client objects."""
-    seen: set[int] = set()
-
-    closure = getattr(func, "__closure__", None)
-    if closure:
-        for cell in closure:
-            try:
-                val = cell.cell_contents
-            except ValueError:
-                continue
-            if id(val) not in seen:
-                seen.add(id(val))
-                mc = discover_mcp_client(val)
-                if mc is not None:
-                    mcp_clients.append(mc)
-
-    code = getattr(func, "__code__", None)
-    func_globals = getattr(func, "__globals__", None)
-    if code is not None and func_globals is not None:
-        for varname in code.co_names:
-            val = func_globals.get(varname)
-            if val is None or id(val) in seen:
-                continue
-            seen.add(id(val))
-            mc = discover_mcp_client(val)
-            if mc is not None:
-                mcp_clients.append(mc)

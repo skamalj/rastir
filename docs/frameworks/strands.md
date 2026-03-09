@@ -9,6 +9,8 @@ nav_order: 5
 
 Rastir provides `@strands_agent` — a single decorator that instruments [AWS Strands Agents](https://strandsagents.com/) workflows. It **auto-discovers and wraps** Strands `Agent` objects, intercepting the model's `stream` method and each tool's `stream` method to create LLM and tool spans automatically — tokens, cost, model, provider, latency — with no code changes inside your agents.
 
+> **Tip:** You can also use `@framework_agent` which auto-detects Strands Agent objects from function arguments. The dedicated `@strands_agent` decorator is still available for explicit control.
+
 ---
 
 ## Quick Start

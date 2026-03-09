@@ -17,7 +17,7 @@ Rastir provides decorator-based instrumentation for LLM applications and AI agen
 
 Most LLM observability tools require SDK wrappers, monkey-patching, or vendor-specific clients. Rastir takes a different approach:
 
-- **One decorator per framework** — `@langgraph_agent`, `@crew_kickoff`, `@llamaindex_agent`, `@adk_agent`, `@strands_agent` auto-discover and wrap LLMs, tools, and nodes inside the framework
+- **One decorator per framework** — `@framework_agent` auto-detects the framework; or use `@langgraph_agent`, `@crew_kickoff`, `@llamaindex_agent`, `@adk_agent`, `@strands_agent` for explicit control
 - **Adapters, not patches** — 15 adapters extract model, tokens, and provider from return values. Works across SDK versions
 - **Two-phase enrichment** — metadata captured from function kwargs *before* the call, refined from the response *after*. Survives API failures
 - **Self-hosted collector** — a lightweight FastAPI server you own. Prometheus metrics, OTLP export, zero external infrastructure
@@ -27,13 +27,12 @@ Most LLM observability tools require SDK wrappers, monkey-patching, or vendor-sp
 ## Quick Example
 
 ```python
-from rastir import configure, langgraph_agent
+from rastir import configure, framework_agent
 
 configure(service="my-app", push_url="http://localhost:8080")
 
-@langgraph_agent(agent_name="react_agent")
-def run(query):
-    graph = create_react_agent(model, tools)
+@framework_agent(agent_name="react_agent")
+def run(graph, query):
     return graph.invoke({"messages": [("user", query)]})
 ```
 
@@ -53,7 +52,7 @@ react_agent (AGENT)
 
 ## Key Features
 
-- **Framework decorators** — `@langgraph_agent`, `@crew_kickoff`, `@llamaindex_agent`, `@adk_agent`, `@strands_agent` with automatic LLM/tool discovery
+- **Framework decorators** — `@framework_agent` (auto-detect), plus `@langgraph_agent`, `@crew_kickoff`, `@llamaindex_agent`, `@adk_agent`, `@strands_agent` with automatic LLM/tool discovery
 - **15 provider adapters** — OpenAI, Azure, Anthropic, Bedrock, Gemini, Cohere, Mistral, Groq, LangChain, LangGraph, LlamaIndex, CrewAI
 - **MCP distributed tracing** — `wrap(session)` and `@mcp_endpoint` for end-to-end tracing across MCP tool boundaries
 - **Generic `wrap()`** — instrument any object (Redis, databases, MCP sessions) without decorator access
@@ -74,6 +73,7 @@ react_agent (AGENT)
 ┌─────────────────────────────────────────────────┐
 │  Your Application                               │
 │  ┌──────────────────────────────────────────┐   │
+│  │  @framework_agent (auto-detect)         │   │
 │  │  @langgraph_agent / @crew_kickoff /      │   │
 │  │  @llamaindex_agent / @adk_agent /         │   │
 │  │  @strands_agent                           │   │

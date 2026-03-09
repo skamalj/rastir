@@ -23,20 +23,21 @@
 
 Rastir gives you **production observability for LLM agents** — token usage, latency percentiles, cost tracking, tool call rates, error categories — as Prometheus metrics with Grafana dashboards.
 
-Add **one decorator** to your LangGraph, CrewAI, or LlamaIndex workflow. Rastir auto-discovers LLMs, tools, and graph nodes inside the framework and wraps them for per-call tracing. No code rewrites. No vendor lock-in.
+Add **one decorator** to your LangGraph, CrewAI, LlamaIndex, ADK, or Strands workflow. Rastir auto-discovers LLMs, tools, and graph nodes inside the framework and wraps them for per-call tracing. No code rewrites. No vendor lock-in.
 
 ```python
-from rastir import configure, langgraph_agent
+from rastir import configure, framework_agent
 
 configure(service="my-app", push_url="http://localhost:8080")
 
-@langgraph_agent
-def run(query):
-    graph = create_react_agent(model, tools)
-    return graph.invoke({"messages": [("user", query)]})
+@framework_agent
+def run(graph_or_agent, prompt):
+    return graph_or_agent.invoke(prompt)  # Works with any supported framework
 ```
 
-That's it. Every LLM call, tool invocation, and node execution inside the graph is now traced with metrics flowing to Prometheus.
+That's it. `@framework_agent` auto-detects the framework from function arguments and instruments everything inside. Every LLM call, tool invocation, and node execution is now traced with metrics flowing to Prometheus.
+
+You can also use framework-specific decorators for explicit control: `@langgraph_agent`, `@crew_kickoff`, `@llamaindex_agent`, `@adk_agent`, `@strands_agent`.
 
 ---
 
@@ -44,7 +45,7 @@ That's it. Every LLM call, tool invocation, and node execution inside the graph 
 
 | Feature | Description |
 |---------|-------------|
-| **One decorator per framework** | `@langgraph_agent`, `@crew_kickoff`, `@llamaindex_agent` — auto-discovers and wraps everything inside |
+| **One decorator per framework** | `@framework_agent` (auto-detect), `@langgraph_agent`, `@crew_kickoff`, `@llamaindex_agent`, `@adk_agent`, `@strands_agent` |
 | **15 provider adapters** | OpenAI, Azure, Anthropic, Bedrock, Gemini, Cohere, Mistral, Groq, LangChain, LangGraph, LlamaIndex, CrewAI — auto-detected |
 | **Two-phase enrichment** | Model/provider metadata captured from function args *before* the call, refined from response *after*. Survives API failures |
 | **MCP distributed tracing** | `wrap(session)` propagates trace context across MCP tool boundaries — same `trace_id` links client and server |
@@ -61,15 +62,17 @@ That's it. Every LLM call, tool invocation, and node execution inside the graph 
 
 ## Framework Support at a Glance
 
-| | LangGraph | CrewAI | LlamaIndex |
-|---|---|---|---|
-| **Decorator** | `@langgraph_agent` | `@crew_kickoff` | `@llamaindex_agent` |
-| **Agent span** | Automatic | Automatic | Automatic |
-| **LLM tracing** | Auto-discovered | Auto-discovered | `wrap(llm)` |
-| **Tool tracing** | Auto-discovered | Auto-discovered | `wrap(tool)` |
-| **Node tracing** | Automatic (all nodes) | N/A | N/A |
-| **MCP tools** | Pass as normal tools | Native via `mcps=[]` on agents | `wrap()` on McpToolSpec tools |
-| **User code** | 1 decorator | 1 decorator | 1 decorator + `wrap()` calls |
+All five frameworks work with `@framework_agent` (auto-detects the framework) or the dedicated decorator:
+
+| | LangGraph | CrewAI | LlamaIndex | ADK | Strands |
+|---|---|---|---|---|---|
+| **Decorator** | `@langgraph_agent` | `@crew_kickoff` | `@llamaindex_agent` | `@adk_agent` | `@strands_agent` |
+| **Agent span** | Automatic | Automatic | Automatic | Automatic | Automatic |
+| **LLM tracing** | Auto-discovered | Auto-discovered | `wrap(llm)` | Auto-discovered | Auto-discovered |
+| **Tool tracing** | Auto-discovered | Auto-discovered | `wrap(tool)` | Auto-discovered | Auto-discovered |
+| **Node tracing** | Automatic (all nodes) | N/A | N/A | N/A | N/A |
+| **MCP tools** | Pass as normal tools | Native via `mcps=[]` | `wrap()` on tools | Tools as functions | Tools as functions |
+| **User code** | 1 decorator | 1 decorator | 1 decorator + `wrap()` | 1 decorator | 1 decorator |
 
 ### LangGraph
 
@@ -128,7 +131,7 @@ qa_agent (AGENT)
 └── llamaindex.ReActAgent.llm.achat (LLM)
 ```
 
-→ **Detailed framework documentation:** [LangGraph](https://skamalj.github.io/rastir/frameworks/langgraph) · [CrewAI](https://skamalj.github.io/rastir/frameworks/crewai) · [LlamaIndex](https://skamalj.github.io/rastir/frameworks/llamaindex)
+→ **Detailed framework documentation:** [LangGraph](https://skamalj.github.io/rastir/frameworks/langgraph) · [CrewAI](https://skamalj.github.io/rastir/frameworks/crewai) · [LlamaIndex](https://skamalj.github.io/rastir/frameworks/llamaindex) · [ADK](https://skamalj.github.io/rastir/frameworks/adk) · [Strands](https://skamalj.github.io/rastir/frameworks/strands)
 
 ---
 
@@ -204,11 +207,11 @@ rastir_ttft_seconds_bucket{model="gpt-4o", le="0.5"} 95
 ```
 Your Application                             Rastir Collector
 ┌────────────────────────────────┐           ┌────────────────────────────┐
-│  @langgraph_agent              │   HTTP    │  FastAPI                   │
-│  @crew_kickoff                 │  ──────▸  │  ├── Prometheus /metrics   │
-│  @llamaindex_agent             │   spans   │  ├── Trace store /v1/traces│
-│  @agent / @llm                 │           │  ├── Sampling & backpressure│
-│  wrap(obj)                     │           │  └── OTLP → Tempo/Jaeger  │
+│  @framework_agent (auto-detect)│   HTTP    │  FastAPI                   │
+│  @langgraph_agent / @adk_agent │  ──────▸  │  ├── Prometheus /metrics   │
+│  @crew_kickoff / @strands_agent│   spans   │  ├── Trace store /v1/traces│
+│  @llamaindex_agent             │           │  ├── Sampling & backpressure│
+│  @agent / @llm / wrap(obj)     │           │  └── OTLP → Tempo/Jaeger  │
 └────────────────────────────────┘           └────────────────────────────┘
 ```
 
@@ -222,7 +225,7 @@ Full documentation at **[skamalj.github.io/rastir](https://skamalj.github.io/ras
 |---------|-------|
 | **Getting Started** | [Installation & Quick Start](https://skamalj.github.io/rastir/getting-started) |
 | **Core** | [Decorators](https://skamalj.github.io/rastir/decorators) · [Adapters](https://skamalj.github.io/rastir/adapters) · [wrap() & MCP](https://skamalj.github.io/rastir/wrap) · [MCP Tracing](https://skamalj.github.io/rastir/mcp-tracing) |
-| **Frameworks** | [LangGraph](https://skamalj.github.io/rastir/frameworks/langgraph) · [CrewAI](https://skamalj.github.io/rastir/frameworks/crewai) · [LlamaIndex](https://skamalj.github.io/rastir/frameworks/llamaindex) |
+| **Frameworks** | [LangGraph](https://skamalj.github.io/rastir/frameworks/langgraph) · [CrewAI](https://skamalj.github.io/rastir/frameworks/crewai) · [LlamaIndex](https://skamalj.github.io/rastir/frameworks/llamaindex) · [ADK](https://skamalj.github.io/rastir/frameworks/adk) · [Strands](https://skamalj.github.io/rastir/frameworks/strands) |
 | **Operations** | [Metrics](https://skamalj.github.io/rastir/metrics) · [Dashboards](https://skamalj.github.io/rastir/dashboards) · [Server](https://skamalj.github.io/rastir/server) · [Configuration](https://skamalj.github.io/rastir/configuration) |
 | **Reference** | [Architecture](https://skamalj.github.io/rastir/architecture-responsibilities) · [Environment Variables](https://skamalj.github.io/rastir/environment-variables) · [Contributing Adapters](https://skamalj.github.io/rastir/contributing-adapters) |
 

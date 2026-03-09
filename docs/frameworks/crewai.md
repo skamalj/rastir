@@ -9,6 +9,8 @@ nav_order: 2
 
 Rastir provides `@crew_kickoff` — a single decorator that instruments [CrewAI](https://www.crewai.com/) workflows. It **auto-discovers and wraps** every agent's LLM and tools for per-call tracing — tokens, cost, model, provider, input/output — with no code changes inside your agents.
 
+> **Tip:** You can also use `@framework_agent` which auto-detects CrewAI `Crew` objects from function arguments. The dedicated `@crew_kickoff` decorator is still available for explicit control.
+
 ---
 
 ## Quick Start

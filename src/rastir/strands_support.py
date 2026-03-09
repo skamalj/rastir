@@ -28,12 +28,14 @@ class-name / module inspection only.
 
 from __future__ import annotations
 
-import asyncio
-import functools
 import logging
 from typing import Any, Callable, TypeVar
 
-from rastir.remote import discover_mcp_client, inject_traceparent_into_mcp_clients
+from rastir.framework_base import (
+    FrameworkInstrumentor,
+    make_framework_decorator,
+    register_instrumentor,
+)
 from rastir.wrapper import wrap
 
 logger = logging.getLogger("rastir")
@@ -71,142 +73,41 @@ def _get_model_name(agent: Any) -> str:
 
 
 # ---------------------------------------------------------------------------
-# strands_agent decorator
+# StrandsInstrumentor — FrameworkInstrumentor subclass
 # ---------------------------------------------------------------------------
 
-def strands_agent(
-    func: F | None = None,
-    *,
-    agent_name: str | None = None,
-) -> F | Callable[[F], F]:
-    """Decorator that instruments a Strands Agent call.
+class StrandsInstrumentor(FrameworkInstrumentor):
+    """Instrumentor for AWS Strands Agent calls."""
 
-    Wraps the agent's model and tools for per-call observability, and
-    creates an ``@agent`` span around execution.
+    def detect(self, obj: Any) -> bool:
+        return _is_strands_agent(obj)
 
-    Args:
-        agent_name: Name for the outer agent span.  Defaults to the
-            function name.
+    def wrap(self, obj: Any, originals: Any) -> None:
+        _wrap_strands_internals(obj, originals)
 
-    Usage::
-
-        @strands_agent(agent_name="researcher")
-        def run(agent, prompt):
-            return agent(prompt)
-    """
-
-    def decorator(fn: F) -> F:
-        resolved_name = agent_name or fn.__name__
-
-        @functools.wraps(fn)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            return _strands_agent_impl(fn, resolved_name, args, kwargs)
-
-        @functools.wraps(fn)
-        async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
-            return await _async_strands_agent_impl(fn, resolved_name, args, kwargs)
-
-        if asyncio.iscoroutinefunction(fn):
-            return async_wrapper  # type: ignore[return-value]
-        return wrapper  # type: ignore[return-value]
-
-    if func is not None:
-        return decorator(func)
-    return decorator  # type: ignore[return-value]
-
-
-# ---------------------------------------------------------------------------
-# Implementation
-# ---------------------------------------------------------------------------
-
-def _strands_agent_impl(
-    fn: Callable,
-    agent_name: str,
-    args: tuple,
-    kwargs: dict,
-) -> Any:
-    """Sync implementation of strands_agent."""
-    from rastir.context import (
-        end_span, start_span, set_current_agent, reset_current_agent,
-    )
-    from rastir.queue import enqueue_span
-    from rastir.spans import SpanStatus, SpanType
-
-    span, token = start_span(agent_name, SpanType.AGENT)
-    span.set_attribute("agent_name", agent_name)
-    agent_token = set_current_agent(agent_name)
-
-    originals: dict[int, dict[str, Any]] = {}
-    mcp_clients: list[Any] = []
-
-    try:
-        for obj in (*args, *kwargs.values()):
-            if _is_strands_agent(obj):
-                _wrap_strands_internals(obj, originals)
-            mc = discover_mcp_client(obj)
-            if mc is not None:
-                mcp_clients.append(mc)
-
-        _walk_func_for_mcp_clients(fn, mcp_clients)
-        inject_traceparent_into_mcp_clients(mcp_clients)
-
-        result = fn(*args, **kwargs)
-        span.finish(SpanStatus.OK)
-        return result
-    except BaseException as exc:
-        span.record_error(exc)
-        span.finish(SpanStatus.ERROR)
-        raise
-    finally:
+    def restore(self, originals: Any) -> None:
         _restore_originals(originals)
-        reset_current_agent(agent_token)
-        end_span(token)
-        enqueue_span(span)
 
 
-async def _async_strands_agent_impl(
-    fn: Callable,
-    agent_name: str,
-    args: tuple,
-    kwargs: dict,
-) -> Any:
-    """Async implementation of strands_agent."""
-    from rastir.context import (
-        end_span, start_span, set_current_agent, reset_current_agent,
-    )
-    from rastir.queue import enqueue_span
-    from rastir.spans import SpanStatus, SpanType
+_strands_instrumentor = StrandsInstrumentor()
+register_instrumentor(_strands_instrumentor)
 
-    span, token = start_span(agent_name, SpanType.AGENT)
-    span.set_attribute("agent_name", agent_name)
-    agent_token = set_current_agent(agent_name)
+strands_agent = make_framework_decorator(_strands_instrumentor)
+strands_agent.__doc__ = """Decorator that instruments a Strands Agent call.
 
-    originals: dict[int, dict[str, Any]] = {}
-    mcp_clients: list[Any] = []
+Wraps the agent's model and tools for per-call observability, and
+creates an ``@agent`` span around execution.
 
-    try:
-        for obj in (*args, *kwargs.values()):
-            if _is_strands_agent(obj):
-                _wrap_strands_internals(obj, originals)
-            mc = discover_mcp_client(obj)
-            if mc is not None:
-                mcp_clients.append(mc)
+Args:
+    agent_name: Name for the outer agent span.  Defaults to the
+        function name.
 
-        _walk_func_for_mcp_clients(fn, mcp_clients)
-        inject_traceparent_into_mcp_clients(mcp_clients)
+Usage::
 
-        result = await fn(*args, **kwargs)
-        span.finish(SpanStatus.OK)
-        return result
-    except BaseException as exc:
-        span.record_error(exc)
-        span.finish(SpanStatus.ERROR)
-        raise
-    finally:
-        _restore_originals(originals)
-        reset_current_agent(agent_token)
-        end_span(token)
-        enqueue_span(span)
+    @strands_agent(agent_name="researcher")
+    def run(agent, prompt):
+        return agent(prompt)
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -271,34 +172,3 @@ def _restore_originals(originals: dict[int, dict[str, Any]]) -> None:
             tool.__dict__.pop(attr_name, None)
             tool.__dict__.pop("_rastir_tool_patched", None)
 
-
-def _walk_func_for_mcp_clients(
-    func: Any, mcp_clients: list[Any],
-) -> None:
-    """Walk a function's closures and globals for MCP client objects."""
-    seen: set[int] = set()
-
-    closure = getattr(func, "__closure__", None)
-    if closure:
-        for cell in closure:
-            try:
-                val = cell.cell_contents
-            except ValueError:
-                continue
-            if id(val) not in seen:
-                seen.add(id(val))
-                mc = discover_mcp_client(val)
-                if mc is not None:
-                    mcp_clients.append(mc)
-
-    code = getattr(func, "__code__", None)
-    func_globals = getattr(func, "__globals__", None)
-    if code is not None and func_globals is not None:
-        for varname in code.co_names:
-            val = func_globals.get(varname)
-            if val is None or id(val) in seen:
-                continue
-            seen.add(id(val))
-            mc = discover_mcp_client(val)
-            if mc is not None:
-                mcp_clients.append(mc)

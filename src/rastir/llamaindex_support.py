@@ -30,12 +30,14 @@ class-name / module inspection only.
 
 from __future__ import annotations
 
-import asyncio
-import functools
 import logging
 from typing import Any, Callable, TypeVar
 
-from rastir.remote import discover_mcp_client, inject_traceparent_into_mcp_clients
+from rastir.framework_base import (
+    FrameworkInstrumentor,
+    make_framework_decorator,
+    register_instrumentor,
+)
 from rastir.wrapper import wrap
 
 logger = logging.getLogger("rastir")
@@ -96,156 +98,47 @@ def _set_agent_tools(agent: Any, tools: list) -> None:
 
 
 # ---------------------------------------------------------------------------
-# llamaindex_agent decorator
+# LlamaIndexInstrumentor — FrameworkInstrumentor subclass
 # ---------------------------------------------------------------------------
 
-def llamaindex_agent(
-    func: F | None = None,
-    *,
-    agent_name: str | None = None,
-) -> F | Callable[[F], F]:
-    """Decorator that instruments a LlamaIndex agent call.
+class LlamaIndexInstrumentor(FrameworkInstrumentor):
+    """Instrumentor for LlamaIndex agent calls."""
 
-    Wraps agent LLMs and tools for per-call observability and creates
-    an ``@agent`` span around execution.  MCP tools are handled
-    natively by LlamaIndex (``McpToolSpec.to_tool_list_async()``) and
-    are wrapped the same as any local tool.
+    def detect(self, obj: Any) -> bool:
+        return _is_llamaindex_agent(obj)
 
-    Args:
-        agent_name: Name for the outer agent span.  Defaults to the
-            function name.
+    def wrap(self, obj: Any, originals: Any) -> None:
+        _wrap_agent_internals(obj, originals)
 
-    Usage::
-
-        @llamaindex_agent(agent_name="research")
-        def run(agent):
-            return agent.chat("What is 2+2?")
-
-        @llamaindex_agent
-        async def run(agent):
-            return await agent.arun("List files in /tmp")
-    """
-
-    def decorator(fn: F) -> F:
-        resolved_name = agent_name or fn.__name__
-
-        @functools.wraps(fn)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            return _llamaindex_agent_impl(fn, resolved_name, args, kwargs)
-
-        @functools.wraps(fn)
-        async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
-            return await _async_llamaindex_agent_impl(
-                fn, resolved_name, args, kwargs
-            )
-
-        if asyncio.iscoroutinefunction(fn):
-            return async_wrapper  # type: ignore[return-value]
-        return wrapper  # type: ignore[return-value]
-
-    if func is not None:
-        return decorator(func)
-    return decorator  # type: ignore[return-value]
-
-
-# ---------------------------------------------------------------------------
-# Implementation
-# ---------------------------------------------------------------------------
-
-def _llamaindex_agent_impl(
-    fn: Callable,
-    agent_name: str,
-    args: tuple,
-    kwargs: dict,
-) -> Any:
-    """Sync implementation of llamaindex_agent."""
-    from rastir.context import (
-        end_span, start_span, set_current_agent, reset_current_agent,
-    )
-    from rastir.queue import enqueue_span
-    from rastir.spans import SpanStatus, SpanType
-
-    span, token = start_span(agent_name, SpanType.AGENT)
-    span.set_attribute("agent_name", agent_name)
-    agent_token = set_current_agent(agent_name)
-
-    originals: dict[int, dict[str, Any]] = {}
-    mcp_clients: list[Any] = []
-
-    try:
-        for obj in (*args, *kwargs.values()):
-            if _is_llamaindex_agent(obj):
-                _wrap_agent_internals(obj, originals)
-            mc = discover_mcp_client(obj)
-            if mc is not None:
-                mcp_clients.append(mc)
-
-        # Walk function closures/globals for MCP clients
-        _walk_func_for_mcp_clients(fn, mcp_clients)
-
-        # Inject traceparent header into discovered MCP clients
-        inject_traceparent_into_mcp_clients(mcp_clients)
-
-        result = fn(*args, **kwargs)
-        span.finish(SpanStatus.OK)
-        return result
-    except BaseException as exc:
-        span.record_error(exc)
-        span.finish(SpanStatus.ERROR)
-        raise
-    finally:
+    def restore(self, originals: Any) -> None:
         _restore_originals(originals)
-        reset_current_agent(agent_token)
-        end_span(token)
-        enqueue_span(span)
 
 
-async def _async_llamaindex_agent_impl(
-    fn: Callable,
-    agent_name: str,
-    args: tuple,
-    kwargs: dict,
-) -> Any:
-    """Async implementation of llamaindex_agent."""
-    from rastir.context import (
-        end_span, start_span, set_current_agent, reset_current_agent,
-    )
-    from rastir.queue import enqueue_span
-    from rastir.spans import SpanStatus, SpanType
+_llamaindex_instrumentor = LlamaIndexInstrumentor()
+register_instrumentor(_llamaindex_instrumentor)
 
-    span, token = start_span(agent_name, SpanType.AGENT)
-    span.set_attribute("agent_name", agent_name)
-    agent_token = set_current_agent(agent_name)
+llamaindex_agent = make_framework_decorator(_llamaindex_instrumentor)
+llamaindex_agent.__doc__ = """Decorator that instruments a LlamaIndex agent call.
 
-    originals: dict[int, dict[str, Any]] = {}
-    mcp_clients: list[Any] = []
+Wraps agent LLMs and tools for per-call observability and creates
+an ``@agent`` span around execution.  MCP tools are handled
+natively by LlamaIndex (``McpToolSpec.to_tool_list_async()``) and
+are wrapped the same as any local tool.
 
-    try:
-        for obj in (*args, *kwargs.values()):
-            if _is_llamaindex_agent(obj):
-                _wrap_agent_internals(obj, originals)
-            mc = discover_mcp_client(obj)
-            if mc is not None:
-                mcp_clients.append(mc)
+Args:
+    agent_name: Name for the outer agent span.  Defaults to the
+        function name.
 
-        # Walk function closures/globals for MCP clients
-        _walk_func_for_mcp_clients(fn, mcp_clients)
+Usage::
 
-        # Inject traceparent header into discovered MCP clients
-        inject_traceparent_into_mcp_clients(mcp_clients)
+    @llamaindex_agent(agent_name="research")
+    def run(agent):
+        return agent.chat("What is 2+2?")
 
-        result = await fn(*args, **kwargs)
-        span.finish(SpanStatus.OK)
-        return result
-    except BaseException as exc:
-        span.record_error(exc)
-        span.finish(SpanStatus.ERROR)
-        raise
-    finally:
-        _restore_originals(originals)
-        reset_current_agent(agent_token)
-        end_span(token)
-        enqueue_span(span)
+    @llamaindex_agent
+    async def run(agent):
+        return await agent.arun("List files in /tmp")
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -315,36 +208,3 @@ def _restore_originals(originals: dict[int, dict[str, Any]]) -> None:
         if "tools" in saved:
             _set_agent_tools(ag, saved["tools"])
 
-
-def _walk_func_for_mcp_clients(
-    func: Any, mcp_clients: list[Any],
-) -> None:
-    """Walk a function's closures and globals for MCP client objects."""
-    seen: set[int] = set()
-
-    # 1. Closure cells
-    closure = getattr(func, "__closure__", None)
-    if closure:
-        for cell in closure:
-            try:
-                val = cell.cell_contents
-            except ValueError:
-                continue
-            if id(val) not in seen:
-                seen.add(id(val))
-                mc = discover_mcp_client(val)
-                if mc is not None:
-                    mcp_clients.append(mc)
-
-    # 2. Global variables referenced by the function
-    code = getattr(func, "__code__", None)
-    func_globals = getattr(func, "__globals__", None)
-    if code is not None and func_globals is not None:
-        for varname in code.co_names:
-            val = func_globals.get(varname)
-            if val is None or id(val) in seen:
-                continue
-            seen.add(id(val))
-            mc = discover_mcp_client(val)
-            if mc is not None:
-                mcp_clients.append(mc)

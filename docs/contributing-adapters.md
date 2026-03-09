@@ -360,6 +360,56 @@ Study these files for real-world examples:
 
 ---
 
+## Contributing a Framework Instrumentor
+
+In addition to response adapters, Rastir has **framework instrumentors** — components that actively wrap a framework's internal objects (LLMs, tools, nodes) for automatic tracing. All five supported frameworks (LangGraph, CrewAI, LlamaIndex, ADK, Strands) use the `FrameworkInstrumentor` ABC pattern.
+
+### The Pattern
+
+```python
+from rastir.framework_base import FrameworkInstrumentor, make_framework_decorator, register_instrumentor
+
+class MyFrameworkInstrumentor(FrameworkInstrumentor):
+    def detect(self, obj):
+        \"\"\"Return True if obj is your framework's main object.\"\"\"
+        cls_name = type(obj).__name__
+        return cls_name == "MyAgent"
+
+    def wrap(self, obj, originals):
+        \"\"\"Monkey-patch LLMs/tools on obj for tracing. Store originals for restore.\"\"\"
+        originals["original_llm"] = obj.llm
+        obj.llm = wrapped_llm(obj.llm)
+
+    def restore(self, originals):
+        \"\"\"Undo all monkey-patching.\"\"\"
+        # Restore original objects from originals dict
+
+# Create the framework-specific decorator
+my_framework_agent = make_framework_decorator(MyFrameworkInstrumentor())
+
+# Register for auto-detection via @framework_agent
+register_instrumentor(MyFrameworkInstrumentor())
+```
+
+### Lifecycle
+
+1. **detect** — duck-type check (class name + module). No direct framework imports.
+2. **wrap** — instrument LLMs/tools/nodes. Store originals for safe restore.
+3. User function executes (instrumented objects emit spans).
+4. **restore** — always called (even on error). Undo all monkey-patching.
+
+### Existing instrumentors as reference
+
+| File | Framework | Class |
+|------|-----------|-------|
+| `src/rastir/langgraph_support.py` | LangGraph | `LangGraphInstrumentor` |
+| `src/rastir/crewai_support.py` | CrewAI | `CrewAIInstrumentor` |
+| `src/rastir/llamaindex_support.py` | LlamaIndex | `LlamaIndexInstrumentor` |
+| `src/rastir/adk_support.py` | Google ADK | `ADKInstrumentor` |
+| `src/rastir/strands_support.py` | Strands | `StrandsInstrumentor` |
+
+---
+
 ## Checklist
 
 Before submitting a new adapter:

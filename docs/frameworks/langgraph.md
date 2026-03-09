@@ -9,6 +9,8 @@ nav_order: 1
 
 Rastir provides `@langgraph_agent` — a single decorator that instruments LangGraph compiled-graph execution. It **auto-discovers** LLMs, tools, and nodes inside the graph — no manual wrapping needed.
 
+> **Tip:** You can also use `@framework_agent` which auto-detects LangGraph graphs from function arguments. The dedicated `@langgraph_agent` decorator is still available for explicit control.
+
 ---
 
 ## Quick Start

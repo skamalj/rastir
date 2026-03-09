@@ -6,7 +6,7 @@ nav_order: 3
 
 # Decorator Reference
 
-Rastir provides five **core** decorators for manual instrumentation, plus five **framework** decorators that auto-discover and wrap everything inside a framework's agent loop. All support both sync and async functions.
+Rastir provides five **core** decorators for manual instrumentation, plus a **unified `@framework_agent`** decorator that auto-detects which AI framework you're using, and five individual **framework** decorators for explicit control. All support both sync and async functions.
 
 ---
 
@@ -62,20 +62,57 @@ The interceptor works with clients passed as arguments, stored in closures, or d
 
 | Scenario | Decorator | What it does |
 |----------|-----------|-------------|
-| Building with **LangGraph** | `@langgraph_agent` | Auto-discovers LLMs, tools, and nodes inside the compiled graph. **No manual wrapping needed.** |
-| Building with **CrewAI** | `@crew_kickoff` | Auto-discovers LLMs and tools on every agent in the Crew. MCP tools are handled natively by CrewAI via `mcps=[]`. |
-| Building with **LlamaIndex** | `@llamaindex_agent` | Creates the agent span; you pre-wrap LLMs/tools with `wrap()`. |
-| Building with **Google ADK** | `@adk_agent` | Auto-discovers ADK Runner/Agent objects and intercepts events for LLM and tool spans. |
-| Building with **Strands** | `@strands_agent` | Auto-discovers Strands Agent objects and intercepts model/tool streams. |
+| **Any supported framework** | `@framework_agent` | **Recommended.** Auto-detects LangGraph, CrewAI, LlamaIndex, ADK, or Strands from function arguments and instruments everything. |
+| Building with **LangGraph** | `@langgraph_agent` | Explicit LangGraph instrumentation. Auto-discovers LLMs, tools, and nodes inside the compiled graph. |
+| Building with **CrewAI** | `@crew_kickoff` | Explicit CrewAI instrumentation. Auto-discovers LLMs and tools on every agent in the Crew. |
+| Building with **LlamaIndex** | `@llamaindex_agent` | Explicit LlamaIndex instrumentation. Creates the agent span; you pre-wrap LLMs/tools with `wrap()`. |
+| Building with **Google ADK** | `@adk_agent` | Explicit ADK instrumentation. Auto-discovers ADK Runner/Agent objects and intercepts events. |
+| Building with **Strands** | `@strands_agent` | Explicit Strands instrumentation. Auto-discovers Strands Agent objects and intercepts model/tool streams. |
 | Building your **own agent loop** | `@agent` + `@llm` | Full manual control — you decorate each function yourself. Use `@trace` for non-LLM functions. |
 | **Simple tracing** (no agent) | `@trace` | General-purpose span for any function. |
 | **Standalone metrics** only | `@metric` | Creates metric spans with Prometheus counters/histograms. |
 
-**Rule of thumb:** If you're using LangGraph, CrewAI, LlamaIndex, ADK, or Strands — use the corresponding framework decorator. It does all the heavy lifting and always captures full metadata. Use `@agent` / `@llm` only when you're calling LLM APIs directly without a framework.
+**Rule of thumb:** Use `@framework_agent` for automatic framework detection, or the framework-specific decorator for explicit control. Use `@agent` / `@llm` only when you're calling LLM APIs directly without a framework.
 
 ---
 
 ## Framework Decorators
+
+### @framework_agent (Unified Auto-Detect)
+
+**Purpose:** Auto-detect the AI framework from function arguments and apply the correct instrumentation. This is the recommended single entry point for all supported frameworks.
+
+```python
+from rastir import framework_agent
+
+@framework_agent(agent_name="my_agent")
+def run(graph_or_agent, prompt):
+    return graph_or_agent.invoke(prompt)
+
+# Works with any supported framework:
+# - LangGraph CompiledGraph
+# - CrewAI Crew
+# - LlamaIndex ReActAgent / FunctionAgent
+# - ADK Runner / BaseAgent
+# - Strands Agent
+```
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `agent_name` | `str` | Function name | Agent identity label |
+
+**How it works:**
+1. At call time, scans function arguments for known framework objects
+2. Delegates to the matching `FrameworkInstrumentor` (same code path as the explicit decorators)
+3. If no framework object is found, falls back to a plain `@agent` span
+
+**Supports:** bare `@framework_agent` or `@framework_agent(...)`, sync/async.
+
+**When to use the explicit decorator instead:** When you want to make the framework dependency explicit in your code, or when you need framework-specific parameter support.
+
+---
 
 ### @langgraph_agent
 

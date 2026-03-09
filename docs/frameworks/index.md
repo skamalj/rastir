@@ -8,7 +8,17 @@ permalink: /frameworks/
 
 # Framework Integrations
 
-Rastir provides dedicated decorators for five major AI agent frameworks. Each decorator auto-discovers and wraps the framework's internal components — LLMs, tools, and nodes — for per-call observability.
+Rastir provides a **unified `@framework_agent`** decorator that auto-detects the framework from function arguments, plus dedicated decorators for each of the five supported AI agent frameworks. Each decorator auto-discovers and wraps the framework's internal components — LLMs, tools, and nodes — for per-call observability.
+
+**Recommended:** Use `@framework_agent` for automatic detection. Use the framework-specific decorator when you want explicit control.
+
+```python
+from rastir import framework_agent
+
+@framework_agent(agent_name="my_agent")
+def run(graph_or_agent, prompt):
+    return graph_or_agent.invoke(prompt)  # Works with any supported framework
+```
 
 | | LangGraph | CrewAI | LlamaIndex | ADK | Strands |
 |---|---|---|---|---|---|

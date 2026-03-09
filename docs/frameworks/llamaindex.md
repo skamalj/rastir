@@ -9,6 +9,8 @@ nav_order: 3
 
 Rastir provides `@llamaindex_agent` — a single decorator that instruments [LlamaIndex](https://www.llamaindex.ai/) agent workflows. It **auto-discovers and wraps** the agent's LLM and tools for per-call tracing — tokens, cost, model, provider, input/output — with no code changes inside your agents.
 
+> **Tip:** You can also use `@framework_agent` which auto-detects LlamaIndex agents from function arguments. The dedicated `@llamaindex_agent` decorator is still available for explicit control.
+
 ---
 
 ## Quick Start

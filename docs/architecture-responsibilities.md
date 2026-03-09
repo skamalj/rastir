@@ -215,38 +215,31 @@ User Code
 
 | Adapter | Kind | Priority | Request Metadata | Response Metadata | Streaming | Guardrails | Compliance Notes |
 |---|---|---|---|---|---|---|---|
-| **OpenAI** | provider | 150 | ✅ model, provider | ✅ model, tokens, finish_reason | ✅ | — | Fully compliant |
-| **Anthropic** | provider | 150 | ✅ model, provider | ✅ model, tokens, finish_reason | ✅ | — | Fully compliant |
-| **Bedrock** | provider | 140 | ✅ model, provider, guardrail config | ✅ model, tokens, guardrails | ✅ | ✅ | Fully compliant |
-| **Azure OpenAI** | provider | 155 | ✅ model, provider | ✅ model, tokens, finish_reason | ✅ | — | Fully compliant |
-| **Gemini** | provider | 150 | ✅ model, provider | ✅ model, tokens, finish_reason | ✅ (cumulative) | — | Fully compliant; streaming uses `usage_mode="cumulative"` |
-| **Groq** | provider | 152 | ✅ model, provider | ✅ model, tokens, finish_reason, queue_time | ✅ | — | Fully compliant; extracts Groq-specific timing attributes |
-| **Mistral** | provider | 150 | ✅ model, provider | ✅ model, tokens, finish_reason | ✅ | — | Fully compliant |
-| **Cohere** | provider | 150 | ✅ model, provider | ✅ model, tokens (v1+v2), finish_reason | ✅ | — | Fully compliant; supports both Cohere v1 and v2 SDKs |
-| **LangChain** | framework | 250 | ✅ model, provider from model objects | ✅ unwrap raw + LC metadata | ❌ | — | No stream methods; unwraps `RunnableBinding.bound` |
-| **LangGraph** | framework | 260 | ✅ model, provider via node/closure walk | ✅ unwrap AIMessage + state | ✅ | — | Fully compliant; deep graph traversal for model discovery |
-| **LlamaIndex** | framework | 240 | ❌ | ✅ unwrap raw + source_nodes | ✅ | — | Needs `can_handle_request` for LlamaIndex model objects |
-| **CrewAI** | framework | 245 | ❌ | ✅ token_usage, task metadata | ❌ | — | Needs request metadata; streaming overrides are no-ops |
-| **Retrieval** | provider | 50 | ❌ | ✅ retrieval doc count | ❌ | — | N/A — no LLM, no tokens |
-| **Tool** | provider | 10 | ❌ | ❌ (no-op) | ❌ | — | N/A — `can_handle()` returns False; metadata set by `@tool` decorator |
-| **Fallback** | fallback | 0 | ❌ | ✅ basic (unknown/unknown) | ❌ | — | Catch-all, minimal by design |
-
-### Framework Support Modules
-
-ADK and Strands use standalone support modules (`adk_support.py`, `strands_support.py`) instead of the adapter pipeline. They intercept framework events directly rather than going through the `resolve()` / `transform()` adapter chain.
-
-| Module | Decorator | LLM Discovery | Tool Discovery | Streaming | MCP Tracing | Notes |
-|---|---|---|---|---|---|---|
-| **ADK** | `@adk_agent` | ✅ via `run_async` event interception | ✅ via event interception | ✅ (async event stream) | ✅ traceparent injection | Detects `Runner`/`BaseAgent` objects; creates LLM + tool spans from ADK events |
-| **Strands** | `@strands_agent` | ✅ via `model.stream` wrapping | ✅ via `tool.stream` wrapping | ✅ (stream wrapping) | ✅ traceparent injection | Detects `Agent` objects; wraps model and tool stream methods |
+| **OpenAI** | provider | 150 | ❌ | ✅ model, tokens, finish_reason | ✅ | — | Needs `can_handle_request` for `ChatOpenAI` objects |
+| **Anthropic** | provider | 150 | ❌ | ✅ model, tokens, finish_reason | ✅ | — | Needs `can_handle_request` for `ChatAnthropic` objects |
+| **Bedrock** | provider | 140 | ✅ guardrail config | ✅ model, tokens, guardrails | ✅ | ✅ | Fully compliant |
+| **Azure OpenAI** | provider | 155 | ❌ | ✅ model, tokens, finish_reason | ✅ | — | Needs `can_handle_request` for Azure model objects |
+| **Gemini** | provider | 150 | ❌ | ✅ model, tokens | ✅ | — | Needs `can_handle_request` for Gemini model objects |
+| **Groq** | provider | 152 | ❌ | ✅ model, tokens | ✅ | — | Needs `can_handle_request` for Groq model objects |
+| **Mistral** | provider | 150 | ❌ | ✅ model, tokens | ✅ | — | Needs `can_handle_request` for Mistral model objects |
+| **Cohere** | provider | 150 | ❌ | ✅ model, tokens | ✅ | — | Needs `can_handle_request` for Cohere model objects |
+| **LangChain** | framework | 250 | ✅ model, provider from model objects | ✅ unwrap + model | ✅ (flag only) | — | Stream extraction defers to provider adapter |
+| **LangGraph** | framework | 260 | ✅ model, provider via node/closure walk | ✅ unwrap + model | ✅ | — | Fully compliant |
+| **LlamaIndex** | framework | 240 | ❌ | ✅ unwrap + model | ✅ | — | Needs `can_handle_request` for LlamaIndex model objects |
+| **CrewAI** | framework | 245 | ❌ | ✅ unwrap + model | ❌ | — | Needs request metadata + streaming |
+| **Retrieval** | provider | 50 | ❌ | ✅ retrieval metadata | ❌ | — | N/A — no LLM, no tokens |
+| **Tool** | provider | 10 | ❌ | ✅ tool metadata | ❌ | — | N/A — no LLM, no tokens |
+| **Fallback** | fallback | 0 | ❌ | ✅ basic model/provider | ❌ | — | Catch-all, minimal by design |
 
 ### Alignment Gaps (TODO)
 
-1. **LlamaIndex needs request metadata:** Should implement `can_handle_request()` / `extract_request_metadata()` to detect LlamaIndex model objects in function arguments.
+1. **Provider adapters need request-phase extraction:** OpenAI, Anthropic, Gemini, Groq, Mistral, Cohere, Azure OpenAI should implement `can_handle_request()` / `extract_request_metadata()` to detect their native SDK model objects in function arguments and return `model` + `provider`. This ensures model metadata survives even when the API call fails.
 
-2. **CrewAI needs request metadata:** Should implement request-phase extraction for CrewAI agent/crew objects. Streaming support is not applicable for CrewAI's batch execution model.
+2. **LlamaIndex needs request metadata:** Should scan args for LlamaIndex model objects.
 
-3. **LangChain streaming:** Does not implement `can_handle_stream()` / `extract_stream_delta()`. Stream processing relies on the underlying provider adapter after LangChain unwraps the response.
+3. **CrewAI needs request metadata + streaming:** Currently the least compliant framework adapter.
+
+4. **LangChain streaming:** Declares `supports_streaming = True` but does not implement `can_handle_stream()` / `extract_stream_delta()` — relies on response unwrapping to provider adapter for streaming.
 
 ---
 
@@ -350,9 +343,9 @@ MUST be present on the span for the corresponding metric to be meaningful:
 
 | # | Gap | Fix |
 |---|---|---|
-| 7 | LlamaIndex lacks request-phase metadata extraction | Implement `can_handle_request()` / `extract_request_metadata()` |
-| 8 | CrewAI lacks request-phase metadata extraction | Implement `can_handle_request()` / `extract_request_metadata()` |
-| 9 | LangChain does not implement stream methods (`can_handle_stream()` / `extract_stream_delta()`) | Either implement or document that stream processing defers to provider adapters |
+| 7 | Provider adapters (OpenAI, Anthropic, Gemini, Groq, Mistral, Cohere, Azure) lack request-phase extraction | Implement `can_handle_request()` / `extract_request_metadata()` on each |
+| 8 | LlamaIndex, CrewAI lack request metadata | Implement same |
+| 9 | LangChain declares streaming but doesn't implement stream methods | Either implement or remove the flag |
 
 ---
 
