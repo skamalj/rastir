@@ -231,6 +231,15 @@ User Code
 | **Tool** | provider | 10 | ❌ | ❌ (no-op) | ❌ | — | N/A — `can_handle()` returns False; metadata set by `@tool` decorator |
 | **Fallback** | fallback | 0 | ❌ | ✅ basic (unknown/unknown) | ❌ | — | Catch-all, minimal by design |
 
+### Framework Support Modules
+
+ADK and Strands use standalone support modules (`adk_support.py`, `strands_support.py`) instead of the adapter pipeline. They intercept framework events directly rather than going through the `resolve()` / `transform()` adapter chain.
+
+| Module | Decorator | LLM Discovery | Tool Discovery | Streaming | MCP Tracing | Notes |
+|---|---|---|---|---|---|---|
+| **ADK** | `@adk_agent` | ✅ via `run_async` event interception | ✅ via event interception | ✅ (async event stream) | ✅ traceparent injection | Detects `Runner`/`BaseAgent` objects; creates LLM + tool spans from ADK events |
+| **Strands** | `@strands_agent` | ✅ via `model.stream` wrapping | ✅ via `tool.stream` wrapping | ✅ (stream wrapping) | ✅ traceparent injection | Detects `Agent` objects; wraps model and tool stream methods |
+
 ### Alignment Gaps (TODO)
 
 1. **LlamaIndex needs request metadata:** Should implement `can_handle_request()` / `extract_request_metadata()` to detect LlamaIndex model objects in function arguments.
