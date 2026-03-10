@@ -53,17 +53,17 @@ react_agent (AGENT)
 ## Key Features
 
 - **Framework decorators** — `@framework_agent` (auto-detect), plus `@langgraph_agent`, `@crew_kickoff`, `@llamaindex_agent`, `@adk_agent`, `@strands_agent` with automatic LLM/tool discovery
-- **15 provider adapters** — OpenAI, Azure, Anthropic, Bedrock, Gemini, Cohere, Mistral, Groq, LangChain, LangGraph, LlamaIndex, CrewAI
-- **MCP distributed tracing** — `wrap(session)` and `@mcp_endpoint` for end-to-end tracing across MCP tool boundaries
+- **15 provider adapters** — OpenAI, Azure, Anthropic, Bedrock, Gemini, Cohere, Mistral, Groq, LangChain, LangGraph, LlamaIndex, CrewAI — auto-detected
+- **Two-phase enrichment** — metadata captured from function kwargs *before* the call, refined from response *after*. Survives API failures
+- **MCP distributed tracing** — `wrap(session)` propagates trace context across MCP tool boundaries — same `trace_id` links client and server
 - **Generic `wrap()`** — instrument any object (Redis, databases, MCP sessions) without decorator access
-- **Cost observability** — per-model USD cost tracking with `PricingRegistry`, pricing profiles
+- **Cost observability** — per-model USD cost tracking with `PricingRegistry`, pricing profiles, cost histograms
 - **Streaming TTFT** — Time-To-First-Token measurement on streaming LLM calls
 - **Guardrail tracking** — automatic AWS Bedrock guardrail violation metrics
-- **Error normalisation** — exceptions mapped to 6 fixed categories
-- **Prometheus metrics** — duration histograms, token counters, cost metrics, error rates
-- **7 Grafana dashboards** — ready-to-import dashboards for LLM, agent, cost, SRE, and system health
-- **OTLP export** — forward spans to Tempo, Jaeger, or any OTLP backend
-- **Self-hosted collector** — FastAPI server with sampling, backpressure, rate limiting, cardinality guards
+- **Error normalisation** — exceptions mapped to 6 fixed categories: timeout, rate_limit, validation_error, provider_error, internal_error, unknown
+- **Self-hosted collector** — FastAPI server you own. Prometheus `/metrics`, in-memory trace store, OTLP export to Tempo/Jaeger
+- **SRE budgets & burn rates** — error and cost budget tracking via Prometheus recording rules — SLO status, burn rates, days-to-exhaustion
+- **7 Grafana dashboards** — LLM Performance, Agent-Tool, Cost-TTFT, Evaluation, Guardrail, SRE Budgets, System Health
 
 ---
 
@@ -121,6 +121,9 @@ react_agent (AGENT)
 - [Dashboards](dashboards.md) — 7 Grafana dashboards
 - [Server](server.md) — Collector architecture, endpoints, sampling, OTLP
 - [Configuration](configuration.md) — Client & server config, environment variables
+
+### Deployment
+- [Deployment Guide](deployment.md) — Docker Compose, AWS, Azure, GCP, Kubernetes
 
 ### Reference
 - [Architecture](architecture-responsibilities.md) — Responsibility boundaries
