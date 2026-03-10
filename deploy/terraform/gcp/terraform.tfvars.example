@@ -1,0 +1,22 @@
+# ---------------------------------------------------------------------------
+# Example: copy to terraform.tfvars and edit
+# ---------------------------------------------------------------------------
+
+project_id = "my-gcp-project"
+region     = "us-central1"
+stack_name = "rastir"
+
+# Networking
+vpc_connector_cidr = "10.8.0.0/28"
+
+# Rastir Server
+rastir_image  = "ghcr.io/skamalj/rastir-server:latest"
+rastir_cpu    = "1"
+rastir_memory = "1Gi"
+rastir_port   = 8080
+
+# Prometheus
+prometheus_disk_size_gb = 50
+
+# Grafana
+grafana_admin_password = "CHANGE_ME"

@@ -217,6 +217,25 @@ Your Application                             Rastir Collector
 
 ---
 
+## Deployment
+
+Rastir ships with ready-to-use deployment for **local dev**, **3 clouds** (AWS, Azure, GCP), and **Kubernetes**:
+
+| Target | Tool | Command |
+|--------|------|---------|
+| **Local** | Docker Compose | `cd deploy/docker && ./deploy.sh` |
+| **AWS** | Terraform (ECS Fargate) | `cd deploy/terraform/aws && ./deploy.sh` |
+| **Azure** | Terraform (ACI) | `cd deploy/terraform/azure && ./deploy.sh` |
+| **GCP** | Terraform (Cloud Run) | `cd deploy/terraform/gcp && ./deploy.sh` |
+| **Kubernetes** | Helm | `cd deploy/k8s && ./deploy.sh` |
+
+Each deployment includes the full stack: **Rastir Server + OTel Collector + Prometheus + Grafana**.
+Traces go to Tempo (local/k8s), X-Ray (AWS), Application Insights (Azure), or Cloud Trace (GCP).
+
+See [Deployment Guide](https://skamalj.github.io/rastir/deployment) for details.
+
+---
+
 ## Documentation
 
 Full documentation at **[skamalj.github.io/rastir](https://skamalj.github.io/rastir/)**:
@@ -227,6 +246,7 @@ Full documentation at **[skamalj.github.io/rastir](https://skamalj.github.io/ras
 | **Core** | [Decorators](https://skamalj.github.io/rastir/decorators) · [Adapters](https://skamalj.github.io/rastir/adapters) · [wrap() & MCP](https://skamalj.github.io/rastir/wrap) · [MCP Tracing](https://skamalj.github.io/rastir/mcp-tracing) |
 | **Frameworks** | [LangGraph](https://skamalj.github.io/rastir/frameworks/langgraph) · [CrewAI](https://skamalj.github.io/rastir/frameworks/crewai) · [LlamaIndex](https://skamalj.github.io/rastir/frameworks/llamaindex) · [ADK](https://skamalj.github.io/rastir/frameworks/adk) · [Strands](https://skamalj.github.io/rastir/frameworks/strands) |
 | **Operations** | [Metrics](https://skamalj.github.io/rastir/metrics) · [Dashboards](https://skamalj.github.io/rastir/dashboards) · [Server](https://skamalj.github.io/rastir/server) · [Configuration](https://skamalj.github.io/rastir/configuration) |
+| **Deployment** | [Docker Compose](https://skamalj.github.io/rastir/deployment#docker-compose) · [AWS](https://skamalj.github.io/rastir/deployment#aws) · [Azure](https://skamalj.github.io/rastir/deployment#azure) · [GCP](https://skamalj.github.io/rastir/deployment#gcp) · [Kubernetes](https://skamalj.github.io/rastir/deployment#kubernetes) |
 | **Reference** | [Architecture](https://skamalj.github.io/rastir/architecture-responsibilities) · [Environment Variables](https://skamalj.github.io/rastir/environment-variables) · [Contributing Adapters](https://skamalj.github.io/rastir/contributing-adapters) |
 
 ---

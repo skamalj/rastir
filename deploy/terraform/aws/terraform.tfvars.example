@@ -1,0 +1,25 @@
+# ---------------------------------------------------------------------------
+# Example: copy to terraform.tfvars and edit
+# ---------------------------------------------------------------------------
+
+aws_region       = "ap-south-1"
+stack_name       = "rastir"
+vpc_id           = "vpc-xxxxxxxx"
+subnet_ids       = ["subnet-aaa", "subnet-bbb"]
+assign_public_ip = true
+
+# Rastir Server
+rastir_image  = "ghcr.io/skamalj/rastir-server:latest"
+rastir_cpu    = 512
+rastir_memory = 1024
+rastir_port   = 8080
+
+# Prometheus
+prometheus_cpu        = 512
+prometheus_memory     = 1024
+prometheus_storage_gb = 50
+
+# Grafana
+grafana_cpu            = 256
+grafana_memory         = 512
+grafana_admin_password = "CHANGE_ME"

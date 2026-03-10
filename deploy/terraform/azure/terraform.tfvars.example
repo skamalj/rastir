@@ -1,0 +1,26 @@
+# ---------------------------------------------------------------------------
+# Example: copy to terraform.tfvars and edit
+# ---------------------------------------------------------------------------
+
+location            = "eastus"
+resource_group_name = "rastir-rg"
+stack_name          = "rastir"
+
+# Networking
+vnet_address_space    = "10.0.0.0/16"
+subnet_address_prefix = "10.0.1.0/24"
+
+# Rastir Server
+rastir_image     = "ghcr.io/skamalj/rastir-server:latest"
+rastir_cpu       = 1
+rastir_memory_gb = 1
+rastir_port      = 8080
+
+# Traces → Application Insights
+appinsights_connection_string = "InstrumentationKey=xxx;IngestionEndpoint=https://xxx.in.applicationinsights.azure.com/"
+
+# Prometheus
+prometheus_storage_gb = 50
+
+# Grafana
+grafana_admin_password = "CHANGE_ME"

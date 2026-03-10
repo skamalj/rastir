@@ -1,0 +1,116 @@
+# ---------------------------------------------------------------------------
+# Rastir Helm Chart — values.yaml
+# ---------------------------------------------------------------------------
+
+# ── Global ────────────────────────────────────────────────────────────────
+
+namespace: rastir
+
+# Trace backend: tempo | xray | appinsights | cloudtrace
+traceBackend: tempo
+
+# ── Rastir Server ─────────────────────────────────────────────────────────
+
+rastirServer:
+  image:
+    repository: ghcr.io/skamalj/rastir-server
+    tag: latest
+    pullPolicy: IfNotPresent
+  port: 8080
+  replicas: 1
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  env: {}
+  # Additional environment variables as key-value pairs
+  #   RASTIR_SERVER_EVALUATION_ENABLED: "true"
+
+# ── OTel Collector ────────────────────────────────────────────────────────
+
+otelCollector:
+  image:
+    repository: otel/opentelemetry-collector-contrib
+    tag: latest
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  # AWS X-Ray settings (when traceBackend=xray)
+  aws:
+    region: us-east-1
+
+  # Azure App Insights settings (when traceBackend=appinsights)
+  azure:
+    connectionString: ""
+
+  # GCP Cloud Trace settings (when traceBackend=cloudtrace)
+  gcp:
+    projectId: ""
+
+# ── Tempo (deployed only when traceBackend=tempo) ─────────────────────────
+
+tempo:
+  image:
+    repository: grafana/tempo
+    tag: latest
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+  storage:
+    size: 10Gi
+    storageClass: ""
+
+# ── Prometheus ────────────────────────────────────────────────────────────
+
+prometheus:
+  image:
+    repository: prom/prometheus
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicas: 1
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 2Gi
+  retention: 30d
+  storage:
+    size: 50Gi
+    storageClass: ""
+
+# ── Grafana ───────────────────────────────────────────────────────────────
+
+grafana:
+  image:
+    repository: grafana/grafana
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  adminUser: admin
+  adminPassword: admin
+  storage:
+    size: 1Gi
+    storageClass: ""

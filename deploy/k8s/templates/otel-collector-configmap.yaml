@@ -1,0 +1,53 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "rastir.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: "0.0.0.0:4317"
+          http:
+            endpoint: "0.0.0.0:4318"
+
+    extensions:
+      health_check:
+        endpoint: "0.0.0.0:13133"
+
+    exporters:
+    {{- if eq .Values.traceBackend "tempo" }}
+      otlp/tempo:
+        endpoint: "tempo:4317"
+        tls:
+          insecure: true
+    {{- else if eq .Values.traceBackend "xray" }}
+      awsxray:
+        region: {{ .Values.otelCollector.aws.region | quote }}
+    {{- else if eq .Values.traceBackend "appinsights" }}
+      azuremonitor:
+        connection_string: {{ .Values.otelCollector.azure.connectionString | quote }}
+    {{- else if eq .Values.traceBackend "cloudtrace" }}
+      googlecloud:
+        project: {{ .Values.otelCollector.gcp.projectId | quote }}
+    {{- end }}
+
+    service:
+      extensions: [health_check]
+      pipelines:
+        traces:
+          receivers: [otlp]
+          exporters:
+          {{- if eq .Values.traceBackend "tempo" }}
+            - otlp/tempo
+          {{- else if eq .Values.traceBackend "xray" }}
+            - awsxray
+          {{- else if eq .Values.traceBackend "appinsights" }}
+            - azuremonitor
+          {{- else if eq .Values.traceBackend "cloudtrace" }}
+            - googlecloud
+          {{- end }}

@@ -1,0 +1,53 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-rules
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: prometheus
+    {{- include "rastir.labels" . | nindent 4 }}
+data:
+  alerts.yaml: |
+    groups:
+      - name: rastir-alerts
+        rules:
+          - alert: RastirQueueUtilizationHigh
+            expr: rastir_queue_utilization_percent > 80
+            for: 5m
+            labels:
+              severity: warning
+              component: rastir
+            annotations:
+              summary: "Rastir queue utilization is high ({{`{{ $value }}`}}%)"
+          - alert: RastirEvaluationDrops
+            expr: rate(rastir_evaluation_dropped_total[5m]) > 0
+            for: 5m
+            labels:
+              severity: warning
+              component: rastir
+            annotations:
+              summary: "Rastir evaluations are being dropped"
+          - alert: RastirExportFailures
+            expr: rate(rastir_export_failures_total[5m]) > 0
+            for: 5m
+            labels:
+              severity: critical
+              component: rastir
+            annotations:
+              summary: "Rastir OTLP export failures detected"
+          - alert: RastirLLMErrorSpike
+            expr: rate(rastir_errors_total{span_type="llm"}[5m]) / rate(rastir_llm_calls_total[5m]) > 0.1
+            for: 5m
+            labels:
+              severity: critical
+              component: rastir
+            annotations:
+              summary: "Rastir LLM error rate exceeded 10%"
+          - alert: RastirEvaluationFailureSpike
+            expr: rate(rastir_evaluation_failures_total[5m]) / rate(rastir_evaluation_runs_total[5m]) > 0.2
+            for: 5m
+            labels:
+              severity: warning
+              component: rastir
+            annotations:
+              summary: "Rastir evaluation failure rate exceeded 20%"

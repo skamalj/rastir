@@ -1,0 +1,107 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rastir-server
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: rastir-server
+    {{- include "rastir.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.rastirServer.replicas }}
+  selector:
+    matchLabels:
+      app: rastir-server
+  template:
+    metadata:
+      labels:
+        app: rastir-server
+        {{- include "rastir.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: rastir-server
+          image: "{{ .Values.rastirServer.image.repository }}:{{ .Values.rastirServer.image.tag }}"
+          imagePullPolicy: {{ .Values.rastirServer.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.rastirServer.port }}
+              protocol: TCP
+          env:
+            - name: RASTIR_SERVER_HOST
+              value: "0.0.0.0"
+            - name: RASTIR_SERVER_PORT
+              value: {{ .Values.rastirServer.port | quote }}
+            - name: RASTIR_SERVER_EXPORTER_OTLP_ENDPOINT
+              value: "http://localhost:4318"
+            - name: RASTIR_SERVER_EXEMPLARS_ENABLED
+              value: "true"
+            - name: RASTIR_SERVER_LOGGING_STRUCTURED
+              value: "true"
+            {{- range $key, $val := .Values.rastirServer.env }}
+            - name: {{ $key }}
+              value: {{ $val | quote }}
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.rastirServer.resources | nindent 12 }}
+
+        - name: otel-collector
+          image: "{{ .Values.otelCollector.image.repository }}:{{ .Values.otelCollector.image.tag }}"
+          imagePullPolicy: {{ .Values.otelCollector.image.pullPolicy }}
+          args:
+            - "--config=/etc/otel/config.yaml"
+          ports:
+            - name: otlp-grpc
+              containerPort: 4317
+              protocol: TCP
+            - name: otlp-http
+              containerPort: 4318
+              protocol: TCP
+            - name: health
+              containerPort: 13133
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          volumeMounts:
+            - name: otel-config
+              mountPath: /etc/otel
+              readOnly: true
+          resources:
+            {{- toYaml .Values.otelCollector.resources | nindent 12 }}
+
+      volumes:
+        - name: otel-config
+          configMap:
+            name: otel-collector-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rastir-server
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: rastir-server
+    {{- include "rastir.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.rastirServer.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    app: rastir-server
