@@ -16,11 +16,11 @@ Understanding this difference is key to choosing the right decorator.
 
 **Core decorators** wrap **your function**. They record timing from function entry/exit. `@llm` uses a two-phase strategy:
 
-1. **Interceptor phase** — `@llm` scans the decorated function for known LLM client objects (OpenAI, Azure OpenAI, Anthropic, Google GenAI, Cohere, Mistral, Groq, LangChain, Bedrock) in arguments, closures, and globals. When found, the client's call method is temporarily monkey-patched so the interceptor sees the **full provider response** — model, tokens, cost — regardless of what your function returns. Interceptors are automatically removed after each call.
+1. **Request phase** — `@llm` scans the decorated function for known LLM client objects (OpenAI, Azure OpenAI, Anthropic, Google GenAI, Cohere, Mistral, Groq, LangChain, Bedrock) in arguments, closures, and globals. When found, the client's call is intercepted to capture the **full provider response** — model, tokens, cost — regardless of what your function returns.
 
-2. **Return-value phase** — the adapter pipeline also inspects the return value. If your function returns the raw provider response, the adapter extracts metadata from it. If the interceptor already captured the data, the return-value phase is a no-op.
+2. **Response phase** — the adapter pipeline also inspects the return value. If your function returns the raw provider response, the adapter extracts metadata from it. If the request phase already captured the data, the response phase is a no-op.
 
-**Framework decorators** reach inside the framework's objects and **monkey-patch the model/tool methods directly**. They always see the full provider response regardless of what your code does with it — model, tokens, cost, and latency are always captured.
+**Framework decorators** reach inside the framework's objects and wrap the model/tool methods directly. They always see the full provider response — model, tokens, cost, and latency are always captured.
 
 ### What each decorator records
 
@@ -35,7 +35,7 @@ Every span always records: **duration, status, trace_id, span_id, parent_span_id
 | `@metric` | Core | — | — | — | — | — | Creates a metric span with counters and histograms |
 | `@langgraph_agent` | Framework | ✅ | ✅ | ✅ | ✅ | ✅ | **Wraps model/tool objects directly** — always captures full data |
 | `@crew_kickoff` | Framework | ✅ | ✅ | ✅ | ✅ | ✅ | **Wraps model/tool objects directly** — always captures full data |
-| `@llamaindex_agent` | Framework | ✅ | ✅ | ✅ | ✅ | ✅ | Uses `wrap()` on objects — same reliability as framework wrapping |
+| `@llamaindex_agent` | Framework | ✅ | ✅ | ✅ | ✅ | ✅ | **Wraps agent's LLM/tool objects directly** — always captures full data |
 | `@adk_agent` | Framework | ✅ | ✅ | ✅ | ✅ | ✅ | **Wraps ADK Runner/Agent objects** — intercepts events for LLM/tool spans |
 | `@strands_agent` | Framework | ✅ | ✅ | ✅ | ✅ | ✅ | **Wraps Strands Agent objects** — intercepts model/tool streams |
 
@@ -65,7 +65,7 @@ The interceptor works with clients passed as arguments, stored in closures, or d
 | **Any supported framework** | `@framework_agent` | **Recommended.** Auto-detects LangGraph, CrewAI, LlamaIndex, ADK, or Strands from function arguments and instruments everything. |
 | Building with **LangGraph** | `@langgraph_agent` | Explicit LangGraph instrumentation. Auto-discovers LLMs, tools, and nodes inside the compiled graph. |
 | Building with **CrewAI** | `@crew_kickoff` | Explicit CrewAI instrumentation. Auto-discovers LLMs and tools on every agent in the Crew. |
-| Building with **LlamaIndex** | `@llamaindex_agent` | Explicit LlamaIndex instrumentation. Creates the agent span; you pre-wrap LLMs/tools with `wrap()`. |
+| Building with **LlamaIndex** | `@llamaindex_agent` | Explicit LlamaIndex instrumentation. Auto-discovers LLMs and tools on the agent. |
 | Building with **Google ADK** | `@adk_agent` | Explicit ADK instrumentation. Auto-discovers ADK Runner/Agent objects and intercepts events. |
 | Building with **Strands** | `@strands_agent` | Explicit Strands instrumentation. Auto-discovers Strands Agent objects and intercepts model/tool streams. |
 | Building your **own agent loop** | `@agent` + `@llm` | Full manual control — you decorate each function yourself. Use `@trace` for non-LLM functions. |
@@ -177,19 +177,17 @@ def run(crew):
 
 ### @llamaindex_agent
 
-**Purpose:** Create an agent span around LlamaIndex agent execution. You pre-wrap LLMs and tools with `wrap()` before creating the agent.
+**Purpose:** Instrument a LlamaIndex agent. Auto-discovers the agent's LLM and tools and wraps them for tracing — no manual `wrap()` needed.
 
 ```python
-from rastir import llamaindex_agent, wrap
+from rastir import llamaindex_agent
 from llama_index.core.agent import ReActAgent
 
-llm = wrap(OpenAI(model="gpt-4o"), span_type="llm")
-tools = [wrap(t, span_type="tool") for t in my_tools]
-agent = ReActAgent.from_tools(tools, llm=llm)
+agent = ReActAgent(llm=llm, tools=tools, streaming=False)
 
 @llamaindex_agent(agent_name="qa_agent")
-def run(agent, query):
-    return agent.chat(query)
+async def run(agent, query):
+    return await agent.run(query)
 ```
 
 **Parameters:**

@@ -59,9 +59,9 @@ output "prometheus_config" {
     scrape_configs = [{
       job_name     = "rastir-server"
       metrics_path = "/metrics"
+      honor_labels = true
       static_configs = [{
         targets = [var.rastir_server_endpoint]
-        labels  = { service = "rastir" }
       }]
     }]
   })

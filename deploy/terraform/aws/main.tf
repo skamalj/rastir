@@ -45,6 +45,7 @@ module "rastir_server" {
 
 module "otel_collector" {
   source        = "../modules/otel-collector"
+  image         = var.adot_image
   trace_backend = "xray"
   aws_region    = var.aws_region
 }
@@ -57,11 +58,12 @@ module "prometheus" {
 }
 
 module "grafana" {
-  source         = "../modules/grafana"
-  image          = var.grafana_image
-  admin_password = var.grafana_admin_password
-  prometheus_url = "http://prometheus:9090"
-  tempo_url      = ""  # X-Ray used instead of Tempo
+  source           = "../modules/grafana"
+  image            = var.grafana_image
+  admin_password   = var.grafana_admin_password
+  prometheus_url   = "http://prometheus:9090"
+  tempo_url        = ""  # X-Ray used instead of Tempo
+  xray_datasource  = { region = var.aws_region }
 }
 
 # ── Data ──────────────────────────────────────────────────────────────────
@@ -95,7 +97,7 @@ resource "aws_ecs_cluster" "this" {
 resource "aws_security_group" "rastir" {
   name_prefix = "${var.stack_name}-"
   vpc_id      = var.vpc_id
-  description = "Rastir stack — intra-VPC communication"
+  description = "Rastir stack - intra-VPC communication"
 
   ingress {
     description = "Rastir server"
@@ -171,7 +173,7 @@ resource "aws_iam_role" "task" {
 }
 
 resource "aws_iam_role_policy" "task_xray" {
-  name = "xray-write"
+  name = "xray-access"
   role = aws_iam_role.task.id
   policy = jsonencode({
     Version = "2012-10-17"
@@ -182,6 +184,14 @@ resource "aws_iam_role_policy" "task_xray" {
         "xray:PutTelemetryRecords",
         "xray:GetSamplingRules",
         "xray:GetSamplingTargets",
+        "xray:BatchGetTraces",
+        "xray:GetTraceSummaries",
+        "xray:GetTraceGraph",
+        "xray:GetGroups",
+        "xray:GetGroup",
+        "xray:GetTimeSeriesServiceStatistics",
+        "xray:GetInsightSummaries",
+        "xray:GetServiceGraph",
       ]
       Resource = "*"
     }]
@@ -265,16 +275,35 @@ resource "aws_cloudwatch_log_group" "grafana" {
 locals {
   rastir_config = module.rastir_server.container_config
   otel_config   = module.otel_collector.container_config
+
+  # Prometheus recording rules & alerts
+  rules_dir                = "${path.module}/../../../deploy/docker/rules"
+  prometheus_rules_content = file("${local.rules_dir}/rastir-sre-rules.yml")
+  prometheus_alerts_content = file("${local.rules_dir}/alerts.yaml")
+
+  # Grafana dashboards — compressed for env var transport
+  dashboard_dir = "${path.module}/../../../grafana/dashboards"
+  dashboard_files = {
+    for f in fileset(local.dashboard_dir, "*.json") :
+    replace(f, ".json", "") => base64gzip(
+      replace(file("${local.dashboard_dir}/${f}"), "$${DS_PROMETHEUS}", "prometheus")
+    )
+  }
 }
 
 resource "aws_ecs_task_definition" "rastir" {
   family                   = "${var.stack_name}-rastir"
-  cpu                      = var.rastir_cpu + 256  # sidecar overhead
-  memory                   = var.rastir_memory + 512
+  cpu                      = 1024  # rastir + ADOT sidecar
+  memory                   = 2048
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
   execution_role_arn       = aws_iam_role.execution.arn
   task_role_arn            = aws_iam_role.task.arn
+
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = "ARM64"
+  }
 
   container_definitions = jsonencode([
     {
@@ -339,13 +368,19 @@ resource "aws_ecs_task_definition" "prometheus" {
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
   execution_role_arn       = aws_iam_role.execution.arn
+  task_role_arn            = aws_iam_role.task.arn
+
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = "ARM64"
+  }
 
   volume {
     name = "prometheus-data"
     efs_volume_configuration {
       file_system_id     = aws_efs_file_system.prometheus.id
       transit_encryption = "ENABLED"
-      authorization_configuration {
+      authorization_config {
         access_point_id = aws_efs_access_point.prometheus.id
         iam             = "DISABLED"
       }
@@ -366,11 +401,15 @@ resource "aws_ecs_task_definition" "prometheus" {
         protocol      = "tcp"
         name          = "prometheus-http"
       }]
-      command = module.prometheus.container_config.command
-      environment = [{
-        name  = "PROMETHEUS_CONFIG"
-        value = module.prometheus.prometheus_config
-      }]
+      entryPoint = ["/bin/sh", "-c"]
+      command = [
+        "echo \"$PROMETHEUS_CONFIG\" > /etc/prometheus/prometheus.yml && mkdir -p /etc/prometheus/rules && echo \"$PROMETHEUS_RULES\" > /etc/prometheus/rules/rastir-sre-rules.yml && echo \"$PROMETHEUS_ALERTS\" > /etc/prometheus/rules/alerts.yaml && exec /bin/prometheus --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/prometheus --storage.tsdb.retention.time=30d --web.enable-lifecycle --enable-feature=exemplar-storage"
+      ]
+      environment = [
+        { name = "PROMETHEUS_CONFIG", value = module.prometheus.prometheus_config },
+        { name = "PROMETHEUS_RULES",  value = local.prometheus_rules_content },
+        { name = "PROMETHEUS_ALERTS", value = local.prometheus_alerts_content },
+      ]
       mountPoints = [
         { sourceVolume = "prometheus-data", containerPath = "/prometheus", readOnly = false },
       ]
@@ -386,6 +425,38 @@ resource "aws_ecs_task_definition" "prometheus" {
   ])
 }
 
+# ── EFS for Grafana ───────────────────────────────────────────────────────
+
+resource "aws_efs_file_system" "grafana" {
+  creation_token = "${var.stack_name}-grafana"
+  encrypted      = true
+
+  tags = { Name = "${var.stack_name}-grafana" }
+}
+
+resource "aws_efs_mount_target" "grafana" {
+  count           = length(var.subnet_ids)
+  file_system_id  = aws_efs_file_system.grafana.id
+  subnet_id       = var.subnet_ids[count.index]
+  security_groups = [aws_security_group.rastir.id]
+}
+
+resource "aws_efs_access_point" "grafana" {
+  file_system_id = aws_efs_file_system.grafana.id
+  posix_user {
+    uid = 472  # grafana user
+    gid = 0
+  }
+  root_directory {
+    path = "/grafana"
+    creation_info {
+      owner_uid   = 472
+      owner_gid   = 0
+      permissions = "755"
+    }
+  }
+}
+
 # ── Task Definition: Grafana ─────────────────────────────────────────────
 
 resource "aws_ecs_task_definition" "grafana" {
@@ -395,18 +466,50 @@ resource "aws_ecs_task_definition" "grafana" {
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
   execution_role_arn       = aws_iam_role.execution.arn
+  task_role_arn            = aws_iam_role.task.arn
+
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = "ARM64"
+  }
+
+  volume {
+    name = "grafana-data"
+    efs_volume_configuration {
+      file_system_id     = aws_efs_file_system.grafana.id
+      transit_encryption = "ENABLED"
+      authorization_config {
+        access_point_id = aws_efs_access_point.grafana.id
+        iam             = "DISABLED"
+      }
+    }
+  }
 
   container_definitions = jsonencode([
     {
       name      = "grafana"
       image     = module.grafana.container_config.image
       essential = true
+      entryPoint = ["/bin/sh", "-c"]
+      command = [
+        "echo \"$GRAFANA_DATASOURCES\" > /etc/grafana/provisioning/datasources/datasources.yaml && echo \"$GRAFANA_DASHBOARDS_PROVIDER\" > /etc/grafana/provisioning/dashboards/dashboards.yaml && mkdir -p /var/lib/grafana/dashboards && for var in $(env | grep '^DASH_' | cut -d= -f1); do fname=$(echo $var | sed 's/^DASH_//' | tr '_' '-'); printenv $var | base64 -d | gunzip > /var/lib/grafana/dashboards/$fname.json; done && exec /run.sh"
+      ]
       portMappings = [{
         containerPort = 3000
         protocol      = "tcp"
         name          = "grafana-http"
       }]
-      environment = [for k, v in module.grafana.container_config.environment : { name = k, value = v }]
+      environment = concat(
+        [for k, v in module.grafana.container_config.environment : { name = k, value = v }],
+        [
+          { name = "GRAFANA_DATASOURCES",        value = module.grafana.datasources_config },
+          { name = "GRAFANA_DASHBOARDS_PROVIDER", value = module.grafana.dashboards_provider_config },
+        ],
+        [for name, content in local.dashboard_files : { name = "DASH_${replace(name, "-", "_")}", value = content }]
+      )
+      mountPoints = [
+        { sourceVolume = "grafana-data", containerPath = "/var/lib/grafana", readOnly = false },
+      ]
       logConfiguration = {
         logDriver = "awslogs"
         options = {
@@ -449,11 +552,12 @@ resource "aws_ecs_service" "rastir" {
 }
 
 resource "aws_ecs_service" "prometheus" {
-  name            = "prometheus"
-  cluster         = aws_ecs_cluster.this.id
-  task_definition = aws_ecs_task_definition.prometheus.arn
-  desired_count   = 1
-  launch_type     = "FARGATE"
+  name                   = "prometheus"
+  cluster                = aws_ecs_cluster.this.id
+  task_definition        = aws_ecs_task_definition.prometheus.arn
+  desired_count          = 1
+  launch_type            = "FARGATE"
+  enable_execute_command = true
 
   network_configuration {
     subnets          = var.subnet_ids
@@ -477,11 +581,12 @@ resource "aws_ecs_service" "prometheus" {
 }
 
 resource "aws_ecs_service" "grafana" {
-  name            = "grafana"
-  cluster         = aws_ecs_cluster.this.id
-  task_definition = aws_ecs_task_definition.grafana.arn
-  desired_count   = 1
-  launch_type     = "FARGATE"
+  name                   = "grafana"
+  cluster                = aws_ecs_cluster.this.id
+  task_definition        = aws_ecs_task_definition.grafana.arn
+  desired_count          = 1
+  launch_type            = "FARGATE"
+  enable_execute_command = true
 
   network_configuration {
     subnets          = var.subnet_ids
@@ -500,4 +605,6 @@ resource "aws_ecs_service" "grafana" {
       }
     }
   }
+
+  depends_on = [aws_efs_mount_target.grafana]
 }

@@ -114,17 +114,13 @@ Each agent's `llm` attribute is wrapped with a transparent proxy (`include=["cal
 | Attribute | Source | Example |
 |-----------|--------|---------|
 | `model` | LLM object's `model_name` / `model` attribute | `gpt-4o-mini` |
-| `provider` | Module path detection via `_MODULE_PROVIDER_MAP` | `openai` |
-| `tokens_input` | Per-call delta from CrewAI's cumulative `_token_usage` | `235` |
-| `tokens_output` | Per-call delta from CrewAI's cumulative `_token_usage` | `70` |
+| `provider` | Auto-detected from LLM module path | `openai` |
+| `tokens_input` | Per-call token count | `235` |
+| `tokens_output` | Per-call token count | `70` |
 | `cost_usd` | Calculated from tokens × pricing registry rates | `0.000077` |
 | `input` | Prompt messages passed to `.call()` | System + user messages |
-| `output` | Final text response (on the last call in a tool-use loop) | `"The answer is..."` |
+| `output` | Final text response | `"The answer is..."` |
 | `agent` | Inherited from `@crew_kickoff` agent span | `research_crew` |
-
-**Token extraction:** CrewAI's `.call()` method returns a plain string (not an OpenAI `ChatCompletion` object), so standard token extraction adapters cannot read usage directly. Rastir solves this by **snapshotting** the LLM instance's internal `_token_usage` dict before each call and computing a per-call delta after — giving accurate per-call prompt and completion token counts.
-
-**Provider detection:** CrewAI's LLM classes live at `crewai.llms.providers.<provider>.completion`. Rastir maps these module paths to provider names: `openai`, `anthropic`, `gemini`, `groq`.
 
 ### Tools
 
@@ -143,8 +139,6 @@ Each agent's tools have their `.run()` method **patched in-place** via `tool.__d
 | `tool.input` | Keyword arguments passed by CrewAI to `.run(**kwargs)` | `{'city': 'Tokyo'}` |
 | `tool.output` | Return value from the tool function | `"15°C, rainy"` |
 | `agent` | Inherited from `@crew_kickoff` agent span | `research_crew` |
-
-**Why in-place patching?** CrewAI's `Agent` is a Pydantic model with a `tools` field validated as `list[BaseTool]`. Proxy wrappers are stripped by Pydantic validation. Rastir patches `.run()` directly on each tool's instance `__dict__`, which bypasses Pydantic's `__setattr__` while being fully transparent to CrewAI's tool executor.
 
 ### Skip Already-Wrapped Objects
 
@@ -189,8 +183,6 @@ research_crew (AGENT)
 │   └── mcpserver:get_weather (TOOL)               ← server span (same trace)
 ├── crewai.Researcher.llm.call (LLM)
 ```
-
-**How it works:** When `@crew_kickoff` patches `tool.run()`, the wrapper calls `start_span()` which sets the tool span as the active span in the ContextVar. Inside the tool body, `traceparent_headers()` reads the current span and returns a `{"traceparent": "00-<trace_id>-<span_id>-01"}` header. The MCP server's `RastirMCPMiddleware` reads this header and creates a child span linked to the client tool span.
 
 ### Native MCP via `mcps=[]`
 

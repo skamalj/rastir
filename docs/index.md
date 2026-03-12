@@ -53,7 +53,7 @@ react_agent (AGENT)
 ## Key Features
 
 - **Framework decorators** — `@framework_agent` (auto-detect), plus `@langgraph_agent`, `@crew_kickoff`, `@llamaindex_agent`, `@adk_agent`, `@strands_agent` with automatic LLM/tool discovery
-- **15 provider adapters** — OpenAI, Azure, Anthropic, Bedrock, Gemini, Cohere, Mistral, Groq, LangChain, LangGraph, LlamaIndex, CrewAI — auto-detected
+- **8 provider adapters** — OpenAI, Azure OpenAI, Anthropic, Bedrock, Gemini, Cohere, Mistral, Groq — auto-detected from client module paths
 - **Two-phase enrichment** — metadata captured from function kwargs *before* the call, refined from response *after*. Survives API failures
 - **MCP distributed tracing** — `wrap(session)` propagates trace context across MCP tool boundaries — same `trace_id` links client and server
 - **Generic `wrap()`** — instrument any object (Redis, databases, MCP sessions) without decorator access

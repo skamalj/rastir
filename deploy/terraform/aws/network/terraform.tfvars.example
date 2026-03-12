@@ -1,0 +1,18 @@
+# ---------------------------------------------------------------------------
+# Example Variables — Rastir AWS Network Stack
+# ---------------------------------------------------------------------------
+# cp terraform.tfvars.example terraform.tfvars
+# Edit values below, then: terraform init && terraform apply
+# ---------------------------------------------------------------------------
+
+aws_region  = "ap-south-1"
+stack_name  = "rastir"
+
+# VPC CIDR — default 10.0.0.0/16 provides 65k addresses
+# vpc_cidr = "10.0.0.0/16"
+
+# Private subnet CIDRs — one per AZ, must be within vpc_cidr
+# subnet_cidrs = ["10.0.1.0/24", "10.0.2.0/24"]
+
+# Availability zones — auto-detected if left empty
+# availability_zones = ["ap-south-1a", "ap-south-1b"]

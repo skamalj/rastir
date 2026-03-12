@@ -5,7 +5,7 @@
 variable "aws_region" {
   description = "AWS region"
   type        = string
-  default     = "us-east-1"
+  default     = "ap-south-1"
 }
 
 variable "stack_name" {
@@ -35,7 +35,7 @@ variable "assign_public_ip" {
 variable "rastir_image" {
   description = "Rastir server container image"
   type        = string
-  default     = "ghcr.io/skamalj/rastir-server:latest"
+  default     = "719030485523.dkr.ecr.ap-south-1.amazonaws.com/rastir-server:latest"
 }
 
 variable "rastir_cpu" {
@@ -62,12 +62,20 @@ variable "rastir_env" {
   default     = {}
 }
 
+# --- ADOT Collector ---
+
+variable "adot_image" {
+  description = "ADOT Collector image (must be in ECR for private VPC)"
+  type        = string
+  default     = "719030485523.dkr.ecr.ap-south-1.amazonaws.com/adot-collector:latest"
+}
+
 # --- Prometheus ---
 
 variable "prometheus_image" {
   description = "Prometheus image"
   type        = string
-  default     = "prom/prometheus:latest"
+  default     = "719030485523.dkr.ecr.ap-south-1.amazonaws.com/prom:latest"
 }
 
 variable "prometheus_cpu" {
@@ -93,7 +101,7 @@ variable "prometheus_storage_gb" {
 variable "grafana_image" {
   description = "Grafana image"
   type        = string
-  default     = "grafana/grafana:latest"
+  default     = "719030485523.dkr.ecr.ap-south-1.amazonaws.com/grafana:latest"
 }
 
 variable "grafana_cpu" {

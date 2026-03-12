@@ -115,20 +115,14 @@ Each agent's `llm` attribute (via `._llm` or `.llm`) is wrapped with a transpare
 
 | Attribute | Source | Example |
 |-----------|--------|---------|
-| `model` | LlamaIndex adapter unwraps `ChatResponse.message.raw` to access the underlying provider response | `gpt-4o-mini-2024-07-18` |
-| `provider` | Module path detection — `llama_index.llms.openai` → `openai` | `openai` |
-| `tokens_input` | Extracted from the raw provider response's usage object | `634` |
-| `tokens_output` | Extracted from the raw provider response's usage object | `45` |
+| `model` | Extracted from the underlying provider response | `gpt-4o-mini-2024-07-18` |
+| `provider` | Auto-detected from LLM module path (e.g. `llama_index.llms.openai` → `openai`) | `openai` |
+| `tokens_input` | Extracted from the provider response's usage object | `634` |
+| `tokens_output` | Extracted from the provider response's usage object | `45` |
 | `cost_usd` | Calculated from tokens × pricing registry rates | `0.000122` |
 | `input` | Messages passed to the LLM — `messages`, `user_msg`, or `chat_history` kwargs | `system: You are designed to help...` |
 | `output` | Response text, or `tool_call: func(args)` for tool-calling responses | `tool_call: add({"a": 3, "b": 5})` |
 | `agent` | Inherited from `@llamaindex_agent` span | `calc_agent` |
-
-**Why `chat_with_tools`?** `FunctionAgent` uses `llm.achat_with_tools()` instead of `llm.achat()`. Without wrapping these methods, FunctionAgent LLM calls would be invisible.
-
-**Provider detection:** LlamaIndex LLM classes live at `llama_index.llms.<provider>`. Rastir maps these module paths: `openai`, `anthropic`, `gemini`, `azure_openai`, `bedrock`, `mistral`, `groq`, `cohere`.
-
-**Token extraction:** LlamaIndex wraps provider responses in `ChatResponse`. The LlamaIndex adapter unwraps `ChatResponse.message.raw` to access the original provider response (e.g., OpenAI `ChatCompletion`), which the provider adapter then extracts tokens from.
 
 ### Tools
 
@@ -147,8 +141,6 @@ Each agent's tools (via `._tools` or `.tools`) are wrapped with a transparent pr
 | `tool.input` | Keyword arguments passed to `.acall(**kwargs)` | `{'a': 3, 'b': 5}` |
 | `tool.output` | Return value from the tool function | `8` |
 | `agent` | Inherited from `@llamaindex_agent` span | `calc_agent` |
-
-**Why `acall`?** LlamaIndex invokes tools via `tool.acall(**tool_input)` (async), not `tool.call()`. Without wrapping `acall`, tool spans would not appear.
 
 ### Skip Already-Wrapped Objects
 
@@ -179,7 +171,7 @@ async def run(agent, query):
 
 ### Trace Propagation to MCP Servers
 
-`@llamaindex_agent` auto-discovers `BasicMCPClient` instances in agent tools and injects the `traceparent` header. This also updates the underlying `httpx.AsyncClient` headers so the trace context reaches the MCP server's HTTP transport.
+`@llamaindex_agent` auto-discovers `BasicMCPClient` instances in agent tools and injects the `traceparent` header, enabling end-to-end distributed tracing with a single `trace_id`.
 
 This produces a fully linked trace:
 
@@ -190,8 +182,6 @@ mcp_agent (AGENT)
 │   └── get_weather.acall (TOOL)           ← client tool span
 ├── llamaindex.ReActAgent.llm.achat (LLM)  — final answer
 ```
-
-**How it works:** The decorator discovers `BasicMCPClient` objects, sets `traceparent` on both `client.headers` and `client.http_client.headers`. When the MCP tool calls the server, the `traceparent` header links server-side spans back to the client trace.
 
 ---
 

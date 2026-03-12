@@ -68,7 +68,10 @@ Supports bare `@strands_agent` or `@strands_agent(agent_name="...")`, sync and a
 
 ## MCP Tool Support
 
-Strands agents that use MCP tools are automatically detected. Rastir discovers MCP client objects on the agent and injects `traceparent` headers for distributed tracing across MCP boundaries.
+Strands agents that use MCP tools work with Rastir's generic MCP client discovery. If an MCP client object is passed as a function argument or captured in a closure, Rastir can discover it and inject the `traceparent` header.
+
+{: .note }
+> Strands uses its own MCP integration (`strands.tools.mcp`). For automatic trace propagation, pass the MCP client as a function argument to the decorated function.
 
 ---
 
@@ -76,12 +79,134 @@ Strands agents that use MCP tools are automatically detected. Rastir discovers M
 
 | Data | Source |
 |------|--------|
-| Model name | From `model.model_id`, `model.model_name`, or model string |
-| Provider | Inferred from model class module (e.g. `BedrockModel` → `bedrock`) |
+| Model name | From `model.config["model_id"]`, `model.model_name`, or model string |
+| Provider | Auto-detected from model class module (e.g. `strands.models.bedrock` → `bedrock`) |
 | Input/output tokens | Accumulated from stream chunks |
 | Tool name | From tool object name or function name |
 | Duration | Wall-clock timing per span |
+| Streaming TTFT | Time-To-First-Token on streaming LLM calls |
 | Errors | Exception capture with normalised error type |
+
+---
+
+## Coding Patterns
+
+### Pattern 1: Basic agent (most common)
+
+```python
+from strands import Agent
+from strands.models.bedrock import BedrockModel
+
+model = BedrockModel(model_id="us.anthropic.claude-sonnet-4-20250514")
+agent = Agent(model=model, tools=[search_tool])
+
+@strands_agent(agent_name="research")
+def run(agent, prompt):
+    return agent(prompt)
+
+result = run(agent, "Research quantum computing")
+```
+
+### Pattern 2: Bare decorator (name defaults to function name)
+
+```python
+@strands_agent
+def research_pipeline(agent, prompt):
+    return agent(prompt)
+
+# Agent span name will be "research_pipeline"
+```
+
+### Pattern 3: With OpenAI model
+
+```python
+from strands.models.openai import OpenAIModel
+
+model = OpenAIModel(model="gpt-4o")
+agent = Agent(model=model, tools=[calculator])
+
+@strands_agent(agent_name="calc_agent")
+def run(agent, prompt):
+    return agent(prompt)
+```
+
+### Pattern 4: Async invocation
+
+```python
+@strands_agent(agent_name="async_agent")
+async def run(agent, prompt):
+    return await agent.invoke_async(prompt)
+```
+
+### Pattern 5: Multiple agents
+
+```python
+@strands_agent(agent_name="researcher")
+def research(agent, prompt):
+    return agent(prompt)
+
+@strands_agent(agent_name="writer")
+def write(agent, prompt):
+    return agent(prompt)
+
+research_result = research(research_agent, "Find trends")
+final = write(writer_agent, f"Summarize: {research_result}")
+```
+
+### Pattern 6: Cost tracking with pricing registry
+
+```python
+from rastir import configure
+from rastir.config import get_pricing_registry
+
+configure(service="my-app", push_url="...", enable_cost_calculation=True)
+
+pr = get_pricing_registry()
+pr.register("bedrock", "us.anthropic.claude-sonnet-4-20250514", input_price=3.0, output_price=15.0)
+
+@strands_agent(agent_name="research")
+def run(agent, prompt):
+    return agent(prompt)
+# Each LLM span will now include cost_usd
+```
+
+---
+
+## Span Hierarchy
+
+```
+@strands_agent agent span
+│
+├── LLM  us.anthropic.claude-sonnet-4-20250514
+│   → model, provider, tokens_in, tokens_out, latency, ttft
+│
+├── TOOL search_tool
+│   → tool_name, latency
+│
+├── LLM  us.anthropic.claude-sonnet-4-20250514
+│   → follow-up call with tool results
+│
+└── (more iterations as the agent loops)
+```
+
+All child spans inherit the `agent` label from the outer span, so Prometheus metrics are grouped by agent.
+
+---
+
+## Supported Model Providers
+
+Strands supports multiple model backends. Rastir auto-detects the provider from the model class module:
+
+| Model class | Provider label |
+|-------------|---------------|
+| `BedrockModel` | `bedrock` |
+| `OpenAIModel` | `openai` |
+| `AnthropicModel` | `anthropic` |
+| `GeminiModel` | `gemini` |
+| `MistralModel` | `mistral` |
+| `OllamaModel` | `ollama` |
+| `SageMakerModel` | `bedrock` |
+| `LiteLLMModel` | `litellm` |
 
 ---
 

@@ -11,7 +11,7 @@ datasources:
     jsonData:
       httpMethod: POST
       exemplarTraceIdDestinations:
-        - name: traceID
+        - name: trace_id
           datasourceUid: tempo
           urlDisplayLabel: View Trace
 

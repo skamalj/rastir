@@ -26,6 +26,7 @@ import asyncio
 import functools
 import inspect
 import logging
+import time
 from typing import Any, Optional
 
 from rastir.context import end_span, get_current_agent, start_span
@@ -366,8 +367,12 @@ async def _wrap_async_generator(
     wrapped_obj: Any, usage_before: Any,
 ) -> Any:
     """Wrap an async generator so the span stays open until exhaustion."""
+    first_chunk_seen = False
     try:
         async for item in agen:
+            if is_llm and not first_chunk_seen:
+                first_chunk_seen = True
+                _record_ttft_wrap(span)
             yield item
         span.finish(SpanStatus.OK)
     except GeneratorExit:
@@ -389,8 +394,13 @@ def _wrap_generator(
     wrapped_obj: Any, usage_before: Any,
 ) -> Any:
     """Wrap a sync generator so the span stays open until exhaustion."""
+    first_chunk_seen = False
     try:
-        yield from gen
+        for item in gen:
+            if is_llm and not first_chunk_seen:
+                first_chunk_seen = True
+                _record_ttft_wrap(span)
+            yield item
         span.finish(SpanStatus.OK)
     except GeneratorExit:
         span.finish(SpanStatus.OK)
@@ -402,6 +412,19 @@ def _wrap_generator(
         if is_llm:
             _finalize_llm(span)
         enqueue_span(span)
+
+
+def _record_ttft_wrap(span: Any) -> None:
+    """Record Time-To-First-Token on first streaming chunk (wrap path)."""
+    try:
+        from rastir.config import get_config
+        cfg = get_config()
+        if not cfg.enable_ttft:
+            return
+    except Exception:
+        return
+    ttft_ms = (time.time() - span.start_time) * 1000.0
+    span.set_attribute("ttft_ms", round(ttft_ms, 2))
 
 
 # ---------------------------------------------------------------------------
@@ -420,6 +443,16 @@ def _set_llm_model_provider(span: Any, wrapped_obj: Any) -> None:
         if val and isinstance(val, str):
             span.set_attribute("model", val)
             break
+
+    # Fallback: check config dict (e.g. Strands stores model_id in config)
+    if "model" not in span.attributes:
+        config = getattr(wrapped_obj, "config", None)
+        if isinstance(config, dict):
+            for key in ("model_id", "model_name", "model"):
+                val = config.get(key)
+                if val and isinstance(val, str):
+                    span.set_attribute("model", val)
+                    break
 
     # Provider from module path
     try:

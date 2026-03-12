@@ -6,20 +6,28 @@ aws_region       = "ap-south-1"
 stack_name       = "rastir"
 vpc_id           = "vpc-xxxxxxxx"
 subnet_ids       = ["subnet-aaa", "subnet-bbb"]
-assign_public_ip = true
+assign_public_ip = false
 
-# Rastir Server
-rastir_image  = "ghcr.io/skamalj/rastir-server:latest"
+# Rastir Server (ECR)
+rastir_image  = "719030485523.dkr.ecr.ap-south-1.amazonaws.com/rastir-server:latest"
 rastir_cpu    = 512
 rastir_memory = 1024
 rastir_port   = 8080
 
-# Prometheus
+# Exemplars and Evaluation
+rastir_env = {
+  RASTIR_SERVER_EXEMPLARS_ENABLED              = "true"
+  RASTIR_SERVER_EVALUATION_DEFAULT_SAMPLE_RATE = "1.0"
+}
+
+# Prometheus (ECR)
+prometheus_image      = "719030485523.dkr.ecr.ap-south-1.amazonaws.com/prom:latest"
 prometheus_cpu        = 512
 prometheus_memory     = 1024
 prometheus_storage_gb = 50
 
-# Grafana
+# Grafana (ECR)
+grafana_image          = "719030485523.dkr.ecr.ap-south-1.amazonaws.com/grafana:latest"
 grafana_cpu            = 256
 grafana_memory         = 512
 grafana_admin_password = "CHANGE_ME"

@@ -109,17 +109,7 @@ All tools inside the graph's `ToolNode` are discovered and wrapped.
 
 ### 4. MCP Clients → Trace Propagation
 
-The decorator auto-discovers MCP client objects (e.g. `MultiServerMCPClient`) from three locations:
-
-1. **Function arguments** — positional and keyword args
-2. **Function closures** — variables captured in the enclosing scope
-3. **Function globals** — module-level variables referenced in the function body
-
-For each discovered MCP client, the `traceparent` header is automatically injected into all connections before execution. This enables **distributed tracing** across MCP tool boundaries — the same `trace_id` links the LangGraph agent span to the MCP server spans.
-
-| Client type | Detection |
-|-------------|----------|
-| `MultiServerMCPClient` | Sets `traceparent` on each connection's headers dict |
+The decorator auto-discovers MCP client objects (e.g. `MultiServerMCPClient`) from function arguments, closures, and module globals. For each discovered client, the `traceparent` header is automatically injected into all connections — enabling distributed tracing across MCP tool boundaries with the same `trace_id`.
 
 No manual `wrap(session)` call is needed when using `@langgraph_agent`.
 

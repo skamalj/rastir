@@ -46,7 +46,7 @@ You can also use framework-specific decorators for explicit control: `@langgraph
 | Feature | Description |
 |---------|-------------|
 | **One decorator per framework** | `@framework_agent` (auto-detect), `@langgraph_agent`, `@crew_kickoff`, `@llamaindex_agent`, `@adk_agent`, `@strands_agent` |
-| **15 provider adapters** | OpenAI, Azure, Anthropic, Bedrock, Gemini, Cohere, Mistral, Groq, LangChain, LangGraph, LlamaIndex, CrewAI — auto-detected |
+| **8 provider adapters** | OpenAI, Azure OpenAI, Anthropic, Bedrock, Gemini, Cohere, Mistral, Groq — auto-detected from client module paths |
 | **Two-phase enrichment** | Model/provider metadata captured from function args *before* the call, refined from response *after*. Survives API failures |
 | **MCP distributed tracing** | `wrap(session)` propagates trace context across MCP tool boundaries — same `trace_id` links client and server |
 | **Cost observability** | Per-model USD cost tracking with `PricingRegistry`, pricing profiles, cost histograms |
@@ -68,11 +68,11 @@ All five frameworks work with `@framework_agent` (auto-detects the framework) or
 |---|---|---|---|---|---|
 | **Decorator** | `@langgraph_agent` | `@crew_kickoff` | `@llamaindex_agent` | `@adk_agent` | `@strands_agent` |
 | **Agent span** | Automatic | Automatic | Automatic | Automatic | Automatic |
-| **LLM tracing** | Auto-discovered | Auto-discovered | `wrap(llm)` | Auto-discovered | Auto-discovered |
-| **Tool tracing** | Auto-discovered | Auto-discovered | `wrap(tool)` | Auto-discovered | Auto-discovered |
+| **LLM tracing** | Auto-discovered | Auto-discovered | Auto-discovered | Auto-discovered | Auto-discovered |
+| **Tool tracing** | Auto-discovered | Auto-discovered | Auto-discovered | Auto-discovered | Auto-discovered |
 | **Node tracing** | Automatic (all nodes) | N/A | N/A | N/A | N/A |
-| **MCP tools** | Pass as normal tools | Native via `mcps=[]` | `wrap()` on tools | Tools as functions | Tools as functions |
-| **User code** | 1 decorator | 1 decorator | 1 decorator + `wrap()` | 1 decorator | 1 decorator |
+| **MCP tools** | Pass as normal tools | Native via `mcps=[]` | MCP tools auto-wrapped | Auto-discovered | Auto-discovered |
+| **User code** | 1 decorator | 1 decorator | 1 decorator | 1 decorator | 1 decorator |
 
 ### LangGraph
 
@@ -131,6 +131,40 @@ qa_agent (AGENT)
 └── llamaindex.ReActAgent.llm.achat (LLM)
 ```
 
+### ADK
+
+```python
+@adk_agent(agent_name="weather_agent")
+async def run(runner, prompt):
+    events = []
+    async for event in runner.run_async(user_id="u1", session_id="s1",
+        new_message=types.Content(role="user", parts=[types.Part(text=prompt)])):
+        events.append(event)
+    return events
+```
+
+```
+weather_agent (AGENT)
+├── LLM  gemini-2.0-flash
+├── TOOL get_weather
+└── LLM  gemini-2.0-flash
+```
+
+### Strands
+
+```python
+@strands_agent(agent_name="research_agent")
+def run(agent, prompt):
+    return agent(prompt)
+```
+
+```
+research_agent (AGENT)
+├── LLM  us.anthropic.claude-sonnet-4-20250514
+├── TOOL search_tool
+└── LLM  us.anthropic.claude-sonnet-4-20250514
+```
+
 → **Detailed framework documentation:** [LangGraph](https://skamalj.github.io/rastir/frameworks/langgraph) · [CrewAI](https://skamalj.github.io/rastir/frameworks/crewai) · [LlamaIndex](https://skamalj.github.io/rastir/frameworks/llamaindex) · [ADK](https://skamalj.github.io/rastir/frameworks/adk) · [Strands](https://skamalj.github.io/rastir/frameworks/strands)
 
 ---
@@ -147,10 +181,8 @@ qa_agent (AGENT)
 | **Cohere** | ✅ | ✅ | ✅ | — | ✅ |
 | **Mistral** | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **Groq** | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **LangChain** | ✅ | ✅ | ✅ | ✅ | — |
-| **LangGraph** | ✅ | ✅ | ✅ | ✅ | — |
-| **LlamaIndex** | ✅ | ✅ | ✅ | ✅ | — |
-| **CrewAI** | ✅ | ✅ | ✅ | — | — |
+
+Providers are auto-detected from LLM client module paths — no configuration needed. Each provider adapter extracts model name, token counts, and cost from the provider's native response format.
 
 ---
 

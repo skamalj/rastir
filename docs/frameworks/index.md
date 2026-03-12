@@ -24,11 +24,11 @@ def run(graph_or_agent, prompt):
 |---|---|---|---|---|---|
 | **Decorator** | `@langgraph_agent` | `@crew_kickoff` | `@llamaindex_agent` | `@adk_agent` | `@strands_agent` |
 | **Agent span** | Automatic | Automatic | Automatic | Automatic | Automatic |
-| **LLM tracing** | Auto-discovered | Auto-discovered | Manual `wrap(llm)` | Auto-discovered | Auto-discovered |
-| **Tool tracing** | Auto-discovered | Auto-discovered | Manual `wrap(tool)` | Auto-discovered | Auto-discovered |
+| **LLM tracing** | Auto-discovered | Auto-discovered | Auto-discovered | Auto-discovered | Auto-discovered |
+| **Tool tracing** | Auto-discovered | Auto-discovered | Auto-discovered | Auto-discovered | Auto-discovered |
 | **Node tracing** | Automatic (all nodes) | N/A | N/A | N/A | N/A |
-| **MCP tools** | Pass as normal tools | Native via `mcps=[]` on agents | `wrap()` on McpToolSpec tools | Auto-discovered with traceparent injection | Auto-discovered with traceparent injection |
-| **Lines of user code** | 1 decorator | 1 decorator | 1 decorator + `wrap()` calls | 1 decorator | 1 decorator |
+| **MCP tools** | Pass as normal tools | Native via `mcps=[]` on agents | MCP tools auto-wrapped | Auto-discovered with traceparent injection | Auto-discovered with traceparent injection |
+| **Lines of user code** | 1 decorator | 1 decorator | 1 decorator | 1 decorator | 1 decorator |
 
 All five decorators:
 - Support both sync and async functions

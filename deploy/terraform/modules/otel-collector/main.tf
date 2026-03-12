@@ -46,7 +46,7 @@ variable "gcp_project_id" {
 
 # Use ADOT image for AWS, standard contrib image for everything else
 locals {
-  collector_image = var.trace_backend == "xray" ? "public.ecr.aws/aws-observability/aws-otel-collector:latest" : var.image
+  collector_image = var.trace_backend == "xray" ? coalesce(var.image, "public.ecr.aws/aws-observability/aws-otel-collector:latest") : var.image
 
   configs = {
     tempo = yamlencode({

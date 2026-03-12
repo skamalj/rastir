@@ -40,6 +40,14 @@ variable "tempo_url" {
   default     = "http://tempo:3200"
 }
 
+variable "xray_datasource" {
+  description = "AWS X-Ray datasource config. Set region to enable. Replaces Tempo for exemplar trace links."
+  type = object({
+    region = string
+  })
+  default = null
+}
+
 output "container_config" {
   value = {
     image  = var.image
@@ -50,6 +58,10 @@ output "container_config" {
       GF_USERS_ALLOW_SIGN_UP     = "false"
     }
   }
+}
+
+locals {
+  trace_datasource_uid = var.xray_datasource != null ? "xray" : "tempo"
 }
 
 output "datasources_config" {
@@ -68,12 +80,23 @@ output "datasources_config" {
         jsonData = {
           httpMethod = "POST"
           exemplarTraceIdDestinations = [{
-            name           = "traceID"
-            datasourceUid  = "tempo"
+            name           = "trace_id"
+            datasourceUid  = local.trace_datasource_uid
             urlDisplayLabel = "View Trace"
           }]
         }
       }],
+      var.xray_datasource != null ? [{
+        name     = "X-Ray"
+        type     = "grafana-x-ray-datasource"
+        access   = "proxy"
+        uid      = "xray"
+        editable = true
+        jsonData = {
+          defaultRegion = var.xray_datasource.region
+          authType      = "default"
+        }
+      }] : [],
       var.tempo_url != "" ? [{
         name     = "Tempo"
         type     = "tempo"
