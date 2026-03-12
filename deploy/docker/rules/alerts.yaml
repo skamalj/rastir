@@ -1,1 +1,52 @@
-../../../grafana/provisioning/alerting/alerts.yaml
+groups:
+  - name: rastir-alerts
+    rules:
+      - alert: RastirQueueUtilizationHigh
+        expr: rastir_queue_utilization_percent > 80
+        for: 5m
+        labels:
+          severity: warning
+          component: rastir
+        annotations:
+          summary: "Rastir queue utilization is high ({{ $value }}%)"
+          description: "Queue utilization has exceeded 80% for more than 5 minutes. Current value: {{ $value }}%."
+
+      - alert: RastirEvaluationDrops
+        expr: rate(rastir_evaluation_dropped_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: rastir
+        annotations:
+          summary: "Rastir evaluations are being dropped"
+          description: "Evaluation tasks are being dropped at a rate of {{ $value }}/s for more than 5 minutes."
+
+      - alert: RastirExportFailures
+        expr: rate(rastir_export_failures_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+          component: rastir
+        annotations:
+          summary: "Rastir OTLP export failures detected"
+          description: "Export failures are occurring at a rate of {{ $value }}/s for more than 5 minutes."
+
+      - alert: RastirLLMErrorSpike
+        expr: rate(rastir_errors_total{span_type="llm"}[5m]) / rate(rastir_llm_calls_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+          component: rastir
+        annotations:
+          summary: "Rastir LLM error rate exceeded 10%"
+          description: "The LLM error rate has exceeded 10% for more than 5 minutes. Current error ratio: {{ $value }}."
+
+      - alert: RastirEvaluationFailureSpike
+        expr: rate(rastir_evaluation_failures_total[5m]) / rate(rastir_evaluation_runs_total[5m]) > 0.2
+        for: 5m
+        labels:
+          severity: warning
+          component: rastir
+        annotations:
+          summary: "Rastir evaluation failure rate exceeded 20%"
+          description: "The evaluation failure rate has exceeded 20% for more than 5 minutes. Current failure ratio: {{ $value }}."
