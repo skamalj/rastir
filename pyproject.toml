@@ -72,6 +72,7 @@ Changelog = "https://github.com/skamalj/rastir/releases"
 
 [project.scripts]
 rastir-server = "rastir.server.app:main"
+rastir = "rastir.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/rastir"]

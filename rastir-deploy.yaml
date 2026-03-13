@@ -1,0 +1,85 @@
+# ---------------------------------------------------------------------------
+# Rastir Deploy Configuration
+# ---------------------------------------------------------------------------
+# This file configures WHERE Rastir is deployed (infrastructure).
+# For Rastir SERVER settings (evaluation, redaction, SRE), see:
+#   rastir-server-config.yaml
+# ---------------------------------------------------------------------------
+
+# Reference to server config (application settings)
+server_config: ./rastir-server-config.yaml
+
+# ---------------------------------------------------------------------------
+# Prometheus & Grafana Configuration
+# ---------------------------------------------------------------------------
+# These are FIXED components (always Prometheus + Grafana).
+# Only configurable setting is `mode`:
+#   - deploy:   Deploy Prometheus/Grafana as part of the stack
+#   - external: Use existing Prometheus/Grafana infrastructure
+# ---------------------------------------------------------------------------
+
+prometheus:
+  mode: deploy  # deploy | external
+  
+  # Settings when mode: deploy
+  retention: 30d
+  storage: 50Gi
+  
+  # Settings when mode: external
+  # external:
+  #   endpoint: "http://prometheus.monitoring.svc:9090"
+  #   config_method: operator  # file | operator
+  #   # For file method:
+  #   scrape_config_path: "/etc/prometheus/conf.d/rastir.yml"
+  #   rules_path: "/etc/prometheus/rules.d/rastir/"
+  #   reload_endpoint: "http://prometheus:9090/-/reload"
+
+grafana:
+  mode: deploy  # deploy | external
+  
+  # Settings when mode: deploy
+  admin_password: admin
+  
+  # Settings when mode: external
+  # external:
+  #   endpoint: "http://grafana.monitoring.svc:3000"
+  #   api_key: "${GRAFANA_API_KEY}"
+
+# ---------------------------------------------------------------------------
+# Target-Specific Configuration
+# ---------------------------------------------------------------------------
+# Each target has a FIXED observability stack:
+#
+#   local:  Tempo + OTel Collector + Prometheus + Grafana (Docker Compose)
+#   k8s:    Tempo + OTel Collector + Prometheus + Grafana (Helm)
+#   aws:    X-Ray + ADOT + Prometheus + Grafana (Terraform/ECS)
+#   azure:  App Insights + OTel Collector + Prometheus + Grafana (Terraform/ACI)
+#   gcp:    Cloud Trace + OTel Collector + Prometheus + Grafana (Terraform/Cloud Run)
+#
+# No component overrides — the stack for each target is opinionated and fixed.
+# ---------------------------------------------------------------------------
+
+targets:
+  # Local development (Docker Compose)
+  local: {}
+  
+  # Kubernetes (Helm)
+  k8s:
+    namespace: rastir
+  
+  # AWS (Terraform → ECS Fargate)
+  aws:
+    region: us-east-1
+    vpc_id: ""              # REQUIRED: Your VPC ID
+    subnet_ids: []          # REQUIRED: At least one subnet ID
+    assign_public_ip: false # Set true if using public subnets without NAT
+  
+  # Azure (Terraform → Container Instances)
+  azure:
+    location: eastus
+    resource_group: rastir-rg
+  
+  # GCP (Terraform → Cloud Run)
+  gcp:
+    project_id: ""          # REQUIRED: Your GCP project ID
+    region: us-central1
