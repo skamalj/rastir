@@ -124,10 +124,12 @@ class MetricsRegistry:
         duration_buckets: tuple[float, ...] | None = None,
         tokens_buckets: tuple[float, ...] | None = None,
         exemplars_enabled: bool = False,
+        trace_id_format: str = "w3c",
     ) -> None:
         self._max_label_len = max_label_value_length
         self._registry = CollectorRegistry()
         self._exemplars_enabled = exemplars_enabled
+        self._trace_id_format = trace_id_format
 
         # Per-dimension cardinality caps (merge user overrides over defaults)
         caps = dict(_DEFAULT_CARDINALITY_CAPS)
@@ -203,7 +205,7 @@ class MetricsRegistry:
         self.duration = Histogram(
             "rastir_duration_seconds",
             "Span duration in seconds",
-            ["service", "env", "span_type", "model", "provider"],
+            ["service", "env", "span_type", "model", "provider", "agent"],
             buckets=self._duration_buckets,
             registry=self._registry,
         )
@@ -477,16 +479,8 @@ class MetricsRegistry:
         # This ensures exemplar trace_ids always reference traces that
         # actually exist in the trace backend (not dropped by sampling).
         exemplar = None
-        if self._exemplars_enabled and sampled and trace_id and len(trace_id) == 32:
-            if trace_id not in self._trace_epoch_cache:
-                if len(self._trace_epoch_cache) > 10_000:
-                    self._trace_epoch_cache.clear()
-                self._trace_epoch_cache[trace_id] = int(span.get("start_time") or time.time())
-            epoch = self._trace_epoch_cache[trace_id]
-            xray_tid = f"1-{epoch:08x}-{trace_id[8:]}"
-            exemplar = {"trace_id": xray_tid}
-        elif self._exemplars_enabled and sampled and trace_id:
-            exemplar = {"trace_id": trace_id}
+        if self._exemplars_enabled and sampled and trace_id:
+            exemplar = {"trace_id": self._format_trace_id(trace_id, span)}
 
         # -- universal: ingested counter + duration histogram
         self.spans_ingested.labels(
@@ -496,12 +490,13 @@ class MetricsRegistry:
             status=status,
         ).inc()
 
-        # Extract model/provider early so duration & errors can use them.
+        # Extract model/provider/agent early so duration & errors can use them.
         # All span types may carry inherited model/provider from context.
         raw_model = attrs.get("model", "")
         raw_provider = attrs.get("provider", "")
         model_label = self._guard_cardinality(raw_model, self._seen_models, "model") if raw_model else ""
         provider_label = self._guard_cardinality(raw_provider, self._seen_providers, "provider") if raw_provider else ""
+        agent = self._guard_cardinality(attrs.get("agent", ""), self._seen_agents, "agent")
 
         duration = span.get("duration_ms")
         if duration is not None:
@@ -511,6 +506,7 @@ class MetricsRegistry:
                 span_type=span_type,
                 model=model_label,
                 provider=provider_label,
+                agent=agent,
             ).observe(duration / 1000.0, exemplar=exemplar)
 
         # -- error counter
@@ -519,9 +515,6 @@ class MetricsRegistry:
             error_type = self._guard_cardinality(
                 error_type, self._seen_error_types, "error_type"
             )
-            agent_label = self._guard_cardinality(
-                attrs.get("agent", ""), self._seen_agents, "agent"
-            )
             self.errors.labels(
                 service=self._clip(service),
                 env=self._clip(env),
@@ -529,13 +522,12 @@ class MetricsRegistry:
                 error_type=error_type,
                 model=model_label,
                 provider=provider_label,
-                agent=agent_label,
+                agent=agent,
             ).inc(exemplar=exemplar)
 
         # -- LLM-specific
         if span_type == "llm":
-            # model_label and provider_label already extracted above
-            agent = self._guard_cardinality(attrs.get("agent", ""), self._seen_agents, "agent")
+            # model_label, provider_label, agent already extracted above
 
             self.llm_calls.labels(
                 service=self._clip(service),
@@ -775,6 +767,27 @@ class MetricsRegistry:
     @property
     def registry(self) -> CollectorRegistry:
         return self._registry
+
+    # ----- trace ID formatting ---------------------------------------------
+
+    def _format_trace_id(self, trace_id: str, span: dict) -> str:
+        """Format a 32-hex-char trace ID based on the configured format.
+
+        - ``w3c``:  pass through as-is (32 hex chars) — for Tempo, Cloud Trace
+        - ``xray``: convert to ``1-{epoch_hex}-{remaining_24}`` — for AWS X-Ray
+        """
+        if self._trace_id_format == "xray" and len(trace_id) == 32:
+            epoch = int(span.get("start_time_unix_nano", 0)) // 1_000_000_000
+            if not epoch:
+                import time as _time
+                epoch = int(_time.time())
+            return f"1-{epoch:08x}-{trace_id[8:]}"
+        # w3c (default): 32-char hex passthrough
+        return trace_id
+
+    def format_trace_id(self, trace_id: str, span: dict | None = None) -> str:
+        """Public wrapper for trace ID formatting (used by evaluation_worker)."""
+        return self._format_trace_id(trace_id, span or {})
 
     # ----- internal --------------------------------------------------------
 

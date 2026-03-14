@@ -228,10 +228,12 @@ class EvaluationWorkerPool:
                 # Record metrics
                 self._record_eval_metrics(task, result, duration_ms, ev_model, ev_provider)
 
-                # Build evaluation span with proper wall-clock timestamps
+                # Build evaluation span anchored to the LLM span's end time
+                # so it visually follows the LLM call in trace views.
+                eval_start = task.span_end_time if task.span_end_time else wall_start
                 span = _eval_span_dict(task, result, duration_ms, ev_model, ev_provider)
-                span["start_time"] = wall_start
-                span["end_time"] = wall_start + duration_ms / 1000.0
+                span["start_time"] = eval_start
+                span["end_time"] = eval_start + duration_ms / 1000.0
                 spans_to_emit.append(span)
 
             except (asyncio.TimeoutError, FuturesTimeout):
@@ -248,9 +250,10 @@ class EvaluationWorkerPool:
                     error=f"Evaluation timed out after {timeout_s:.1f}s",
                 )
                 self._record_eval_metrics(task, timeout_result, duration_ms, ev_model, ev_provider)
+                eval_start = task.span_end_time if task.span_end_time else wall_start
                 span = _eval_span_dict(task, timeout_result, duration_ms, ev_model, ev_provider)
-                span["start_time"] = wall_start
-                span["end_time"] = wall_start + duration_ms / 1000.0
+                span["start_time"] = eval_start
+                span["end_time"] = eval_start + duration_ms / 1000.0
                 spans_to_emit.append(span)
                 # Cancel the future if still running
                 future.cancel()
@@ -265,9 +268,10 @@ class EvaluationWorkerPool:
                     error=str(exc),
                 )
                 self._record_eval_metrics(task, error_result, duration_ms, ev_model, ev_provider)
+                eval_start = task.span_end_time if task.span_end_time else wall_start
                 span = _eval_span_dict(task, error_result, duration_ms, ev_model, ev_provider)
-                span["start_time"] = wall_start
-                span["end_time"] = wall_start + duration_ms / 1000.0
+                span["start_time"] = eval_start
+                span["end_time"] = eval_start + duration_ms / 1000.0
                 spans_to_emit.append(span)
 
         # Emit all evaluation spans via the ingestion pipeline
@@ -307,13 +311,12 @@ class EvaluationWorkerPool:
         # Build exemplar linking back to the original LLM span's trace.
         exemplar = None
         trace_id = task.trace_id
-        if trace_id and len(trace_id) == 32:
-            import time as _time
-            epoch = int(task.span_start_time or task.enqueued_at or _time.time())
-            xray_tid = f"1-{epoch:08x}-{trace_id[8:]}"
-            exemplar = {"trace_id": xray_tid}
-        elif trace_id:
-            exemplar = {"trace_id": trace_id}
+        if trace_id:
+            span_stub = {
+                "start_time_unix_nano": int((task.span_start_time or task.enqueued_at or 0) * 1_000_000_000),
+            }
+            formatted = self._metrics.format_trace_id(trace_id, span_stub)
+            exemplar = {"trace_id": formatted}
 
         try:
             self._metrics.evaluation_runs.labels(**labels).inc(exemplar=exemplar)

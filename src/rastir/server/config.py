@@ -137,6 +137,7 @@ class RateLimitSection:
 class ExemplarSection:
     """Prometheus exemplar support."""
     enabled: bool = False  # disabled by default
+    trace_id_format: str = "w3c"  # w3c | xray
 
 
 @dataclass(frozen=True)
@@ -408,6 +409,7 @@ def load_config(config_path: Optional[str] = None) -> ServerConfig:
 
     exemplars = ExemplarSection(
         enabled=_get("exemplars", "enabled", False, as_type=bool),
+        trace_id_format=_get("exemplars", "trace_id_format", "w3c"),
     )
 
     shutdown = ShutdownSection(

@@ -557,7 +557,7 @@
       "id": 6,
       "type": "timeseries",
       "title": "Evaluation Latency Percentiles",
-      "description": "p50 and p95 evaluation latency by evaluation type",
+      "description": "p50, p95, and p99 evaluation latency by evaluation type",
       "gridPos": {
         "h": 8,
         "w": 24,
@@ -588,6 +588,16 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "exemplar": true
+        },
+        {
+          "refId": "C",
+          "expr": "histogram_quantile(0.99, sum(rate(rastir_evaluation_latency_seconds_bucket{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", agent=~\"$agent\", evaluation_type=~\"$evaluation_type\"}[5m])) by (le, evaluation_type))",
+          "legendFormat": "p99 {{evaluation_type}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "exemplar": false
         }
       ],
       "fieldConfig": {
@@ -642,7 +652,7 @@
               },
               {
                 "color": "red",
-                "value": 60
+                "value": 30
               }
             ]
           }
@@ -680,6 +690,120 @@
       "panels": []
     },
     {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Evaluation Latency by Evaluator Model",
+      "description": "p95 evaluation latency broken down by evaluator model",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 23
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum(rate(rastir_evaluation_latency_seconds_bucket{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", agent=~\"$agent\", evaluation_type=~\"$evaluation_type\"}[5m])) by (le, evaluator_model))",
+          "legendFormat": "p95 {{evaluator_model}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 8,
+            "gradientMode": "opacity",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 10
+              },
+              {
+                "color": "red",
+                "value": 30
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 50,
+      "type": "row",
+      "title": "Evaluation Score",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 31
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
       "id": 8,
       "type": "timeseries",
       "title": "Evaluation Score by Type & Model",
@@ -688,7 +812,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 23
+        "y": 32
       },
       "datasource": {
         "type": "prometheus",
@@ -791,7 +915,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 31
+        "y": 40
       },
       "collapsed": false,
       "panels": []
@@ -803,9 +927,9 @@
       "description": "Current number of evaluations queued",
       "gridPos": {
         "h": 8,
-        "w": 8,
+        "w": 6,
         "x": 0,
-        "y": 32
+        "y": 41
       },
       "datasource": {
         "type": "prometheus",
@@ -865,15 +989,86 @@
       }
     },
     {
+      "id": 12,
+      "type": "gauge",
+      "title": "Eval Queue Utilization",
+      "description": "Evaluation queue utilization percentage",
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 6,
+        "y": 41
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rastir_evaluation_queue_utilization_percent",
+          "legendFormat": "Utilization",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "max": 100,
+          "min": 0,
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 60
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "minVizHeight": 75,
+        "minVizWidth": 75,
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      }
+    },
+    {
       "id": 11,
       "type": "timeseries",
       "title": "Evaluations Dropped",
       "description": "Rate of evaluations dropped due to queue overflow",
       "gridPos": {
         "h": 8,
-        "w": 16,
-        "x": 8,
-        "y": 32
+        "w": 12,
+        "x": 12,
+        "y": 41
       },
       "datasource": {
         "type": "prometheus",

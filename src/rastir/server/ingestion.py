@@ -388,6 +388,7 @@ class IngestionWorker:
             evaluation_types=list(eval_types),
             timeout_ms=timeout_ms,
             span_start_time=trace_epoch,
+            span_end_time=span.get("end_time"),
         )
 
         accepted = self._eval_queue.put(task)

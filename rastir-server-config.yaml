@@ -32,6 +32,7 @@ logging:
 
 exemplars:
   enabled: true
+  trace_id_format: w3c  # w3c (Tempo, Cloud Trace) | xray (AWS X-Ray)
 
 sre:
   enabled: true

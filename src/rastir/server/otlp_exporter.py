@@ -115,6 +115,7 @@ class OTLPForwarder:
         endpoint: str,
         batch_size: int = 200,
         flush_interval_ms: int = 5000,
+        trace_id_format: str = "w3c",
     ) -> None:
         if not _check_otel():
             raise ImportError(
@@ -131,6 +132,7 @@ class OTLPForwarder:
         self._default_resource = Resource.create({"service.name": "rastir-server"})
         self._resource_cache: dict[tuple, Resource] = {}
         self._trace_epoch_cache: dict[str, float] = {}
+        self._trace_id_format = trace_id_format
         self._provider = TracerProvider(resource=self._default_resource)
         raw_exporter = OTLPSpanExporter(endpoint=f"{endpoint.rstrip('/')}/v1/traces")
         self._exporter = _LoggingExporterWrapper(raw_exporter)
@@ -219,19 +221,21 @@ class OTLPForwarder:
             logger.warning("[OTLP] Skipping span — missing trace_id=%r span_id=%r", raw_trace_id, raw_span_id)
             return None
 
-        # Compute start_epoch early — needed for X-Ray-compatible trace IDs.
+        # Timestamps needed for both span timing and (optionally) X-Ray trace IDs.
         now = time.time()
         raw_start = span_dict.get("start_time")
         start_epoch = raw_start if raw_start is not None else now
 
-        # All spans in the same trace must share the same epoch prefix
-        # so X-Ray assembles them into one trace.
-        if raw_trace_id not in self._trace_epoch_cache:
-            # Bound cache size to prevent unbounded growth
-            if len(self._trace_epoch_cache) > 10_000:
-                self._trace_epoch_cache.clear()
-            self._trace_epoch_cache[raw_trace_id] = start_epoch
-        trace_epoch = self._trace_epoch_cache[raw_trace_id]
+        # In xray mode, overwrite the first 4 bytes of the trace ID with the
+        # epoch timestamp so AWS X-Ray indexes it correctly.
+        # In w3c mode, pass through the original trace ID unchanged.
+        trace_epoch = None
+        if self._trace_id_format == "xray":
+            if raw_trace_id not in self._trace_epoch_cache:
+                if len(self._trace_epoch_cache) > 10_000:
+                    self._trace_epoch_cache.clear()
+                self._trace_epoch_cache[raw_trace_id] = start_epoch
+            trace_epoch = self._trace_epoch_cache[raw_trace_id]
 
         trace_id = _hex_to_trace_id(raw_trace_id, start_epoch=trace_epoch)
         span_id = _hex_to_span_id(raw_span_id)

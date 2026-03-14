@@ -492,8 +492,8 @@
       "targets": [
         {
           "refId": "A",
-          "exemplar": true,
-          "expr": "histogram_quantile(0.50, sum(rate(rastir_duration_seconds_bucket{span_type=\"llm\", service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\"}[5m])) by (le, model, provider))",
+          "exemplar": false,
+          "expr": "histogram_quantile(0.50, sum(rate(rastir_duration_seconds_bucket{span_type=\"llm\", service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", agent=~\"$agent\"}[5m])) by (le, model, provider))",
           "legendFormat": "p50 {{model}} / {{provider}}",
           "datasource": {
             "type": "prometheus",
@@ -503,7 +503,7 @@
         {
           "refId": "B",
           "exemplar": true,
-          "expr": "histogram_quantile(0.95, sum(rate(rastir_duration_seconds_bucket{span_type=\"llm\", service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\"}[5m])) by (le, model, provider))",
+          "expr": "histogram_quantile(0.95, sum(rate(rastir_duration_seconds_bucket{span_type=\"llm\", service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", agent=~\"$agent\"}[5m])) by (le, model, provider))",
           "legendFormat": "p95 {{model}} / {{provider}}",
           "datasource": {
             "type": "prometheus",
@@ -512,8 +512,8 @@
         },
         {
           "refId": "C",
-          "exemplar": true,
-          "expr": "histogram_quantile(0.99, sum(rate(rastir_duration_seconds_bucket{span_type=\"llm\", service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\"}[5m])) by (le, model, provider))",
+          "exemplar": false,
+          "expr": "histogram_quantile(0.99, sum(rate(rastir_duration_seconds_bucket{span_type=\"llm\", service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", agent=~\"$agent\"}[5m])) by (le, model, provider))",
           "legendFormat": "p99 {{model}} / {{provider}}",
           "datasource": {
             "type": "prometheus",
@@ -739,8 +739,8 @@
     {
       "id": 6,
       "type": "timeseries",
-      "title": "Cumulative Input Tokens by Model",
-      "description": "Cumulative input tokens consumed over time",
+      "title": "Input Token Rate by Model",
+      "description": "Input token consumption rate per second by model",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -754,7 +754,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rastir_tokens_input_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\"}) by (model)",
+          "expr": "sum(rate(rastir_tokens_input_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\"}[5m])) by (model)",
           "legendFormat": "{{model}}",
           "datasource": {
             "type": "prometheus",
@@ -771,7 +771,7 @@
             "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
-            "axisLabel": "tokens",
+            "axisLabel": "tokens/s",
             "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "line",
@@ -832,8 +832,8 @@
     {
       "id": 7,
       "type": "timeseries",
-      "title": "Cumulative Output Tokens by Model",
-      "description": "Cumulative output tokens generated over time",
+      "title": "Output Token Rate by Model",
+      "description": "Output token generation rate per second by model",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -847,7 +847,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rastir_tokens_output_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\"}) by (model)",
+          "expr": "sum(rate(rastir_tokens_output_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\"}[5m])) by (model)",
           "legendFormat": "{{model}}",
           "datasource": {
             "type": "prometheus",
@@ -864,7 +864,7 @@
             "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
-            "axisLabel": "tokens",
+            "axisLabel": "tokens/s",
             "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "line",

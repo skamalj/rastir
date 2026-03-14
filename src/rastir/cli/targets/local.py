@@ -100,7 +100,8 @@ class LocalTarget(DeployTarget):
         grafana_mode = self.config.grafana.mode
         
         # Build compose arguments
-        compose_args = ["up", "-d", "--build"]
+        # --wait ensures all services are healthy/started before returning
+        compose_args = ["up", "-d", "--build", "--wait"]
         
         # If prometheus or grafana is external, we need to handle that
         # For now, we deploy everything in local mode
@@ -125,7 +126,7 @@ class LocalTarget(DeployTarget):
         """Tear down the local stack."""
         print(f"\nStopping Rastir on {self.name}...")
         
-        ret = self._run_compose(["down"])
+        ret = self._run_compose(["down", "--remove-orphans"])
         
         if ret == 0 and not self.dry_run:
             print("✓ Stack torn down.")

@@ -240,7 +240,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(increase(rastir_errors_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\"}[$__range]))",
+          "expr": "sum(increase(rastir_errors_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", agent=~\"$agent\"}[$__range]))",
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
@@ -757,7 +757,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(rastir_retrieval_calls_total{service=~\"$service\", env=~\"$env\", agent=~\"$agent\"}[5m])) by (agent)",
+          "expr": "sum(rate(rastir_retrieval_calls_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", agent=~\"$agent\"}[5m])) by (agent)",
           "legendFormat": "{{agent}}",
           "datasource": {
             "type": "prometheus",
@@ -837,6 +837,90 @@
       }
     },
     {
+      "id": 40,
+      "type": "row",
+      "title": "Error Rate by Agent",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 40
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 41,
+      "type": "stat",
+      "title": "Error Rate % by Agent",
+      "description": "Percentage of LLM calls resulting in errors, per agent",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 41
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * sum(increase(rastir_errors_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", agent=~\"$agent\"}[$__range])) by (agent) / sum(increase(rastir_llm_calls_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", agent=~\"$agent\"}[$__range])) by (agent)",
+          "legendFormat": "{{agent}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "unit": "percent",
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 5
+              },
+              {
+                "color": "red",
+                "value": 20
+              }
+            ]
+          },
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto"
+      }
+    },
+    {
       "id": 8,
       "type": "row",
       "title": "Error Totals by Span Type",
@@ -844,7 +928,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 40
+        "y": 49
       },
       "collapsed": false,
       "panels": []
@@ -858,7 +942,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 41
+        "y": 50
       },
       "datasource": {
         "type": "prometheus",
@@ -867,7 +951,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(increase(rastir_errors_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\"}[$__range])) by (span_type) > 0",
+          "expr": "sum(increase(rastir_errors_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", agent=~\"$agent\"}[$__range])) by (span_type) > 0",
           "legendFormat": "{{span_type}}",
           "datasource": {
             "type": "prometheus",
@@ -921,7 +1005,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 41
+        "y": 50
       },
       "datasource": {
         "type": "prometheus",
@@ -930,7 +1014,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(rastir_errors_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\"}[5m])) by (span_type) > 0",
+          "expr": "sum(rate(rastir_errors_total{service=~\"$service\", env=~\"$env\", model=~\"$model\", provider=~\"$provider\", agent=~\"$agent\"}[5m])) by (span_type) > 0",
           "legendFormat": "{{span_type}}",
           "datasource": {
             "type": "prometheus",

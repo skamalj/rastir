@@ -399,7 +399,7 @@
       },
       "targets": [
         {
-          "expr": "scalar(rastir_cost_budget_usd{agent=\"unknown\"})",
+          "expr": "sum(rastir_cost_budget_usd{service=~\"$service\",env=~\"$env\"})",
           "legendFormat": "Cost Budget",
           "refId": "A",
           "instant": true,
@@ -688,7 +688,7 @@
       },
       "targets": [
         {
-          "expr": "scalar(rastir_cost_budget_usd{agent=\"unknown\"}) - sum(rastir:cost:$period)",
+          "expr": "sum(rastir_cost_budget_usd{service=~\"$service\",env=~\"$env\"}) - sum(rastir:cost:$period{service=~\"$service\",env=~\"$env\"})",
           "legendFormat": "Cost Remaining",
           "refId": "A",
           "instant": true,
@@ -1108,8 +1108,8 @@
     },
     {
       "id": 25,
-      "title": "Cumulative Volume",
-      "description": "Total LLM call volume accumulated within the current month",
+      "title": "Request Volume Rate",
+      "description": "LLM call volume rate over time",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
@@ -1123,8 +1123,8 @@
       },
       "targets": [
         {
-          "expr": "sum(rastir:volume:$period{service=~\"$service\",env=~\"$env\",agent=~\"$agent\"})",
-          "legendFormat": "Total Volume",
+          "expr": "sum(rate(rastir_llm_calls_total{service=~\"$service\",env=~\"$env\",agent=~\"$agent\"}[5m]))",
+          "legendFormat": "Request Rate",
           "refId": "A",
           "datasource": {
             "type": "prometheus",

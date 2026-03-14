@@ -123,6 +123,7 @@ def _build_components(cfg: ServerConfig) -> dict[str, Any]:
         duration_buckets=cfg.histograms.duration_buckets,
         tokens_buckets=cfg.histograms.tokens_buckets,
         exemplars_enabled=cfg.exemplars.enabled,
+        trace_id_format=cfg.exemplars.trace_id_format,
     )
 
     trace_store: Optional[TraceStore] = None
@@ -142,6 +143,7 @@ def _build_components(cfg: ServerConfig) -> dict[str, Any]:
                 endpoint=cfg.exporter.otlp_endpoint,  # type: ignore[arg-type]
                 batch_size=cfg.exporter.batch_size,
                 flush_interval_ms=cfg.exporter.flush_interval * 1000,
+                trace_id_format=cfg.exemplars.trace_id_format,
             )
         except ImportError:
             logger.warning(
