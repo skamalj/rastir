@@ -285,9 +285,21 @@ def load_config(config_path: Optional[str] = None) -> ServerConfig:
         except Exception as exc:
             logger.warning("Failed to load config from %s: %s", path, exc)
 
-    # ---- helpers to merge yaml → env → default ----
+    # Load runtime overrides (highest precedence)
+    runtime_data: dict = {}
+    runtime_config_path = _env("RASTIR_SERVER_RUNTIME_CONFIG")
+    if runtime_config_path and Path(runtime_config_path).is_file():
+        try:
+            import yaml
+            with open(runtime_config_path) as f:
+                runtime_data = yaml.safe_load(f) or {}
+            logger.info("Loaded runtime config overrides from %s", runtime_config_path)
+        except Exception as exc:
+            logger.warning("Failed to load runtime config from %s: %s", runtime_config_path, exc)
+
+    # ---- helpers to merge: runtime > env > yaml > default ----
     def _get(section: str, key: str, default, *, as_type=str):
-        """Resolve: env var > yaml > default."""
+        """Resolve: runtime > env var > yaml > default."""
         env_name = f"RASTIR_SERVER_{section.upper()}_{key.upper()}"
         # Flatten: for top-level section names that match the key prefix
         if section == "server":
@@ -295,6 +307,10 @@ def load_config(config_path: Optional[str] = None) -> ServerConfig:
 
         env_val = _env(env_name)
         yaml_val = yaml_data.get(section, {}).get(key) if isinstance(yaml_data.get(section), dict) else None
+        runtime_val = runtime_data.get(section, {}).get(key) if isinstance(runtime_data.get(section), dict) else None
+
+        if runtime_val is not None:
+            return runtime_val
 
         if env_val is not None:
             if as_type is int:
@@ -378,17 +394,28 @@ def load_config(config_path: Optional[str] = None) -> ServerConfig:
     def _get_float(section: str, key: str, default: float) -> float:
         env_name = f"RASTIR_SERVER_{section.upper()}_{key.upper()}"
         env_val = _env(env_name)
+        yaml_val = yaml_data.get(section, {}).get(key) if isinstance(yaml_data.get(section), dict) else None
+        runtime_val = runtime_data.get(section, {}).get(key) if isinstance(runtime_data.get(section), dict) else None
+
+        # Runtime has highest precedence
+        if runtime_val is not None:
+            try:
+                return float(runtime_val)
+            except (ValueError, TypeError):
+                pass
+
         if env_val is not None:
             try:
                 return float(env_val)
             except ValueError:
-                return default
-        yaml_val = yaml_data.get(section, {}).get(key) if isinstance(yaml_data.get(section), dict) else None
+                pass
+
         if yaml_val is not None:
             try:
                 return float(yaml_val)
             except (ValueError, TypeError):
-                return default
+                pass
+
         return default
 
     sampling = SamplingSection(

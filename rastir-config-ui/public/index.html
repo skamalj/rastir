@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rastir · Config</title>
+    <style>
+        :root {
+            --bg:        #0d0f14;
+            --surface:   #13161e;
+            --surface2:  #1a1e2a;
+            --border:    #252a38;
+            --accent:    #6c63ff;
+            --accent2:   #4ecca3;
+            --text:      #e2e8f0;
+            --muted:     #64748b;
+            --danger:    #f87171;
+            --success:   #4ecca3;
+            --warn:      #fbbf24;
+            --radius:    10px;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+
+        /* ── Layout ── */
+        .layout { display: flex; min-height: 100vh; }
+
+        /* ── Sidebar ── */
+        .sidebar {
+            width: 220px;
+            background: var(--surface);
+            border-right: 1px solid var(--border);
+            padding: 24px 0;
+            position: fixed;
+            top: 0; left: 0; bottom: 0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .logo {
+            padding: 0 20px 24px;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 16px;
+        }
+
+        .logo-title {
+            font-size: 1.1rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .logo-sub {
+            font-size: 0.7rem;
+            color: var(--muted);
+            margin-top: 2px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 20px;
+            font-size: 0.85rem;
+            color: var(--muted);
+            cursor: pointer;
+            border-left: 3px solid transparent;
+            transition: all 0.15s;
+            text-decoration: none;
+        }
+
+        .nav-item:hover { color: var(--text); background: var(--surface2); }
+        .nav-item.active { color: var(--accent); border-left-color: var(--accent); background: rgba(108,99,255,0.08); }
+
+        .nav-icon { font-size: 1rem; width: 18px; text-align: center; }
+
+        .sidebar-footer {
+            margin-top: auto;
+            padding: 16px 20px;
+            border-top: 1px solid var(--border);
+        }
+
+        .server-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.75rem;
+            color: var(--muted);
+        }
+
+        .dot {
+            width: 7px; height: 7px;
+            border-radius: 50%;
+            background: var(--success);
+            box-shadow: 0 0 6px var(--success);
+            flex-shrink: 0;
+        }
+
+        /* ── Main ── */
+        .main {
+            margin-left: 220px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* ── Topbar ── */
+        .topbar {
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            padding: 16px 32px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        .topbar-title { font-size: 1rem; font-weight: 600; }
+        .topbar-sub { font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
+
+        .topbar-actions { display: flex; gap: 10px; }
+
+        /* ── Buttons ── */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 18px;
+            border-radius: 6px;
+            font-size: 0.82rem;
+            font-weight: 500;
+            cursor: pointer;
+            border: none;
+            transition: all 0.15s;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: #fff;
+        }
+        .btn-primary:hover { background: #7c74ff; box-shadow: 0 0 16px rgba(108,99,255,0.4); }
+
+        .btn-ghost {
+            background: transparent;
+            color: var(--muted);
+            border: 1px solid var(--border);
+        }
+        .btn-ghost:hover { color: var(--text); border-color: var(--muted); }
+
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        /* ── Content ── */
+        .content { padding: 32px; display: flex; flex-direction: column; gap: 20px; }
+
+        /* ── Toast ── */
+        #toast {
+            position: fixed;
+            bottom: 28px; right: 28px;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            display: none;
+            z-index: 100;
+            animation: slideUp 0.2s ease;
+            max-width: 340px;
+        }
+
+        @keyframes slideUp {
+            from { transform: translateY(12px); opacity: 0; }
+            to   { transform: translateY(0);    opacity: 1; }
+        }
+
+        #toast.success { background: rgba(78,204,163,0.15); border: 1px solid var(--success); color: var(--success); }
+        #toast.error   { background: rgba(248,113,113,0.15); border: 1px solid var(--danger);  color: var(--danger);  }
+        #toast.info    { background: rgba(108,99,255,0.15);  border: 1px solid var(--accent);  color: var(--accent);  }
+
+        /* ── Card ── */
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            overflow: hidden;
+        }
+
+        .card-header {
+            padding: 16px 24px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .card-icon {
+            width: 32px; height: 32px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1rem;
+            flex-shrink: 0;
+        }
+
+        .card-title { font-size: 0.9rem; font-weight: 600; }
+        .card-desc  { font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
+
+        .card-body { padding: 20px 24px; }
+
+        /* ── Form ── */
+        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
+
+        .field { display: flex; flex-direction: column; gap: 6px; }
+
+        .field label {
+            font-size: 0.78rem;
+            font-weight: 500;
+            color: var(--muted);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .field input,
+        .field select {
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text);
+            font-size: 0.88rem;
+            padding: 9px 12px;
+            width: 100%;
+            transition: border-color 0.15s, box-shadow 0.15s;
+            appearance: none;
+        }
+
+        .field input:focus,
+        .field select:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(108,99,255,0.15);
+        }
+
+        .field select {
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2364748b' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 12px center;
+            padding-right: 32px;
+        }
+
+        .field small { font-size: 0.72rem; color: var(--muted); }
+
+        /* ── Badges ── */
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 1px 7px;
+            border-radius: 4px;
+            font-size: 0.65rem;
+            font-weight: 600;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+
+        .source-default { background: rgba(100,116,139,0.2); color: var(--muted); }
+        .source-yaml    { background: rgba(251,191,36,0.15);  color: var(--warn);    }
+        .source-env     { background: rgba(56,189,248,0.15);  color: #38bdf8;        }
+        .source-runtime { background: rgba(78,204,163,0.15);  color: var(--success); }
+        .source-ui      { background: rgba(108,99,255,0.2);   color: var(--accent);  }
+
+        /* ── Slider (sampling rate) ── */
+        .slider-wrap { display: flex; align-items: center; gap: 12px; }
+
+        .slider-wrap input[type=range] {
+            flex: 1;
+            -webkit-appearance: none;
+            height: 4px;
+            border-radius: 2px;
+            background: var(--border);
+            border: none;
+            padding: 0;
+            cursor: pointer;
+        }
+
+        .slider-wrap input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px; height: 16px;
+            border-radius: 50%;
+            background: var(--accent);
+            box-shadow: 0 0 8px rgba(108,99,255,0.5);
+            cursor: pointer;
+        }
+
+        .slider-val {
+            min-width: 44px;
+            text-align: right;
+            font-size: 0.88rem;
+            font-weight: 600;
+            color: var(--accent);
+        }
+
+        /* ── Toggle ── */
+        .toggle-wrap { display: flex; align-items: center; gap: 10px; }
+
+        .toggle {
+            position: relative;
+            width: 40px; height: 22px;
+            flex-shrink: 0;
+        }
+
+        .toggle input { opacity: 0; width: 0; height: 0; }
+
+        .toggle-track {
+            position: absolute;
+            inset: 0;
+            background: var(--border);
+            border-radius: 11px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .toggle-track::after {
+            content: '';
+            position: absolute;
+            left: 3px; top: 3px;
+            width: 16px; height: 16px;
+            border-radius: 50%;
+            background: var(--muted);
+            transition: transform 0.2s, background 0.2s;
+        }
+
+        .toggle input:checked + .toggle-track { background: rgba(108,99,255,0.3); }
+        .toggle input:checked + .toggle-track::after { transform: translateX(18px); background: var(--accent); }
+
+        .toggle-label { font-size: 0.85rem; color: var(--text); }
+
+        /* ── Divider ── */
+        .divider { height: 1px; background: var(--border); margin: 4px 0; }
+
+        /* ── Color accents per section ── */
+        .icon-sampling  { background: rgba(108,99,255,0.15); }
+        .icon-eval      { background: rgba(78,204,163,0.15); }
+        .icon-ratelimit { background: rgba(251,191,36,0.15); }
+        .icon-backpress { background: rgba(248,113,113,0.15); }
+        .icon-logging   { background: rgba(56,189,248,0.15); }
+        .icon-limits    { background: rgba(167,139,250,0.15); }
+        .icon-sre       { background: rgba(251,146,60,0.15); }
+    </style>
+</head>
+<body>
+<div class="layout">
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="logo">
+            <div class="logo-title">⬡ Rastir</div>
+            <div class="logo-sub">Config Console</div>
+        </div>
+
+        <nav>
+            <a class="nav-item active" href="#sampling">
+                <span class="nav-icon">◎</span> Sampling
+            </a>
+            <a class="nav-item" href="#evaluation">
+                <span class="nav-icon">⚡</span> Evaluation
+            </a>
+            <a class="nav-item" href="#rate-limit">
+                <span class="nav-icon">⏱</span> Rate Limiting
+            </a>
+            <a class="nav-item" href="#backpressure">
+                <span class="nav-icon">⊟</span> Backpressure
+            </a>
+            <a class="nav-item" href="#logging">
+                <span class="nav-icon">≡</span> Logging
+            </a>
+            <a class="nav-item" href="#limits">
+                <span class="nav-icon">◈</span> Limits
+            </a>
+            <a class="nav-item" href="#sre">
+                <span class="nav-icon">◉</span> SRE Budgets
+            </a>
+        </nav>
+
+        <div class="sidebar-footer">
+            <div class="server-status">
+                <div class="dot" id="server-dot"></div>
+                <span id="server-status-text">Connecting…</span>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main -->
+    <div class="main">
+        <div class="topbar">
+            <div>
+                <div class="topbar-title">Runtime Configuration</div>
+                <div class="topbar-sub">Changes take effect immediately and persist across restarts</div>
+            </div>
+            <div class="topbar-actions">
+                <button class="btn btn-ghost" id="reload-btn">↺ Reload from file</button>
+                <button class="btn btn-primary" id="save-btn">✓ Save changes</button>
+            </div>
+        </div>
+
+        <div class="content">
+
+            <!-- Sampling -->
+            <div class="card" id="sampling">
+                <div class="card-header">
+                    <div class="card-icon icon-sampling">◎</div>
+                    <div>
+                        <div class="card-title">Sampling</div>
+                        <div class="card-desc">Controls what fraction of traces are stored and exported</div>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="field">
+                        <label>
+                            Sampling Rate
+                            <span id="sampling-rate-source" class="badge source-default">default</span>
+                        </label>
+                        <div class="slider-wrap">
+                            <input type="range" id="sampling-rate-slider" min="0" max="1" step="0.01" value="1.0">
+                            <input type="number" id="sampling-rate" min="0" max="1" step="0.01" value="1.0" style="width:80px; flex-shrink:0;">
+                            <span class="slider-val" id="sampling-rate-display">1.00</span>
+                        </div>
+                        <small>Probability each trace is sampled (0.0 = none, 1.0 = all). Metrics are always recorded regardless.</small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Evaluation -->
+            <div class="card" id="evaluation">
+                <div class="card-header">
+                    <div class="card-icon icon-eval">⚡</div>
+                    <div>
+                        <div class="card-title">Evaluation</div>
+                        <div class="card-desc">Async LLM-as-judge evaluation pipeline</div>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="form-grid">
+                        <div class="field">
+                            <label>
+                                Enabled
+                                <span id="evaluation-enabled-source" class="badge source-default">default</span>
+                            </label>
+                            <div class="toggle-wrap">
+                                <label class="toggle">
+                                    <input type="checkbox" id="evaluation-enabled-toggle">
+                                    <span class="toggle-track"></span>
+                                </label>
+                                <span class="toggle-label" id="evaluation-enabled-label">Disabled</span>
+                                <input type="hidden" id="evaluation-enabled" value="false">
+                            </div>
+                        </div>
+                        <div class="field">
+                            <label>
+                                Queue Size
+                                <span id="evaluation-queue-size-source" class="badge source-default">default</span>
+                            </label>
+                            <input type="number" id="evaluation-queue-size" value="10000">
+                            <small>Max pending evaluation jobs</small>
+                        </div>
+                    </div>
+                    <div class="form-grid" style="margin-top:16px;">
+                        <div class="field">
+                            <label>
+                                Judge Model
+                                <span id="evaluation-judge-model-source" class="badge source-default">default</span>
+                            </label>
+                            <input type="text" id="evaluation-judge-model" value="gpt-4o-mini" placeholder="e.g. gpt-4o-mini">
+                            <small>Model used for LLM-as-judge evaluation</small>
+                        </div>
+                        <div class="field">
+                            <label>
+                                Judge Provider
+                                <span id="evaluation-judge-provider-source" class="badge source-default">default</span>
+                            </label>
+                            <select id="evaluation-judge-provider">
+                                <option value="openai">OpenAI</option>
+                                <option value="anthropic">Anthropic</option>
+                                <option value="bedrock">Bedrock</option>
+                                <option value="gemini">Gemini</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Rate Limiting -->
+            <div class="card" id="rate-limit">
+                <div class="card-header">
+                    <div class="card-icon icon-ratelimit">⏱</div>
+                    <div>
+                        <div class="card-title">Rate Limiting</div>
+                        <div class="card-desc">Per-IP and per-service request throttling</div>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="form-grid">
+                        <div class="field">
+                            <label>
+                                Enabled
+                                <span id="rate-limit-enabled-source" class="badge source-default">default</span>
+                            </label>
+                            <div class="toggle-wrap">
+                                <label class="toggle">
+                                    <input type="checkbox" id="rate-limit-enabled-toggle">
+                                    <span class="toggle-track"></span>
+                                </label>
+                                <span class="toggle-label" id="rate-limit-enabled-label">Disabled</span>
+                                <input type="hidden" id="rate-limit-enabled" value="false">
+                            </div>
+                        </div>
+                        <div class="field">
+                            <label>
+                                Per IP RPM
+                                <span id="rate-limit-per-ip-rpm-source" class="badge source-default">default</span>
+                            </label>
+                            <input type="number" id="rate-limit-per-ip-rpm" value="600">
+                            <small>Requests per minute per IP</small>
+                        </div>
+                        <div class="field">
+                            <label>
+                                Per Service RPM
+                                <span id="rate-limit-per-service-rpm-source" class="badge source-default">default</span>
+                            </label>
+                            <input type="number" id="rate-limit-per-service-rpm" value="3000">
+                            <small>Requests per minute per service</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Backpressure -->
+            <div class="card" id="backpressure">
+                <div class="card-header">
+                    <div class="card-icon icon-backpress">⊟</div>
+                    <div>
+                        <div class="card-title">Backpressure</div>
+                        <div class="card-desc">Queue saturation thresholds and drop policy</div>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="form-grid">
+                        <div class="field">
+                            <label>
+                                Soft Limit %
+                                <span id="backpressure-soft-limit-pct-source" class="badge source-default">default</span>
+                            </label>
+                            <input type="number" id="backpressure-soft-limit-pct" min="0" max="100" step="1" value="80">
+                            <small>Queue % that triggers a warning</small>
+                        </div>
+                        <div class="field">
+                            <label>
+                                Hard Limit %
+                                <span id="backpressure-hard-limit-pct-source" class="badge source-default">default</span>
+                            </label>
+                            <input type="number" id="backpressure-hard-limit-pct" min="0" max="100" step="1" value="95">
+                            <small>Queue % that triggers rejection</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Logging -->
+            <div class="card" id="logging">
+                <div class="card-header">
+                    <div class="card-icon icon-logging">≡</div>
+                    <div>
+                        <div class="card-title">Logging</div>
+                        <div class="card-desc">Server log verbosity and format</div>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="form-grid">
+                        <div class="field">
+                            <label>
+                                Level
+                                <span id="logging-level-source" class="badge source-default">default</span>
+                            </label>
+                            <select id="logging-level">
+                                <option value="DEBUG">DEBUG</option>
+                                <option value="INFO" selected>INFO</option>
+                                <option value="WARNING">WARNING</option>
+                                <option value="ERROR">ERROR</option>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label>
+                                Structured JSON
+                                <span id="logging-structured-source" class="badge source-default">default</span>
+                            </label>
+                            <div class="toggle-wrap">
+                                <label class="toggle">
+                                    <input type="checkbox" id="logging-structured-toggle">
+                                    <span class="toggle-track"></span>
+                                </label>
+                                <span class="toggle-label" id="logging-structured-label">Disabled</span>
+                                <input type="hidden" id="logging-structured" value="false">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Limits -->
+            <div class="card" id="limits">
+                <div class="card-header">
+                    <div class="card-icon icon-limits">◈</div>
+                    <div>
+                        <div class="card-title">Limits</div>
+                        <div class="card-desc">Memory and cardinality caps</div>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="form-grid">
+                        <div class="field">
+                            <label>
+                                Max Traces
+                                <span id="limits-max-traces-source" class="badge source-default">default</span>
+                            </label>
+                            <input type="number" id="limits-max-traces" value="10000">
+                            <small>Ring-buffer trace capacity</small>
+                        </div>
+                        <div class="field">
+                            <label>
+                                Max Queue Size
+                                <span id="limits-max-queue-size-source" class="badge source-default">default</span>
+                            </label>
+                            <input type="number" id="limits-max-queue-size" value="50000">
+                            <small>Ingestion queue depth</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SRE -->
+            <div class="card" id="sre">
+                <div class="card-header">
+                    <div class="card-icon icon-sre">◉</div>
+                    <div>
+                        <div class="card-title">SRE Budgets</div>
+                        <div class="card-desc">SLO error rate and cost budget targets</div>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="form-grid">
+                        <div class="field">
+                            <label>
+                                Enabled
+                                <span id="sre-enabled-source" class="badge source-default">default</span>
+                            </label>
+                            <div class="toggle-wrap">
+                                <label class="toggle">
+                                    <input type="checkbox" id="sre-enabled-toggle">
+                                    <span class="toggle-track"></span>
+                                </label>
+                                <span class="toggle-label" id="sre-enabled-label">Disabled</span>
+                                <input type="hidden" id="sre-enabled" value="false">
+                            </div>
+                        </div>
+                        <div class="field">
+                            <label>
+                                Default SLO Error Rate
+                                <span id="sre-default-slo-error-rate-source" class="badge source-default">default</span>
+                            </label>
+                            <input type="number" id="sre-default-slo-error-rate" min="0" max="1" step="0.001" value="0.01">
+                            <small>e.g. 0.01 = 1% error budget</small>
+                        </div>
+                        <div class="field">
+                            <label>
+                                Default Cost Budget (USD)
+                                <span id="sre-default-cost-budget-usd-source" class="badge source-default">default</span>
+                            </label>
+                            <input type="number" id="sre-default-cost-budget-usd" min="0" step="1" value="0">
+                            <small>0 = disabled</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div><!-- /content -->
+    </div><!-- /main -->
+</div><!-- /layout -->
+
+<div id="toast"></div>
+
+<!-- keep id="status" for backward compat with app.js -->
+<div id="status" style="display:none;"></div>
+
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

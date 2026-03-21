@@ -29,6 +29,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Optional
 
 from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse, Response
 
 from rastir.server.config import ServerConfig, load_config, validate_config
@@ -272,14 +273,15 @@ async def lifespan(app: FastAPI):
 # ---------------------------------------------------------------------------
 
 
-def create_app(config: Optional[ServerConfig] = None) -> FastAPI:
+def create_app(config: Optional[ServerConfig] = None, config_path: Optional[str] = None) -> FastAPI:
     """Create and configure the FastAPI application.
 
     Args:
         config: Server configuration. If ``None``, loads from YAML /
                 env vars / defaults via ``load_config()``.
+        config_path: Optional path to config file for reload support.
     """
-    cfg = config or load_config()
+    cfg = config or load_config(config_path)
     validate_config(cfg)
 
     # Configure logging before anything else
@@ -297,9 +299,19 @@ def create_app(config: Optional[ServerConfig] = None) -> FastAPI:
         lifespan=lifespan,
     )
 
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["GET", "PUT", "POST", "OPTIONS"],
+        allow_headers=["*"],
+    )
+
     # Attach components to app.state for access in route handlers
     for name, obj in components.items():
         setattr(app.state, name, obj)
+
+    # Store config path for reload support
+    setattr(app.state, "config_file_path", config_path)
 
     # Register routes
     _register_routes(app, cfg)
@@ -480,6 +492,205 @@ def _register_routes(app: FastAPI, cfg: ServerConfig) -> None:
             media_type="application/json",
         )
 
+    # --- GET /config -------------------------------------------------------
+
+    @app.get("/config")
+    async def get_config(request: Request):
+        """Get current server configuration."""
+        cfg: ServerConfig = request.app.state.config
+        return {
+            "server": {
+                "host": cfg.server.host,
+                "port": cfg.server.port,
+            },
+            "limits": {
+                "max_traces": cfg.limits.max_traces,
+                "max_queue_size": cfg.limits.max_queue_size,
+                "max_span_attributes": cfg.limits.max_span_attributes,
+                "max_label_value_length": cfg.limits.max_label_value_length,
+                "cardinality_model": cfg.limits.cardinality_model,
+                "cardinality_provider": cfg.limits.cardinality_provider,
+                "cardinality_tool_name": cfg.limits.cardinality_tool_name,
+                "cardinality_agent": cfg.limits.cardinality_agent,
+                "cardinality_error_type": cfg.limits.cardinality_error_type,
+            },
+            "histograms": {
+                "duration_buckets": list(cfg.histograms.duration_buckets),
+                "tokens_buckets": list(cfg.histograms.tokens_buckets),
+            },
+            "trace_store": {
+                "enabled": cfg.trace_store.enabled,
+                "max_spans_per_trace": cfg.trace_store.max_spans_per_trace,
+                "ttl_seconds": cfg.trace_store.ttl_seconds,
+            },
+            "exporter": {
+                "otlp_endpoint": cfg.exporter.otlp_endpoint,
+                "batch_size": cfg.exporter.batch_size,
+                "flush_interval": cfg.exporter.flush_interval,
+            },
+            "multi_tenant": {
+                "enabled": cfg.multi_tenant.enabled,
+                "header_name": cfg.multi_tenant.header_name,
+            },
+            "sampling": {
+                "rate": cfg.sampling.rate,
+            },
+            "backpressure": {
+                "soft_limit_pct": cfg.backpressure.soft_limit_pct,
+                "hard_limit_pct": cfg.backpressure.hard_limit_pct,
+                "mode": cfg.backpressure.mode,
+            },
+            "rate_limit": {
+                "enabled": cfg.rate_limit.enabled,
+                "per_ip_rpm": cfg.rate_limit.per_ip_rpm,
+                "per_service_rpm": cfg.rate_limit.per_service_rpm,
+            },
+            "exemplars": {
+                "enabled": cfg.exemplars.enabled,
+            },
+            "shutdown": {
+                "grace_period_seconds": cfg.shutdown.grace_period_seconds,
+                "drain_queue": cfg.shutdown.drain_queue,
+            },
+            "logging": {
+                "structured": cfg.logging.structured,
+                "level": cfg.logging.level,
+                "log_file": cfg.logging.log_file,
+            },
+            "redaction": {
+                "enabled": cfg.redaction.enabled,
+                "max_text_length": cfg.redaction.max_text_length,
+                "custom_patterns": list(cfg.redaction.custom_patterns),
+                "drop_on_failure": cfg.redaction.drop_on_failure,
+            },
+            "evaluation": {
+                "enabled": cfg.evaluation.enabled,
+                "queue_size": cfg.evaluation.queue_size,
+                "drop_policy": cfg.evaluation.drop_policy,
+                "worker_concurrency": cfg.evaluation.worker_concurrency,
+                "default_sample_rate": cfg.evaluation.default_sample_rate,
+                "default_timeout_ms": cfg.evaluation.default_timeout_ms,
+                "max_evaluation_types": cfg.evaluation.max_evaluation_types,
+                "judge_model": cfg.evaluation.judge_model,
+                "judge_provider": cfg.evaluation.judge_provider,
+            },
+            "sre": {
+                "enabled": cfg.sre.enabled,
+                "default_slo_error_rate": cfg.sre.default_slo_error_rate,
+                "default_cost_budget_usd": cfg.sre.default_cost_budget_usd,
+                "agents": dict(cfg.sre.agents),
+            },
+        }
+
+    # --- PUT /config -------------------------------------------------------
+
+    @app.put("/config")
+    async def update_config(request: Request):
+        """Update runtime configuration (persistent via runtime-overrides file)."""
+        try:
+            body = await request.json()
+        except Exception:
+            logger.error("[ROUTE] Failed to parse JSON body", exc_info=True)
+            raise HTTPException(status_code=400, detail="Invalid JSON")
+
+        # Validate required fields
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail="Payload must be a JSON object")
+
+        # Only allow specific keys for runtime updates
+        allowed_keys = {
+            "sampling", "evaluation", "rate_limit", "backpressure",
+            "logging", "limits", "sre"
+        }
+
+        # Validate keys
+        for key in body.keys():
+            if key not in allowed_keys:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Configuration key '{key}' is not allowed for runtime updates"
+                )
+
+        # Validate nested keys
+        for section, values in body.items():
+            if not isinstance(values, dict):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Configuration section '{section}' must be an object"
+                )
+
+        # Write runtime overrides to file
+        try:
+            import yaml
+            import os
+
+            runtime_config_path = os.environ.get(
+                "RASTIR_SERVER_RUNTIME_CONFIG",
+                "/etc/rastir/runtime-config.yaml"
+            )
+
+            # Load existing runtime config if exists
+            existing = {}
+            if os.path.exists(runtime_config_path):
+                with open(runtime_config_path) as f:
+                    existing = yaml.safe_load(f) or {}
+
+            # Merge new values
+            for section, values in body.items():
+                if section not in existing:
+                    existing[section] = {}
+                existing[section].update(values)
+
+            # Write updated config
+            with open(runtime_config_path, "w") as f:
+                yaml.dump(existing, f, default_flow_style=False)
+
+            logger.info("Runtime config updated: %s", runtime_config_path)
+
+            # Reload config and update app state
+            from rastir.server.config import load_config, validate_config
+
+            cfg_path = request.app.state.config_file_path if hasattr(request.app.state, "config_file_path") else None
+            new_cfg = load_config(cfg_path)
+            validate_config(new_cfg)
+
+            # Update app state with new config
+            request.app.state.config = new_cfg
+
+            return {"status": "ok", "message": "Configuration updated successfully"}
+
+        except ImportError:
+            raise HTTPException(
+                status_code=500,
+                detail="PyYAML not installed - cannot write config file"
+            )
+        except Exception as exc:
+            logger.error("[ROUTE] Failed to update config", exc_info=True)
+            raise HTTPException(status_code=500, detail=str(exc))
+
+    # --- POST /config/reload -----------------------------------------------
+
+    @app.post("/config/reload")
+    async def reload_config(request: Request):
+        """Reload configuration from file."""
+        try:
+            from rastir.server.config import load_config, validate_config
+            from rastir.server.app import create_app
+
+            cfg_path = request.app.state.config_file_path if hasattr(request.app.state, "config_file_path") else None
+            new_cfg = load_config(cfg_path)
+            validate_config(new_cfg)
+
+            # Update app state with new config
+            request.app.state.config = new_cfg
+
+            logger.info("Configuration reloaded from file")
+            return {"status": "ok", "message": "Configuration reloaded successfully"}
+
+        except Exception as exc:
+            logger.error("[ROUTE] Failed to reload config", exc_info=True)
+            raise HTTPException(status_code=500, detail=str(exc))
+
 
 # ---------------------------------------------------------------------------
 # CLI entry point
@@ -500,7 +711,7 @@ def main() -> None:
     args = parser.parse_args()
 
     cfg = load_config(args.config)
-    app = create_app(cfg)
+    app = create_app(cfg, args.config)
     # log_config=None prevents uvicorn from overriding our handlers
     uvicorn.run(
         app,

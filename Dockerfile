@@ -40,10 +40,14 @@ RUN pip install --no-cache-dir "$(ls /tmp/*.whl)[server]" \
 # Bundle default config
 COPY rastir-server-config.yaml /app/rastir-server-config.yaml
 
+# Create runtime config directory with proper permissions
+RUN mkdir -p /etc/rastir && chown rastir:rastir /etc/rastir
+
 # Defaults — overridable at runtime
 ENV RASTIR_SERVER_HOST=0.0.0.0
 ENV RASTIR_SERVER_PORT=8080
 ENV RASTIR_SERVER_CONFIG=/app/rastir-server-config.yaml
+ENV RASTIR_SERVER_RUNTIME_CONFIG=/etc/rastir/runtime-config.yaml
 
 EXPOSE 8080
 

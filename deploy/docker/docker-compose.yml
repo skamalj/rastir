@@ -1,12 +1,13 @@
 # ---------------------------------------------------------------------------
 # Rastir Observability Stack — Local Docker Compose
 # ---------------------------------------------------------------------------
-# Brings up all 5 services:
+# Brings up all 6 services:
 #   1. rastir-server    — LLM & Agent observability server
-#   2. otel-collector   — OpenTelemetry Collector (forwards traces to Tempo)
-#   3. prometheus       — Metrics storage + SRE rules + alerts
-#   4. grafana          — Dashboards (pre-provisioned)
-#   5. tempo            — Trace storage backend
+#   2. rastir-config-ui — Runtime configuration UI
+#   3. otel-collector   — OpenTelemetry Collector (forwards traces to Tempo)
+#   4. prometheus       — Metrics storage + SRE rules + alerts
+#   5. grafana          — Dashboards (pre-provisioned)
+#   6. tempo            — Trace storage backend
 #
 # Usage:
 #   cd deploy/docker
@@ -14,6 +15,7 @@
 #
 # Ports:
 #   8080  — Rastir Server  (health: GET /health, metrics: GET /metrics)
+#   8081  — Config UI      (http://localhost:8081)
 #   3000  — Grafana         (admin/admin)
 #   9090  — Prometheus
 #   3200  — Tempo
@@ -35,8 +37,10 @@ services:
       - RASTIR_SERVER_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
       - RASTIR_SERVER_EXEMPLARS_ENABLED=true
       - RASTIR_SERVER_LOGGING_STRUCTURED=true
+      - RASTIR_SERVER_RUNTIME_CONFIG=/etc/rastir/runtime-config.yaml
     volumes:
       - ../../rastir-server-config.yaml:/app/rastir-server-config.yaml:ro
+      - rastir-runtime-config:/etc/rastir
     healthcheck:
       test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8080/health').raise_for_status()"]
       interval: 15s
@@ -46,6 +50,20 @@ services:
     depends_on:
       otel-collector:
         condition: service_started
+    restart: unless-stopped
+
+  rastir-config-ui:
+    build:
+      context: ../../rastir-config-ui
+      dockerfile: Dockerfile
+    container_name: rastir-config-ui
+    ports:
+      - "8081:80"
+    environment:
+      - API_URL=http://localhost:8080
+    depends_on:
+      rastir-server:
+        condition: service_healthy
     restart: unless-stopped
 
   otel-collector:
@@ -89,12 +107,12 @@ services:
       - "3000:3000"
     volumes:
       - ./provisioning:/etc/grafana/provisioning:ro
-      - ./dashboards:/var/lib/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
     environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_AUTH_ADMIN_USER=admin
+      - GF_AUTH_ADMIN_PASSWORD=admin
       - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_AUTH_ANONYMOUS_ENABLED=false
     depends_on:
       - prometheus
       - tempo
@@ -116,3 +134,4 @@ volumes:
   prometheus-data:
   grafana-data:
   tempo-data:
+  rastir-runtime-config:
